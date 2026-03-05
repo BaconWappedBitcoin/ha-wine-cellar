@@ -14,6 +14,7 @@ export class WineDetailDialog extends LitElement {
   @state() private _userRating: number = 0;
   @state() private _tastingNotes: TastingNotes = { aroma: "", taste: "", finish: "", overall: "" };
   @state() private _saving = false;
+  @state() private _refreshing = false;
 
   static styles = [
     sharedStyles,
@@ -397,6 +398,26 @@ export class WineDetailDialog extends LitElement {
     this._saving = false;
   }
 
+  private async _refreshFromVivino() {
+    if (!this.wine || !this.hass) return;
+    this._refreshing = true;
+    try {
+      const resp = await this.hass.callWS({
+        type: "wine_cellar/refresh_wine",
+        wine_id: this.wine.id,
+      });
+      if (resp.error) {
+        alert(resp.error);
+      } else if (resp.wine) {
+        this.wine = { ...this.wine, ...resp.wine };
+        this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+      }
+    } catch (err) {
+      console.error("Vivino refresh failed", err);
+    }
+    this._refreshing = false;
+  }
+
   private _hasTastingNotes(): boolean {
     const n = this._tastingNotes;
     return !!(n.aroma || n.taste || n.finish || n.overall);
@@ -618,6 +639,14 @@ export class WineDetailDialog extends LitElement {
           </div>
 
           <div class="actions">
+            <button
+              class="btn btn-outline"
+              style="color: #7b1fa2; border-color: #7b1fa2"
+              ?disabled=${this._refreshing}
+              @click=${this._refreshFromVivino}
+            >
+              ${this._refreshing ? "Scanning..." : "🍇 Vivino"}
+            </button>
             <button class="btn btn-outline" @click=${this._onCopy}>
               📋 Copy
             </button>

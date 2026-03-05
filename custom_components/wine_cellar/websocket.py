@@ -32,6 +32,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_recognize_label)
     websocket_api.async_register_command(hass, ws_get_capabilities)
     websocket_api.async_register_command(hass, ws_analyze_wines)
+    websocket_api.async_register_command(hass, ws_refresh_wine)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "wine_cellar/get_wines"})
@@ -371,3 +372,66 @@ async def ws_analyze_wines(
     connection.send_result(
         msg["id"], {"updated": updated, "total": len(wines)}
     )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "wine_cellar/refresh_wine",
+        vol.Required("wine_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_refresh_wine(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Re-lookup wine data from Vivino and update stored fields."""
+    storage = hass.data[DOMAIN]["storage"]
+    vivino = hass.data[DOMAIN]["vivino"]
+    wine = storage.get_wine(msg["wine_id"])
+    if not wine:
+        connection.send_result(msg["id"], {"error": "Wine not found."})
+        return
+
+    # Build search query from wine name + winery + vintage
+    parts = []
+    if wine.get("winery"):
+        parts.append(wine["winery"])
+    if wine.get("name"):
+        parts.append(wine["name"])
+    if wine.get("vintage"):
+        parts.append(str(wine["vintage"]))
+    query = " ".join(parts) if parts else ""
+
+    if not query:
+        connection.send_result(msg["id"], {"error": "No name/winery to search."})
+        return
+
+    result = await vivino.search_wine(query)
+    if not result:
+        connection.send_result(msg["id"], {"error": f"No Vivino results for '{query}'."})
+        return
+
+    lookup = result[0]
+    # Merge: only overwrite fields that are empty/missing or enrichment fields
+    updates: dict[str, Any] = {}
+    # Always update enrichment fields from Vivino
+    for key in ("rating", "ratings_count", "image_url", "description",
+                "food_pairings", "alcohol", "grape_variety"):
+        val = lookup.get(key)
+        if val:
+            updates[key] = val
+    # Only fill in fields that are currently empty
+    for key in ("region", "country", "type"):
+        val = lookup.get(key)
+        if val and not wine.get(key):
+            updates[key] = val
+
+    if updates:
+        updated_wine = storage.update_wine(msg["wine_id"], updates)
+        await storage.async_save()
+        hass.bus.async_fire(f"{DOMAIN}_updated")
+        connection.send_result(msg["id"], {"wine": updated_wine, "updated_fields": list(updates.keys())})
+    else:
+        connection.send_result(msg["id"], {"wine": wine, "updated_fields": []})

@@ -899,6 +899,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._userRating = 0;
         this._tastingNotes = { aroma: "", taste: "", finish: "", overall: "" };
         this._saving = false;
+        this._refreshing = false;
     }
     updated(changedProps) {
         if (changedProps.has("wine") && this.wine) {
@@ -974,6 +975,28 @@ let WineDetailDialog = class WineDetailDialog extends i {
             console.error("Failed to save rating/notes", err);
         }
         this._saving = false;
+    }
+    async _refreshFromVivino() {
+        if (!this.wine || !this.hass)
+            return;
+        this._refreshing = true;
+        try {
+            const resp = await this.hass.callWS({
+                type: "wine_cellar/refresh_wine",
+                wine_id: this.wine.id,
+            });
+            if (resp.error) {
+                alert(resp.error);
+            }
+            else if (resp.wine) {
+                this.wine = { ...this.wine, ...resp.wine };
+                this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+            }
+        }
+        catch (err) {
+            console.error("Vivino refresh failed", err);
+        }
+        this._refreshing = false;
     }
     _hasTastingNotes() {
         const n = this._tastingNotes;
@@ -1187,6 +1210,14 @@ let WineDetailDialog = class WineDetailDialog extends i {
           </div>
 
           <div class="actions">
+            <button
+              class="btn btn-outline"
+              style="color: #7b1fa2; border-color: #7b1fa2"
+              ?disabled=${this._refreshing}
+              @click=${this._refreshFromVivino}
+            >
+              ${this._refreshing ? "Scanning..." : "🍇 Vivino"}
+            </button>
             <button class="btn btn-outline" @click=${this._onCopy}>
               📋 Copy
             </button>
@@ -1525,6 +1556,9 @@ __decorate([
 __decorate([
     r()
 ], WineDetailDialog.prototype, "_saving", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_refreshing", void 0);
 WineDetailDialog = __decorate([
     t("wine-detail-dialog")
 ], WineDetailDialog);

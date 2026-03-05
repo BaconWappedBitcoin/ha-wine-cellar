@@ -100,6 +100,15 @@
             return { wine };
           case "wine_cellar/analyze_wines":
             return { updated: mockWines.length, total: mockWines.length };
+          case "wine_cellar/refresh_wine":
+            const rw = mockWines.find(w => w.id === msg.wine_id);
+            if (rw) {
+              rw.description = rw.description || "Rich and complex with great depth.";
+              rw.food_pairings = rw.food_pairings || "Beef, Lamb, Pasta";
+              rw.alcohol = rw.alcohol || "14.0%";
+              rw.ratings_count = rw.ratings_count || 2500;
+            }
+            return { wine: rw, updated_fields: ["description", "food_pairings", "alcohol", "ratings_count"] };
           default:
             return {};
         }
