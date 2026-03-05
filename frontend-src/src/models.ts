@@ -28,6 +28,7 @@ export interface Wine {
   user_rating: number | null;
   tasting_notes: TastingNotes | null;
   added_at: string;
+  disposition: string;
 }
 
 export interface Cabinet {

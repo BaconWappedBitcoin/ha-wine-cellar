@@ -383,15 +383,22 @@ let CabinetGrid = class CabinetGrid extends i {
             const bgColor = wine
                 ? WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red
                 : "transparent";
+            const disp = wine?.disposition || "";
+            const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
+            const ratingDisplay = wine?.rating ? wine.rating.toFixed(1) : "";
             return b `
                   <div
                     class="cell ${wine ? "filled" : "empty"}"
                     style=${wine ? `background: ${bgColor}` : ""}
                     @click=${() => this._onCellClick(row, col, wine)}
-                    title=${wine ? `${wine.name} (${wine.vintage || "NV"})` : `Empty - Row ${row + 1}, Col ${col + 1}`}
+                    title=${wine ? `${wine.name} (${wine.vintage || "NV"})${wine.rating ? ` ★${wine.rating}` : ""}` : `Empty - Row ${row + 1}, Col ${col + 1}`}
                   >
                     ${wine
-                ? b `<span class="bottle-label">${wine.vintage || "NV"}</span>`
+                ? b `
+                          <span class="bottle-label">${wine.vintage || "NV"}</span>
+                          ${dispClass ? b `<span class="disposition ${dispClass}">${disp}</span>` : A}
+                          ${ratingDisplay ? b `<span class="rating-badge">★${ratingDisplay}</span>` : A}
+                        `
                 : A}
                   </div>
                 `;
@@ -546,6 +553,56 @@ CabinetGrid.styles = [
       }
 
       .cell.filled:hover .bottle-label {
+        display: block;
+      }
+
+      .cell .disposition {
+        position: absolute;
+        top: -2px;
+        right: -2px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        font-size: 8px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        z-index: 2;
+        pointer-events: none;
+        line-height: 1;
+      }
+
+      .cell .disposition.drink {
+        background: #2e7d32;
+      }
+
+      .cell .disposition.hold {
+        background: #1565c0;
+      }
+
+      .cell .disposition.past {
+        background: #c62828;
+      }
+
+      .cell .rating-badge {
+        position: absolute;
+        bottom: -2px;
+        right: -2px;
+        font-size: 6px;
+        font-weight: 700;
+        color: #fff;
+        background: rgba(0,0,0,0.6);
+        border-radius: 4px;
+        padding: 1px 3px;
+        z-index: 2;
+        pointer-events: none;
+        line-height: 1;
+        display: none;
+      }
+
+      .cell.filled:hover .rating-badge {
         display: block;
       }
 
@@ -823,6 +880,16 @@ let WineDetailDialog = class WineDetailDialog extends i {
             this._close();
         }
     }
+    _onCopy() {
+        if (this.wine) {
+            this.dispatchEvent(new CustomEvent("copy-wine", {
+                detail: { wine: this.wine },
+                bubbles: true,
+                composed: true,
+            }));
+            this._close();
+        }
+    }
     _onRatingChange(e) {
         this._userRating = e.detail.value;
     }
@@ -1024,6 +1091,9 @@ let WineDetailDialog = class WineDetailDialog extends i {
           </div>
 
           <div class="actions">
+            <button class="btn btn-outline" @click=${this._onCopy}>
+              📋 Copy
+            </button>
             <button class="btn btn-outline" @click=${this._onMove}>
               ↔ Move
             </button>
@@ -1542,7 +1612,6 @@ let LabelCamera = class LabelCamera extends i {
         this._error = "";
         this._captured = false;
         this._capturedImage = "";
-        this._rotateVideo = false;
     }
     updated(changedProps) {
         if (changedProps.has("active")) {
@@ -1562,7 +1631,6 @@ let LabelCamera = class LabelCamera extends i {
     }
     async _startCamera() {
         this._error = "";
-        this._rotateVideo = false;
         try {
             this._stream = await navigator.mediaDevices.getUserMedia({
                 video: {
@@ -1577,12 +1645,6 @@ let LabelCamera = class LabelCamera extends i {
             const video = this.renderRoot.querySelector("video");
             if (video && this._stream) {
                 video.srcObject = this._stream;
-                // Once video metadata loads, check if stream is landscape and needs rotation
-                video.addEventListener("loadedmetadata", () => {
-                    if (video.videoWidth > video.videoHeight) {
-                        this._rotateVideo = true;
-                    }
-                }, { once: true });
             }
         }
         catch (err) {
@@ -1607,39 +1669,17 @@ let LabelCamera = class LabelCamera extends i {
             return;
         const canvas = document.createElement("canvas");
         const maxDim = 1024;
-        let vw = video.videoWidth;
-        let vh = video.videoHeight;
-        if (this._rotateVideo) {
-            // Stream is landscape but we displayed it as portrait via CSS rotation.
-            // Rotate the capture so Gemini gets a portrait image.
-            let w = vh;
-            let h = vw;
-            if (w > maxDim || h > maxDim) {
-                const scale = maxDim / Math.max(w, h);
-                w = Math.round(w * scale);
-                h = Math.round(h * scale);
-            }
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext("2d");
-            // Rotate -90°: translate then rotate
-            ctx.translate(0, h);
-            ctx.rotate(-Math.PI / 2);
-            ctx.drawImage(video, 0, 0, h, w);
+        let w = video.videoWidth;
+        let h = video.videoHeight;
+        if (w > maxDim || h > maxDim) {
+            const scale = maxDim / Math.max(w, h);
+            w = Math.round(w * scale);
+            h = Math.round(h * scale);
         }
-        else {
-            let w = vw;
-            let h = vh;
-            if (w > maxDim || h > maxDim) {
-                const scale = maxDim / Math.max(w, h);
-                w = Math.round(w * scale);
-                h = Math.round(h * scale);
-            }
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext("2d");
-            ctx.drawImage(video, 0, 0, w, h);
-        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0, w, h);
         const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
         const base64 = dataUrl.split(",")[1];
         this._stopCamera();
@@ -1659,7 +1699,6 @@ let LabelCamera = class LabelCamera extends i {
         const reader = new FileReader();
         reader.onload = () => {
             const dataUrl = reader.result;
-            dataUrl.split(",")[1];
             // Resize if needed
             const img = new Image();
             img.onload = () => {
@@ -1693,7 +1732,6 @@ let LabelCamera = class LabelCamera extends i {
     retake() {
         this._captured = false;
         this._capturedImage = "";
-        this._rotateVideo = false;
         this._startCamera();
     }
     render() {
@@ -1709,7 +1747,7 @@ let LabelCamera = class LabelCamera extends i {
             ? b `<div class="error-message">${this._error}</div>`
             : b `
             <div class="camera-container">
-              <video autoplay playsinline muted class=${this._rotateVideo ? "rotate-portrait" : ""}></video>
+              <video autoplay playsinline muted></video>
             </div>
             <div class="capture-btn-area">
               <button class="capture-btn" @click=${this._capture} title="Take photo"></button>
@@ -1749,12 +1787,6 @@ LabelCamera.styles = [
         height: 100%;
         object-fit: cover;
         display: block;
-      }
-
-      /* When camera returns landscape stream, rotate it to portrait */
-      video.rotate-portrait {
-        transform: rotate(-90deg) scale(1.35);
-        transform-origin: center center;
       }
 
       .captured-preview {
@@ -1874,9 +1906,6 @@ __decorate([
 __decorate([
     r()
 ], LabelCamera.prototype, "_capturedImage", void 0);
-__decorate([
-    r()
-], LabelCamera.prototype, "_rotateVideo", void 0);
 LabelCamera = __decorate([
     t("label-camera")
 ], LabelCamera);
@@ -2985,6 +3014,567 @@ WineSearchBar = __decorate([
     t("wine-search-bar")
 ], WineSearchBar);
 
+let RackSettingsDialog = class RackSettingsDialog extends i {
+    constructor() {
+        super(...arguments);
+        this.open = false;
+        this.cabinets = [];
+        this.wines = [];
+        this._mode = "list";
+        this._editCabinet = {};
+        this._deleteCabinet = null;
+        this._loading = false;
+        this._error = "";
+    }
+    updated(changedProps) {
+        if (changedProps.has("open") && this.open) {
+            this._mode = "list";
+            this._error = "";
+        }
+    }
+    _close() {
+        this._mode = "list";
+        this._error = "";
+        this.dispatchEvent(new CustomEvent("close"));
+    }
+    _notifyUpdate() {
+        this.dispatchEvent(new CustomEvent("racks-updated", { bubbles: true, composed: true }));
+    }
+    _winesInCabinet(cabinetId) {
+        return this.wines.filter((w) => w.cabinet_id === cabinetId).length;
+    }
+    _winesOutOfBounds(cabinetId, newRows, newCols) {
+        return this.wines.filter((w) => w.cabinet_id === cabinetId &&
+            w.row != null &&
+            w.col != null &&
+            (w.row >= newRows || w.col >= newCols)).length;
+    }
+    _startAdd() {
+        this._mode = "add";
+        this._error = "";
+        this._editCabinet = {
+            name: "",
+            rows: 8,
+            cols: 8,
+            has_bottom_zone: false,
+            bottom_zone_name: "Box Storage",
+        };
+    }
+    _startEdit(cabinet) {
+        this._mode = "edit";
+        this._error = "";
+        this._editCabinet = { ...cabinet };
+    }
+    _startDelete(cabinet) {
+        this._mode = "delete-confirm";
+        this._error = "";
+        this._deleteCabinet = cabinet;
+    }
+    async _saveAdd() {
+        this._loading = true;
+        this._error = "";
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/add_cabinet",
+                cabinet: {
+                    name: this._editCabinet.name || "New Rack",
+                    rows: this._editCabinet.rows || 8,
+                    cols: this._editCabinet.cols || 8,
+                    has_bottom_zone: this._editCabinet.has_bottom_zone || false,
+                    bottom_zone_name: this._editCabinet.bottom_zone_name || "Box Storage",
+                    order: this.cabinets.length,
+                },
+            });
+            this._notifyUpdate();
+            this._mode = "list";
+        }
+        catch {
+            this._error = "Failed to add rack.";
+        }
+        this._loading = false;
+    }
+    async _saveEdit() {
+        this._loading = true;
+        this._error = "";
+        try {
+            const cabinetId = this._editCabinet.id;
+            const newRows = this._editCabinet.rows || 8;
+            const newCols = this._editCabinet.cols || 8;
+            await this.hass.callWS({
+                type: "wine_cellar/update_cabinet",
+                cabinet_id: cabinetId,
+                updates: {
+                    name: this._editCabinet.name,
+                    rows: newRows,
+                    cols: newCols,
+                    has_bottom_zone: this._editCabinet.has_bottom_zone,
+                    bottom_zone_name: this._editCabinet.bottom_zone_name,
+                },
+            });
+            // Unassign wines that are out of bounds
+            const outOfBounds = this.wines.filter((w) => w.cabinet_id === cabinetId &&
+                w.row != null &&
+                w.col != null &&
+                (w.row >= newRows || w.col >= newCols));
+            for (const wine of outOfBounds) {
+                await this.hass.callWS({
+                    type: "wine_cellar/update_wine",
+                    wine_id: wine.id,
+                    updates: { cabinet_id: "", row: null, col: null, zone: "" },
+                });
+            }
+            this._notifyUpdate();
+            this._mode = "list";
+        }
+        catch {
+            this._error = "Failed to update rack.";
+        }
+        this._loading = false;
+    }
+    async _confirmDelete() {
+        if (!this._deleteCabinet)
+            return;
+        this._loading = true;
+        this._error = "";
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/remove_cabinet",
+                cabinet_id: this._deleteCabinet.id,
+            });
+            this._notifyUpdate();
+            this._mode = "list";
+            this._deleteCabinet = null;
+        }
+        catch {
+            this._error = "Failed to delete rack.";
+        }
+        this._loading = false;
+    }
+    async _moveUp(cabinet) {
+        const sorted = [...this.cabinets].sort((a, b) => a.order - b.order);
+        const idx = sorted.findIndex((c) => c.id === cabinet.id);
+        if (idx <= 0)
+            return;
+        const prev = sorted[idx - 1];
+        await Promise.all([
+            this.hass.callWS({
+                type: "wine_cellar/update_cabinet",
+                cabinet_id: cabinet.id,
+                updates: { order: prev.order },
+            }),
+            this.hass.callWS({
+                type: "wine_cellar/update_cabinet",
+                cabinet_id: prev.id,
+                updates: { order: cabinet.order },
+            }),
+        ]);
+        this._notifyUpdate();
+    }
+    async _moveDown(cabinet) {
+        const sorted = [...this.cabinets].sort((a, b) => a.order - b.order);
+        const idx = sorted.findIndex((c) => c.id === cabinet.id);
+        if (idx < 0 || idx >= sorted.length - 1)
+            return;
+        const next = sorted[idx + 1];
+        await Promise.all([
+            this.hass.callWS({
+                type: "wine_cellar/update_cabinet",
+                cabinet_id: cabinet.id,
+                updates: { order: next.order },
+            }),
+            this.hass.callWS({
+                type: "wine_cellar/update_cabinet",
+                cabinet_id: next.id,
+                updates: { order: cabinet.order },
+            }),
+        ]);
+        this._notifyUpdate();
+    }
+    _renderList() {
+        const sorted = [...this.cabinets].sort((a, b) => a.order - b.order);
+        return b `
+      <div class="dialog-body">
+        <div class="rack-list">
+          ${sorted.map((cab, idx) => b `
+              <div class="rack-item">
+                <div class="rack-info">
+                  <div class="rack-name">${cab.name}</div>
+                  <div class="rack-meta">
+                    ${cab.rows} × ${cab.cols} (${cab.rows * cab.cols} slots)
+                    · ${this._winesInCabinet(cab.id)} bottles
+                    ${cab.has_bottom_zone ? " · + zone" : ""}
+                  </div>
+                </div>
+                <div class="rack-actions">
+                  <button
+                    class="small-btn"
+                    @click=${() => this._moveUp(cab)}
+                    ?disabled=${idx === 0}
+                    title="Move up"
+                  >↑</button>
+                  <button
+                    class="small-btn"
+                    @click=${() => this._moveDown(cab)}
+                    ?disabled=${idx === sorted.length - 1}
+                    title="Move down"
+                  >↓</button>
+                  <button
+                    class="small-btn"
+                    @click=${() => this._startEdit(cab)}
+                  >Edit</button>
+                  <button
+                    class="small-btn danger"
+                    @click=${() => this._startDelete(cab)}
+                  >Del</button>
+                </div>
+              </div>
+            `)}
+
+          <button class="add-rack-btn" @click=${this._startAdd}>
+            + Add Rack
+          </button>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn btn-outline" @click=${this._close}>Close</button>
+      </div>
+    `;
+    }
+    _renderForm() {
+        const isEdit = this._mode === "edit";
+        // Calculate out-of-bounds warning for edits
+        let oobCount = 0;
+        if (isEdit && this._editCabinet.id) {
+            const orig = this.cabinets.find((c) => c.id === this._editCabinet.id);
+            if (orig) {
+                const newRows = this._editCabinet.rows || orig.rows;
+                const newCols = this._editCabinet.cols || orig.cols;
+                if (newRows < orig.rows || newCols < orig.cols) {
+                    oobCount = this._winesOutOfBounds(this._editCabinet.id, newRows, newCols);
+                }
+            }
+        }
+        return b `
+      <div class="dialog-body">
+        <div class="form-group">
+          <label>Rack Name</label>
+          <input
+            type="text"
+            .value=${this._editCabinet.name || ""}
+            @input=${(e) => (this._editCabinet = {
+            ...this._editCabinet,
+            name: e.target.value,
+        })}
+          />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Rows</label>
+            <input
+              type="number"
+              min="1"
+              max="20"
+              .value=${(this._editCabinet.rows || 8).toString()}
+              @input=${(e) => (this._editCabinet = {
+            ...this._editCabinet,
+            rows: parseInt(e.target.value) || 1,
+        })}
+            />
+          </div>
+          <div class="form-group">
+            <label>Columns</label>
+            <input
+              type="number"
+              min="1"
+              max="20"
+              .value=${(this._editCabinet.cols || 8).toString()}
+              @input=${(e) => (this._editCabinet = {
+            ...this._editCabinet,
+            cols: parseInt(e.target.value) || 1,
+        })}
+            />
+          </div>
+        </div>
+
+        <div class="zone-toggle">
+          <input
+            type="checkbox"
+            id="zone-check"
+            .checked=${this._editCabinet.has_bottom_zone || false}
+            @change=${(e) => (this._editCabinet = {
+            ...this._editCabinet,
+            has_bottom_zone: e.target.checked,
+        })}
+          />
+          <label for="zone-check">Has bottom zone (box storage)</label>
+        </div>
+
+        ${this._editCabinet.has_bottom_zone
+            ? b `
+              <div class="form-group">
+                <label>Zone Name</label>
+                <input
+                  type="text"
+                  .value=${this._editCabinet.bottom_zone_name || "Box Storage"}
+                  @input=${(e) => (this._editCabinet = {
+                ...this._editCabinet,
+                bottom_zone_name: e.target.value,
+            })}
+                />
+              </div>
+            `
+            : A}
+
+        ${oobCount > 0
+            ? b `
+              <div class="warning-msg">
+                ⚠️ Shrinking will unassign ${oobCount} wine${oobCount > 1 ? "s" : ""} that are outside the new grid bounds.
+              </div>
+            `
+            : A}
+
+        ${this._error
+            ? b `<div class="error-msg" style="color:#c62828;margin-top:8px">${this._error}</div>`
+            : A}
+      </div>
+
+      <div class="dialog-footer">
+        <button class="btn btn-outline" @click=${() => (this._mode = "list")}>
+          Cancel
+        </button>
+        <button
+          class="btn btn-primary"
+          @click=${isEdit ? this._saveEdit : this._saveAdd}
+          ?disabled=${this._loading}
+        >
+          ${this._loading ? "Saving..." : "Save"}
+        </button>
+      </div>
+    `;
+    }
+    _renderDeleteConfirm() {
+        if (!this._deleteCabinet)
+            return A;
+        const count = this._winesInCabinet(this._deleteCabinet.id);
+        return b `
+      <div class="dialog-body">
+        <div class="delete-info">
+          Are you sure you want to delete
+          <strong>"${this._deleteCabinet.name}"</strong>?
+          ${count > 0
+            ? b `<br /><span class="delete-count"
+                >${count} wine${count > 1 ? "s" : ""} will be unassigned.</span
+              >`
+            : A}
+        </div>
+        ${this._error
+            ? b `<div style="color:#c62828;font-size:0.85em">${this._error}</div>`
+            : A}
+      </div>
+      <div class="dialog-footer">
+        <button class="btn btn-outline" @click=${() => (this._mode = "list")}>
+          Cancel
+        </button>
+        <button
+          class="btn btn-primary"
+          style="background:#c62828"
+          @click=${this._confirmDelete}
+          ?disabled=${this._loading}
+        >
+          ${this._loading ? "Deleting..." : "Delete"}
+        </button>
+      </div>
+    `;
+    }
+    render() {
+        if (!this.open)
+            return A;
+        const titles = {
+            list: "Manage Racks",
+            add: "Add Rack",
+            edit: "Edit Rack",
+            "delete-confirm": "Delete Rack?",
+        };
+        return b `
+      <div class="dialog-overlay" @click=${this._close}>
+        <div class="dialog" @click=${(e) => e.stopPropagation()}>
+          <div class="dialog-header">${titles[this._mode]}</div>
+          ${this._mode === "list" ? this._renderList() : A}
+          ${this._mode === "add" || this._mode === "edit"
+            ? this._renderForm()
+            : A}
+          ${this._mode === "delete-confirm"
+            ? this._renderDeleteConfirm()
+            : A}
+        </div>
+      </div>
+    `;
+    }
+};
+RackSettingsDialog.styles = [
+    sharedStyles,
+    i$3 `
+      .rack-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .rack-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border: 1px solid var(--wc-border);
+        border-radius: 10px;
+        transition: background 0.2s;
+      }
+
+      .rack-item:hover {
+        background: rgba(0, 0, 0, 0.03);
+      }
+
+      .rack-info {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .rack-name {
+        font-weight: 600;
+        font-size: 0.95em;
+      }
+
+      .rack-meta {
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+        margin-top: 2px;
+      }
+
+      .rack-actions {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        flex-shrink: 0;
+      }
+
+      .small-btn {
+        background: transparent;
+        border: 1px solid var(--wc-border);
+        border-radius: 6px;
+        cursor: pointer;
+        padding: 4px 8px;
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+        transition: all 0.2s;
+      }
+
+      .small-btn:hover {
+        background: rgba(0, 0, 0, 0.06);
+      }
+
+      .small-btn:disabled {
+        opacity: 0.3;
+        cursor: default;
+      }
+
+      .small-btn.danger {
+        color: #c62828;
+        border-color: rgba(198, 40, 40, 0.3);
+      }
+
+      .small-btn.danger:hover {
+        background: rgba(198, 40, 40, 0.08);
+      }
+
+      .warning-msg {
+        background: rgba(255, 152, 0, 0.1);
+        border: 1px solid rgba(255, 152, 0, 0.3);
+        border-radius: 8px;
+        padding: 10px;
+        font-size: 0.85em;
+        color: #e65100;
+        margin-top: 12px;
+      }
+
+      .delete-info {
+        font-size: 0.95em;
+        margin: 12px 0;
+        line-height: 1.5;
+      }
+
+      .delete-count {
+        color: #c62828;
+        font-weight: 600;
+      }
+
+      .add-rack-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 10px;
+        border: 2px dashed var(--wc-border);
+        border-radius: 10px;
+        background: transparent;
+        color: var(--wc-text-secondary);
+        cursor: pointer;
+        font-size: 0.9em;
+        transition: all 0.2s;
+        width: 100%;
+      }
+
+      .add-rack-btn:hover {
+        border-color: var(--wc-primary);
+        color: var(--wc-primary);
+        background: rgba(114, 47, 55, 0.05);
+      }
+
+      .zone-toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 8px 0;
+        font-size: 0.9em;
+      }
+
+      .zone-toggle input[type="checkbox"] {
+        width: auto;
+        margin: 0;
+      }
+    `,
+];
+__decorate([
+    n({ type: Boolean })
+], RackSettingsDialog.prototype, "open", void 0);
+__decorate([
+    n({ attribute: false })
+], RackSettingsDialog.prototype, "hass", void 0);
+__decorate([
+    n({ attribute: false })
+], RackSettingsDialog.prototype, "cabinets", void 0);
+__decorate([
+    n({ attribute: false })
+], RackSettingsDialog.prototype, "wines", void 0);
+__decorate([
+    r()
+], RackSettingsDialog.prototype, "_mode", void 0);
+__decorate([
+    r()
+], RackSettingsDialog.prototype, "_editCabinet", void 0);
+__decorate([
+    r()
+], RackSettingsDialog.prototype, "_deleteCabinet", void 0);
+__decorate([
+    r()
+], RackSettingsDialog.prototype, "_loading", void 0);
+__decorate([
+    r()
+], RackSettingsDialog.prototype, "_error", void 0);
+RackSettingsDialog = __decorate([
+    t("rack-settings-dialog")
+], RackSettingsDialog);
+
 let WineCellarCard = class WineCellarCard extends i {
     constructor() {
         super(...arguments);
@@ -2999,6 +3589,10 @@ let WineCellarCard = class WineCellarCard extends i {
         this._showAddDialog = false;
         this._addPreselect = { cabinet: "", row: null, col: null };
         this._loading = true;
+        this._showRackSettings = false;
+        this._copiedWine = null;
+        this._analyzing = false;
+        this._toast = "";
     }
     setConfig(config) {
         this._config = config;
@@ -3058,8 +3652,18 @@ let WineCellarCard = class WineCellarCard extends i {
         }
         return wines;
     }
+    _showToast(message) {
+        this._toast = message;
+        setTimeout(() => (this._toast = ""), 2500);
+    }
+    // --- Copy/Paste wine ---
     _onCellClick(e) {
         const { wine, cabinet, row, col } = e.detail;
+        // If we have a copied wine and clicked an empty cell, paste it
+        if (this._copiedWine && !wine) {
+            this._pasteWine(cabinet.id, row, col);
+            return;
+        }
         if (wine) {
             this._selectedWine = wine;
             this._showDetail = true;
@@ -3079,6 +3683,67 @@ let WineCellarCard = class WineCellarCard extends i {
             this._addPreselect = { cabinet: cabinet.id, row: null, col: null };
             this._showAddDialog = true;
         }
+    }
+    _copyWine(wine) {
+        this._copiedWine = wine;
+        this._showToast(`Copied "${wine.name}" — tap empty cells to paste`);
+        this._showDetail = false;
+    }
+    async _pasteWine(cabinetId, row, col) {
+        if (!this._copiedWine)
+            return;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/add_wine",
+                wine: {
+                    barcode: this._copiedWine.barcode,
+                    name: this._copiedWine.name,
+                    winery: this._copiedWine.winery,
+                    region: this._copiedWine.region,
+                    country: this._copiedWine.country,
+                    vintage: this._copiedWine.vintage,
+                    type: this._copiedWine.type,
+                    grape_variety: this._copiedWine.grape_variety,
+                    rating: this._copiedWine.rating,
+                    image_url: this._copiedWine.image_url,
+                    price: this._copiedWine.price,
+                    drink_by: this._copiedWine.drink_by,
+                    notes: this._copiedWine.notes,
+                    cabinet_id: cabinetId,
+                    row,
+                    col,
+                    zone: "",
+                    user_rating: this._copiedWine.user_rating,
+                    disposition: this._copiedWine.disposition,
+                },
+            });
+            this._showToast("Wine pasted! Tap more empty cells or click ✕ to stop.");
+            await this._loadData();
+        }
+        catch {
+            this._showToast("Failed to paste wine.");
+        }
+    }
+    // --- AI Analysis ---
+    async _analyzeWines() {
+        this._analyzing = true;
+        this._showToast("Analyzing wines with AI...");
+        try {
+            const result = await this.hass.callWS({
+                type: "wine_cellar/analyze_wines",
+            });
+            if (result.error) {
+                this._showToast(`Analysis failed: ${result.error}`);
+            }
+            else {
+                this._showToast(`Analysis complete! ${result.updated}/${result.total} wines updated.`);
+                await this._loadData();
+            }
+        }
+        catch (err) {
+            this._showToast("Analysis failed.");
+        }
+        this._analyzing = false;
     }
     async _onRemoveWine(e) {
         try {
@@ -3122,6 +3787,21 @@ let WineCellarCard = class WineCellarCard extends i {
           </div>
           <div class="header-actions">
             <button
+              class="btn btn-icon"
+              @click=${this._analyzeWines}
+              title="AI Drink/Hold Analysis"
+              ?disabled=${this._analyzing}
+            >
+              ${this._analyzing ? "⏳" : "🧠"}
+            </button>
+            <button
+              class="btn btn-icon"
+              @click=${() => (this._showRackSettings = true)}
+              title="Manage Racks"
+            >
+              ⚙️
+            </button>
+            <button
               class="btn btn-primary"
               @click=${() => {
             this._addPreselect = { cabinet: "", row: null, col: null };
@@ -3132,6 +3812,16 @@ let WineCellarCard = class WineCellarCard extends i {
             </button>
           </div>
         </div>
+
+        <!-- Copy mode banner -->
+        ${this._copiedWine
+            ? b `
+              <div class="copy-banner">
+                <span>📋 Copying "${this._copiedWine.name}" — tap empty cells to place copies</span>
+                <button @click=${() => (this._copiedWine = null)}>✕ Done</button>
+              </div>
+            `
+            : A}
 
         <!-- Stats bar -->
         ${this._stats
@@ -3239,6 +3929,7 @@ let WineCellarCard = class WineCellarCard extends i {
                             <div class="wine-list-name">${wine.name}</div>
                             <div class="wine-list-meta">
                               ${wine.winery}${wine.vintage ? ` · ${wine.vintage}` : ""}
+                              ${wine.rating ? ` · ★${wine.rating}` : ""}
                             </div>
                           </div>
                           <div class="wine-list-location">${cabinetName}</div>
@@ -3272,6 +3963,7 @@ let WineCellarCard = class WineCellarCard extends i {
           @close=${() => (this._showDetail = false)}
           @remove-wine=${this._onRemoveWine}
           @wine-updated=${() => this._loadData()}
+          @copy-wine=${(e) => this._copyWine(e.detail.wine)}
           @move-wine=${(e) => {
             this._showDetail = false;
             this._addPreselect = { cabinet: "", row: null, col: null };
@@ -3290,6 +3982,19 @@ let WineCellarCard = class WineCellarCard extends i {
           @close=${() => (this._showAddDialog = false)}
           @wine-added=${this._onWineAdded}
         ></add-wine-dialog>
+
+        <!-- Rack Settings Dialog -->
+        <rack-settings-dialog
+          .open=${this._showRackSettings}
+          .hass=${this.hass}
+          .cabinets=${this._cabinets}
+          .wines=${this._wines}
+          @close=${() => (this._showRackSettings = false)}
+          @racks-updated=${() => this._loadData()}
+        ></rack-settings-dialog>
+
+        <!-- Toast -->
+        ${this._toast ? b `<div class="toast">${this._toast}</div>` : A}
       </ha-card>
     `;
     }
@@ -3331,6 +4036,7 @@ WineCellarCard.styles = [
       .header-actions {
         display: flex;
         gap: 4px;
+        align-items: center;
       }
 
       .cabinets-row {
@@ -3404,6 +4110,42 @@ WineCellarCard.styles = [
         text-align: center;
         padding: 40px;
         color: var(--wc-text-secondary);
+      }
+
+      .copy-banner {
+        background: rgba(46, 125, 50, 0.1);
+        border: 1px solid rgba(46, 125, 50, 0.3);
+        color: #2e7d32;
+        font-size: 0.85em;
+        padding: 6px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .copy-banner button {
+        background: transparent;
+        border: 1px solid rgba(46, 125, 50, 0.4);
+        color: #2e7d32;
+        border-radius: 6px;
+        padding: 2px 10px;
+        cursor: pointer;
+        font-size: 0.9em;
+      }
+
+      .toast {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #333;
+        color: #fff;
+        padding: 10px 20px;
+        border-radius: 8px;
+        font-size: 0.9em;
+        z-index: 1000;
+        animation: fadeIn 0.2s;
+        pointer-events: none;
       }
 
       /* Phone: stack cabinets vertically */
@@ -3491,6 +4233,18 @@ __decorate([
 __decorate([
     r()
 ], WineCellarCard.prototype, "_loading", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_showRackSettings", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_copiedWine", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_analyzing", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_toast", void 0);
 WineCellarCard = __decorate([
     t("wine-cellar-card")
 ], WineCellarCard);

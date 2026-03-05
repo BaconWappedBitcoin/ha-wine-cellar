@@ -31,6 +31,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_remove_cabinet)
     websocket_api.async_register_command(hass, ws_recognize_label)
     websocket_api.async_register_command(hass, ws_get_capabilities)
+    websocket_api.async_register_command(hass, ws_analyze_wines)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "wine_cellar/get_wines"})
@@ -323,4 +324,50 @@ def ws_get_capabilities(
     connection.send_result(
         msg["id"],
         {"has_gemini": "gemini" in hass.data.get(DOMAIN, {})},
+    )
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "wine_cellar/analyze_wines"}
+)
+@websocket_api.async_response
+async def ws_analyze_wines(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Analyze wines with Gemini to get drink/hold dispositions."""
+    gemini = hass.data[DOMAIN].get("gemini")
+    if not gemini:
+        connection.send_result(
+            msg["id"],
+            {"error": "Gemini API key not configured."},
+        )
+        return
+
+    storage = hass.data[DOMAIN]["storage"]
+    wines = storage.wines
+    if not wines:
+        connection.send_result(msg["id"], {"error": "No wines to analyze."})
+        return
+
+    result = await gemini.analyze_collection(wines)
+    if "error" in result:
+        connection.send_result(msg["id"], {"error": result["error"]})
+        return
+
+    # Apply dispositions to wines
+    dispositions = result.get("dispositions", {})
+    updated = 0
+    for wine_id, disposition in dispositions.items():
+        wine = storage.update_wine(wine_id, {"disposition": disposition})
+        if wine:
+            updated += 1
+
+    if updated:
+        await storage.async_save()
+        hass.bus.async_fire(f"{DOMAIN}_updated")
+
+    connection.send_result(
+        msg["id"], {"updated": updated, "total": len(wines)}
     )

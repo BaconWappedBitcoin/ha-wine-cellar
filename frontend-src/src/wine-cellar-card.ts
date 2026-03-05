@@ -7,6 +7,7 @@ import "./components/cabinet-grid";
 import "./components/wine-detail-dialog";
 import "./components/add-wine-dialog";
 import "./components/search-bar";
+import "./components/rack-settings-dialog";
 
 interface WineCellarCardConfig {
   type: string;
@@ -29,6 +30,10 @@ export class WineCellarCard extends LitElement {
   @state() private _showAddDialog = false;
   @state() private _addPreselect = { cabinet: "", row: null as number | null, col: null as number | null };
   @state() private _loading = true;
+  @state() private _showRackSettings = false;
+  @state() private _copiedWine: Wine | null = null;
+  @state() private _analyzing = false;
+  @state() private _toast = "";
 
   static styles = [
     sharedStyles,
@@ -64,6 +69,7 @@ export class WineCellarCard extends LitElement {
       .header-actions {
         display: flex;
         gap: 4px;
+        align-items: center;
       }
 
       .cabinets-row {
@@ -137,6 +143,42 @@ export class WineCellarCard extends LitElement {
         text-align: center;
         padding: 40px;
         color: var(--wc-text-secondary);
+      }
+
+      .copy-banner {
+        background: rgba(46, 125, 50, 0.1);
+        border: 1px solid rgba(46, 125, 50, 0.3);
+        color: #2e7d32;
+        font-size: 0.85em;
+        padding: 6px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .copy-banner button {
+        background: transparent;
+        border: 1px solid rgba(46, 125, 50, 0.4);
+        color: #2e7d32;
+        border-radius: 6px;
+        padding: 2px 10px;
+        cursor: pointer;
+        font-size: 0.9em;
+      }
+
+      .toast {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #333;
+        color: #fff;
+        padding: 10px 20px;
+        border-radius: 8px;
+        font-size: 0.9em;
+        z-index: 1000;
+        animation: fadeIn 0.2s;
+        pointer-events: none;
       }
 
       /* Phone: stack cabinets vertically */
@@ -263,8 +305,21 @@ export class WineCellarCard extends LitElement {
     return wines;
   }
 
+  private _showToast(message: string) {
+    this._toast = message;
+    setTimeout(() => (this._toast = ""), 2500);
+  }
+
+  // --- Copy/Paste wine ---
   private _onCellClick(e: CustomEvent) {
     const { wine, cabinet, row, col } = e.detail;
+
+    // If we have a copied wine and clicked an empty cell, paste it
+    if (this._copiedWine && !wine) {
+      this._pasteWine(cabinet.id, row, col);
+      return;
+    }
+
     if (wine) {
       this._selectedWine = wine;
       this._showDetail = true;
@@ -283,6 +338,68 @@ export class WineCellarCard extends LitElement {
       this._addPreselect = { cabinet: cabinet.id, row: null, col: null };
       this._showAddDialog = true;
     }
+  }
+
+  private _copyWine(wine: Wine) {
+    this._copiedWine = wine;
+    this._showToast(`Copied "${wine.name}" — tap empty cells to paste`);
+    this._showDetail = false;
+  }
+
+  private async _pasteWine(cabinetId: string, row: number, col: number) {
+    if (!this._copiedWine) return;
+    try {
+      await this.hass.callWS({
+        type: "wine_cellar/add_wine",
+        wine: {
+          barcode: this._copiedWine.barcode,
+          name: this._copiedWine.name,
+          winery: this._copiedWine.winery,
+          region: this._copiedWine.region,
+          country: this._copiedWine.country,
+          vintage: this._copiedWine.vintage,
+          type: this._copiedWine.type,
+          grape_variety: this._copiedWine.grape_variety,
+          rating: this._copiedWine.rating,
+          image_url: this._copiedWine.image_url,
+          price: this._copiedWine.price,
+          drink_by: this._copiedWine.drink_by,
+          notes: this._copiedWine.notes,
+          cabinet_id: cabinetId,
+          row,
+          col,
+          zone: "",
+          user_rating: this._copiedWine.user_rating,
+          disposition: this._copiedWine.disposition,
+        },
+      });
+      this._showToast("Wine pasted! Tap more empty cells or click ✕ to stop.");
+      await this._loadData();
+    } catch {
+      this._showToast("Failed to paste wine.");
+    }
+  }
+
+  // --- AI Analysis ---
+  private async _analyzeWines() {
+    this._analyzing = true;
+    this._showToast("Analyzing wines with AI...");
+    try {
+      const result = await this.hass.callWS({
+        type: "wine_cellar/analyze_wines",
+      });
+      if (result.error) {
+        this._showToast(`Analysis failed: ${result.error}`);
+      } else {
+        this._showToast(
+          `Analysis complete! ${result.updated}/${result.total} wines updated.`
+        );
+        await this._loadData();
+      }
+    } catch (err: any) {
+      this._showToast("Analysis failed.");
+    }
+    this._analyzing = false;
   }
 
   private async _onRemoveWine(e: CustomEvent) {
@@ -332,6 +449,21 @@ export class WineCellarCard extends LitElement {
           </div>
           <div class="header-actions">
             <button
+              class="btn btn-icon"
+              @click=${this._analyzeWines}
+              title="AI Drink/Hold Analysis"
+              ?disabled=${this._analyzing}
+            >
+              ${this._analyzing ? "⏳" : "🧠"}
+            </button>
+            <button
+              class="btn btn-icon"
+              @click=${() => (this._showRackSettings = true)}
+              title="Manage Racks"
+            >
+              ⚙️
+            </button>
+            <button
               class="btn btn-primary"
               @click=${() => {
                 this._addPreselect = { cabinet: "", row: null, col: null };
@@ -342,6 +474,16 @@ export class WineCellarCard extends LitElement {
             </button>
           </div>
         </div>
+
+        <!-- Copy mode banner -->
+        ${this._copiedWine
+          ? html`
+              <div class="copy-banner">
+                <span>📋 Copying "${this._copiedWine.name}" — tap empty cells to place copies</span>
+                <button @click=${() => (this._copiedWine = null)}>✕ Done</button>
+              </div>
+            `
+          : nothing}
 
         <!-- Stats bar -->
         ${this._stats
@@ -458,6 +600,7 @@ export class WineCellarCard extends LitElement {
                             <div class="wine-list-name">${wine.name}</div>
                             <div class="wine-list-meta">
                               ${wine.winery}${wine.vintage ? ` · ${wine.vintage}` : ""}
+                              ${wine.rating ? ` · ★${wine.rating}` : ""}
                             </div>
                           </div>
                           <div class="wine-list-location">${cabinetName}</div>
@@ -491,6 +634,7 @@ export class WineCellarCard extends LitElement {
           @close=${() => (this._showDetail = false)}
           @remove-wine=${this._onRemoveWine}
           @wine-updated=${() => this._loadData()}
+          @copy-wine=${(e: CustomEvent) => this._copyWine(e.detail.wine)}
           @move-wine=${(e: CustomEvent) => {
             this._showDetail = false;
             this._addPreselect = { cabinet: "", row: null, col: null };
@@ -509,6 +653,19 @@ export class WineCellarCard extends LitElement {
           @close=${() => (this._showAddDialog = false)}
           @wine-added=${this._onWineAdded}
         ></add-wine-dialog>
+
+        <!-- Rack Settings Dialog -->
+        <rack-settings-dialog
+          .open=${this._showRackSettings}
+          .hass=${this.hass}
+          .cabinets=${this._cabinets}
+          .wines=${this._wines}
+          @close=${() => (this._showRackSettings = false)}
+          @racks-updated=${() => this._loadData()}
+        ></rack-settings-dialog>
+
+        <!-- Toast -->
+        ${this._toast ? html`<div class="toast">${this._toast}</div>` : nothing}
       </ha-card>
     `;
   }

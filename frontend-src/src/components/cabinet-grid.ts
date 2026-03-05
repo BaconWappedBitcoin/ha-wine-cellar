@@ -132,6 +132,56 @@ export class CabinetGrid extends LitElement {
         display: block;
       }
 
+      .cell .disposition {
+        position: absolute;
+        top: -2px;
+        right: -2px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        font-size: 8px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        z-index: 2;
+        pointer-events: none;
+        line-height: 1;
+      }
+
+      .cell .disposition.drink {
+        background: #2e7d32;
+      }
+
+      .cell .disposition.hold {
+        background: #1565c0;
+      }
+
+      .cell .disposition.past {
+        background: #c62828;
+      }
+
+      .cell .rating-badge {
+        position: absolute;
+        bottom: -2px;
+        right: -2px;
+        font-size: 6px;
+        font-weight: 700;
+        color: #fff;
+        background: rgba(0,0,0,0.6);
+        border-radius: 4px;
+        padding: 1px 3px;
+        z-index: 2;
+        pointer-events: none;
+        line-height: 1;
+        display: none;
+      }
+
+      .cell.filled:hover .rating-badge {
+        display: block;
+      }
+
       .bottom-zone {
         margin-top: 8px;
         background: linear-gradient(135deg, #6b5010 0%, #8b6914 100%);
@@ -285,15 +335,22 @@ export class CabinetGrid extends LitElement {
                 const bgColor = wine
                   ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red
                   : "transparent";
+                const disp = wine?.disposition || "";
+                const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
+                const ratingDisplay = wine?.rating ? wine.rating.toFixed(1) : "";
                 return html`
                   <div
                     class="cell ${wine ? "filled" : "empty"}"
                     style=${wine ? `background: ${bgColor}` : ""}
                     @click=${() => this._onCellClick(row, col, wine)}
-                    title=${wine ? `${wine.name} (${wine.vintage || "NV"})` : `Empty - Row ${row + 1}, Col ${col + 1}`}
+                    title=${wine ? `${wine.name} (${wine.vintage || "NV"})${wine.rating ? ` ★${wine.rating}` : ""}` : `Empty - Row ${row + 1}, Col ${col + 1}`}
                   >
                     ${wine
-                      ? html`<span class="bottle-label">${wine.vintage || "NV"}</span>`
+                      ? html`
+                          <span class="bottle-label">${wine.vintage || "NV"}</span>
+                          ${dispClass ? html`<span class="disposition ${dispClass}">${disp}</span>` : nothing}
+                          ${ratingDisplay ? html`<span class="rating-badge">★${ratingDisplay}</span>` : nothing}
+                        `
                       : nothing}
                   </div>
                 `;

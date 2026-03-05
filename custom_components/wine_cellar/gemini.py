@@ -189,3 +189,96 @@ class GeminiVisionClient:
         except Exception as err:
             _LOGGER.error("Gemini API error: %s", err)
             return {"error": f"Unexpected error: {err}"}
+
+    async def analyze_collection(
+        self, wines: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Analyze wine collection and return drink/hold dispositions.
+
+        Returns {"dispositions": {wine_id: "D"|"H"|"P"}} or {"error": "..."}.
+        """
+        if not self._api_key:
+            return {"error": "Gemini API key is empty"}
+
+        # Build a concise wine list for analysis
+        current_year = 2026
+        wine_lines = []
+        for w in wines:
+            vintage = w.get("vintage") or "NV"
+            wine_type = w.get("type", "red")
+            name = w.get("name", "Unknown")
+            winery = w.get("winery", "")
+            region = w.get("region", "")
+            drink_by = w.get("drink_by", "")
+            line = (
+                f'ID:{w["id"]}|{name}|{winery}|{vintage}|{wine_type}'
+                f"|{region}|drink_by:{drink_by}"
+            )
+            wine_lines.append(line)
+
+        prompt = f"""You are a wine sommelier. The current year is {current_year}.
+Analyze each wine and assign a disposition:
+- "D" = Drink Now (at or near peak, best enjoyed soon)
+- "H" = Hold (will improve with more aging)
+- "P" = Past Peak (likely past its prime drinking window)
+
+Consider vintage age, wine type, region, and any drink_by dates.
+General guidelines:
+- Most everyday reds/whites: drink within 3-5 years of vintage
+- Quality Bordeaux/Barolo/Napa Cab: can age 10-20+ years
+- Sparkling: drink within 3-5 years unless vintage champagne
+- Rosé/most whites: drink within 2-3 years
+- Dessert wines: can age decades
+- NV wines: assume current, Drink Now
+
+Return ONLY a JSON object mapping wine IDs to dispositions:
+{{"wine_id_1": "D", "wine_id_2": "H", "wine_id_3": "P"}}
+
+Wines:
+{chr(10).join(wine_lines)}"""
+
+        session = async_get_clientsession(self._hass)
+
+        body = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "temperature": 0.1,
+            },
+        }
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=60)
+            async with session.post(
+                GEMINI_API_URL,
+                params={"key": self._api_key},
+                json=body,
+                timeout=timeout,
+            ) as resp:
+                if resp.status == 429:
+                    return {"error": "Gemini API quota exhausted"}
+                if resp.status != 200:
+                    return {"error": f"Gemini API error (HTTP {resp.status})"}
+
+                data = json.loads(await resp.text())
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    return {"error": "Gemini returned no results"}
+
+                text = candidates[0]["content"]["parts"][0]["text"]
+                dispositions = json.loads(text)
+
+                # Validate dispositions
+                valid = {"D", "H", "P"}
+                cleaned = {}
+                for wine_id, disp in dispositions.items():
+                    if disp in valid:
+                        cleaned[wine_id] = disp
+                    else:
+                        cleaned[wine_id] = "D"
+
+                return {"dispositions": cleaned}
+
+        except Exception as err:
+            _LOGGER.error("Wine analysis error: %s", err)
+            return {"error": f"Analysis failed: {err}"}

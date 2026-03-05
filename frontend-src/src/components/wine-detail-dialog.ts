@@ -296,6 +296,19 @@ export class WineDetailDialog extends LitElement {
     }
   }
 
+  private _onCopy() {
+    if (this.wine) {
+      this.dispatchEvent(
+        new CustomEvent("copy-wine", {
+          detail: { wine: this.wine },
+          bubbles: true,
+          composed: true,
+        })
+      );
+      this._close();
+    }
+  }
+
   private _onRatingChange(e: CustomEvent) {
     this._userRating = e.detail.value;
   }
@@ -501,6 +514,9 @@ export class WineDetailDialog extends LitElement {
           </div>
 
           <div class="actions">
+            <button class="btn btn-outline" @click=${this._onCopy}>
+              📋 Copy
+            </button>
             <button class="btn btn-outline" @click=${this._onMove}>
               ↔ Move
             </button>

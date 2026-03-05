@@ -10,7 +10,6 @@ export class LabelCamera extends LitElement {
   @state() private _error = "";
   @state() private _captured = false;
   @state() private _capturedImage = "";
-  @state() private _rotateVideo = false;
 
   static styles = [
     sharedStyles,
@@ -35,12 +34,6 @@ export class LabelCamera extends LitElement {
         height: 100%;
         object-fit: cover;
         display: block;
-      }
-
-      /* When camera returns landscape stream, rotate it to portrait */
-      video.rotate-portrait {
-        transform: rotate(-90deg) scale(1.35);
-        transform-origin: center center;
       }
 
       .captured-preview {
@@ -165,7 +158,6 @@ export class LabelCamera extends LitElement {
 
   private async _startCamera() {
     this._error = "";
-    this._rotateVideo = false;
     try {
       this._stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -180,12 +172,6 @@ export class LabelCamera extends LitElement {
       const video = this.renderRoot.querySelector("video") as HTMLVideoElement;
       if (video && this._stream) {
         video.srcObject = this._stream;
-        // Once video metadata loads, check if stream is landscape and needs rotation
-        video.addEventListener("loadedmetadata", () => {
-          if (video.videoWidth > video.videoHeight) {
-            this._rotateVideo = true;
-          }
-        }, { once: true });
       }
     } catch (err: any) {
       const msg = err?.message || String(err);
@@ -210,39 +196,17 @@ export class LabelCamera extends LitElement {
 
     const canvas = document.createElement("canvas");
     const maxDim = 1024;
-    let vw = video.videoWidth;
-    let vh = video.videoHeight;
-
-    if (this._rotateVideo) {
-      // Stream is landscape but we displayed it as portrait via CSS rotation.
-      // Rotate the capture so Gemini gets a portrait image.
-      let w = vh;
-      let h = vw;
-      if (w > maxDim || h > maxDim) {
-        const scale = maxDim / Math.max(w, h);
-        w = Math.round(w * scale);
-        h = Math.round(h * scale);
-      }
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d")!;
-      // Rotate -90°: translate then rotate
-      ctx.translate(0, h);
-      ctx.rotate(-Math.PI / 2);
-      ctx.drawImage(video, 0, 0, h, w);
-    } else {
-      let w = vw;
-      let h = vh;
-      if (w > maxDim || h > maxDim) {
-        const scale = maxDim / Math.max(w, h);
-        w = Math.round(w * scale);
-        h = Math.round(h * scale);
-      }
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d")!;
-      ctx.drawImage(video, 0, 0, w, h);
+    let w = video.videoWidth;
+    let h = video.videoHeight;
+    if (w > maxDim || h > maxDim) {
+      const scale = maxDim / Math.max(w, h);
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
     }
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(video, 0, 0, w, h);
 
     const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
     const base64 = dataUrl.split(",")[1];
@@ -268,7 +232,6 @@ export class LabelCamera extends LitElement {
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
-      const base64 = dataUrl.split(",")[1];
 
       // Resize if needed
       const img = new Image();
@@ -308,7 +271,6 @@ export class LabelCamera extends LitElement {
   retake() {
     this._captured = false;
     this._capturedImage = "";
-    this._rotateVideo = false;
     this._startCamera();
   }
 
@@ -326,7 +288,7 @@ export class LabelCamera extends LitElement {
         ? html`<div class="error-message">${this._error}</div>`
         : html`
             <div class="camera-container">
-              <video autoplay playsinline muted class=${this._rotateVideo ? "rotate-portrait" : ""}></video>
+              <video autoplay playsinline muted></video>
             </div>
             <div class="capture-btn-area">
               <button class="capture-btn" @click=${this._capture} title="Take photo"></button>
