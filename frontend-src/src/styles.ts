@@ -99,12 +99,12 @@ export const sharedStyles = css`
 
   .btn-outline {
     background: transparent;
-    color: var(--wc-primary);
-    border: 1px solid var(--wc-primary);
+    color: var(--wc-text);
+    border: 1px solid var(--wc-border);
   }
 
   .btn-outline:hover {
-    background: rgba(114, 47, 55, 0.08);
+    background: rgba(255, 255, 255, 0.06);
   }
 
   .btn-icon {

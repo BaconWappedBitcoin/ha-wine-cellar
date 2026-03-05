@@ -103,7 +103,7 @@ export class CabinetGrid extends LitElement {
         box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4),
           inset 0 -2px 4px rgba(0, 0, 0, 0.3),
           0 0 8px rgba(50, 100, 255, 0.15);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        border: 2px solid var(--bottle-type-color, rgba(255, 255, 255, 0.1));
         overflow: hidden;
       }
 
@@ -350,6 +350,18 @@ export class CabinetGrid extends LitElement {
     );
   }
 
+  private _brightenColor(hex: string): string {
+    // Make wine type colors brighter for the ring border
+    const brightMap: Record<string, string> = {
+      "#722F37": "#c44d58",  // red → brighter red
+      "#F5E6CA": "#fff8e8",  // white → bright cream
+      "#E8A0BF": "#f5c0d8",  // rosé → brighter pink
+      "#D4E09B": "#e8f0b8",  // sparkling → brighter green
+      "#DAA520": "#f0c040",  // dessert → brighter gold
+    };
+    return brightMap[hex] || hex;
+  }
+
   private _renderStorageZone(row: number) {
     const zoneName = this._getStorageRowName(row);
     const zoneId = `storage-${row}`;
@@ -387,10 +399,12 @@ export class CabinetGrid extends LitElement {
           const disp = wine?.disposition || "";
           const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
           const ratingDisplay = wine?.rating ? wine.rating.toFixed(1) : "";
+          // Brighter ring color for type visibility
+          const ringColor = wine ? this._brightenColor(bgColor) : "";
           return html`
             <div
               class="cell ${wine ? "filled" : "empty"}"
-              style=${wine ? `background: ${bgColor}` : ""}
+              style=${wine ? `background: ${bgColor}; --bottle-type-color: ${ringColor}` : ""}
               @click=${() => this._onCellClick(row, col, wine)}
               title=${wine ? `${wine.name} (${wine.vintage || "NV"})${wine.rating ? ` ★${wine.rating}` : ""}` : `Empty - Row ${row + 1}, Col ${col + 1}`}
             >

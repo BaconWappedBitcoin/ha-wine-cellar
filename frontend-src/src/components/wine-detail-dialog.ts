@@ -531,13 +531,16 @@ export class WineDetailDialog extends LitElement {
           ${wine.disposition && wine.drink_by
             ? html`
                 <div class="drink-by-banner ${wine.disposition === 'D' ? 'drink' : wine.disposition === 'H' ? 'hold' : wine.disposition === 'P' ? 'past' : ''}">
-                  ${wine.disposition === "D" ? "Ready to drink" : wine.disposition === "H" ? "Hold until" : "Past peak since"}
-                  ${wine.drink_by}
+                  ${wine.disposition === "D" ? `Drink now \u2022 best by ${wine.drink_by}` : wine.disposition === "H" ? `Hold until ${wine.drink_by}` : `Past peak since ${wine.drink_by}`}
                 </div>
               `
-            : wine.disposition === "H" && !wine.drink_by
-              ? html`<div class="drink-by-banner hold">Hold — no drink date set</div>`
-              : nothing}
+            : wine.disposition === "D" && !wine.drink_by
+              ? html`<div class="drink-by-banner drink">Drink now</div>`
+              : wine.disposition === "H" && !wine.drink_by
+                ? html`<div class="drink-by-banner hold">Hold — no drink date set</div>`
+                : wine.disposition === "P" && !wine.drink_by
+                  ? html`<div class="drink-by-banner past">Past peak</div>`
+                  : nothing}
 
           <!-- Description -->
           ${wine.description

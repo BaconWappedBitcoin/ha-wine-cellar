@@ -419,10 +419,17 @@ async def ws_refresh_wine(
     updates: dict[str, Any] = {}
     # Always update enrichment fields from Vivino
     for key in ("rating", "ratings_count", "image_url", "description",
-                "food_pairings", "alcohol", "grape_variety"):
+                "food_pairings", "alcohol", "grape_variety", "price"):
         val = lookup.get(key)
         if val:
             updates[key] = val
+
+    # Clear bad descriptions (Vivino error page text)
+    cur_desc = wine.get("description", "")
+    bad_keywords = ("forbidden", "underage", "try searching", "page is blocked")
+    if cur_desc and any(kw in cur_desc.lower() for kw in bad_keywords):
+        if "description" not in updates:
+            updates["description"] = ""
     # Only fill in fields that are currently empty
     for key in ("region", "country", "type"):
         val = lookup.get(key)
@@ -476,7 +483,11 @@ async def ws_analyze_single_wine(
         updates["disposition"] = result["disposition"]
     if result.get("drink_by"):
         updates["drink_by"] = result["drink_by"]
-    if result.get("description") and not wine.get("description"):
+    # Set AI description if wine has no description or has error text
+    cur_desc = wine.get("description", "")
+    bad_kw = ("forbidden", "underage", "try searching", "page is blocked")
+    has_bad_desc = cur_desc and any(kw in cur_desc.lower() for kw in bad_kw)
+    if result.get("description") and (not cur_desc or has_bad_desc):
         updates["description"] = result["description"]
 
     # Store AI ratings as a dict in notes or a new field

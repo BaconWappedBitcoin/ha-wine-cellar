@@ -171,12 +171,12 @@ const sharedStyles = i$3 `
 
   .btn-outline {
     background: transparent;
-    color: var(--wc-primary);
-    border: 1px solid var(--wc-primary);
+    color: var(--wc-text);
+    border: 1px solid var(--wc-border);
   }
 
   .btn-outline:hover {
-    background: rgba(114, 47, 55, 0.08);
+    background: rgba(255, 255, 255, 0.06);
   }
 
   .btn-icon {
@@ -382,6 +382,17 @@ let CabinetGrid = class CabinetGrid extends i {
             composed: true,
         }));
     }
+    _brightenColor(hex) {
+        // Make wine type colors brighter for the ring border
+        const brightMap = {
+            "#722F37": "#c44d58", // red → brighter red
+            "#F5E6CA": "#fff8e8", // white → bright cream
+            "#E8A0BF": "#f5c0d8", // rosé → brighter pink
+            "#D4E09B": "#e8f0b8", // sparkling → brighter green
+            "#DAA520": "#f0c040", // dessert → brighter gold
+        };
+        return brightMap[hex] || hex;
+    }
     _renderStorageZone(row) {
         const zoneName = this._getStorageRowName(row);
         const zoneId = `storage-${row}`;
@@ -416,10 +427,12 @@ let CabinetGrid = class CabinetGrid extends i {
             const disp = wine?.disposition || "";
             const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
             const ratingDisplay = wine?.rating ? wine.rating.toFixed(1) : "";
+            // Brighter ring color for type visibility
+            const ringColor = wine ? this._brightenColor(bgColor) : "";
             return b `
             <div
               class="cell ${wine ? "filled" : "empty"}"
-              style=${wine ? `background: ${bgColor}` : ""}
+              style=${wine ? `background: ${bgColor}; --bottle-type-color: ${ringColor}` : ""}
               @click=${() => this._onCellClick(row, col, wine)}
               title=${wine ? `${wine.name} (${wine.vintage || "NV"})${wine.rating ? ` ★${wine.rating}` : ""}` : `Empty - Row ${row + 1}, Col ${col + 1}`}
             >
@@ -569,7 +582,7 @@ CabinetGrid.styles = [
         box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4),
           inset 0 -2px 4px rgba(0, 0, 0, 0.3),
           0 0 8px rgba(50, 100, 255, 0.15);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        border: 2px solid var(--bottle-type-color, rgba(255, 255, 255, 0.1));
         overflow: hidden;
       }
 
@@ -1076,13 +1089,16 @@ let WineDetailDialog = class WineDetailDialog extends i {
           ${wine.disposition && wine.drink_by
             ? b `
                 <div class="drink-by-banner ${wine.disposition === 'D' ? 'drink' : wine.disposition === 'H' ? 'hold' : wine.disposition === 'P' ? 'past' : ''}">
-                  ${wine.disposition === "D" ? "Ready to drink" : wine.disposition === "H" ? "Hold until" : "Past peak since"}
-                  ${wine.drink_by}
+                  ${wine.disposition === "D" ? `Drink now \u2022 best by ${wine.drink_by}` : wine.disposition === "H" ? `Hold until ${wine.drink_by}` : `Past peak since ${wine.drink_by}`}
                 </div>
               `
-            : wine.disposition === "H" && !wine.drink_by
-                ? b `<div class="drink-by-banner hold">Hold — no drink date set</div>`
-                : A}
+            : wine.disposition === "D" && !wine.drink_by
+                ? b `<div class="drink-by-banner drink">Drink now</div>`
+                : wine.disposition === "H" && !wine.drink_by
+                    ? b `<div class="drink-by-banner hold">Hold — no drink date set</div>`
+                    : wine.disposition === "P" && !wine.drink_by
+                        ? b `<div class="drink-by-banner past">Past peak</div>`
+                        : A}
 
           <!-- Description -->
           ${wine.description
@@ -2907,11 +2923,11 @@ AddWineDialog.styles = [
         align-items: center;
         gap: 12px;
         padding: 14px;
-        border: 2px solid var(--wc-border);
+        border: 2px solid rgba(255, 255, 255, 0.2);
         border-radius: 12px;
         cursor: pointer;
         transition: all 0.2s;
-        background: transparent;
+        background: rgba(255, 255, 255, 0.06);
         color: var(--wc-text);
         text-align: left;
         font-size: 0.95em;
@@ -2920,7 +2936,7 @@ AddWineDialog.styles = [
 
       .scan-option:hover {
         border-color: var(--wc-primary);
-        background: rgba(114, 47, 55, 0.05);
+        background: rgba(255, 255, 255, 0.12);
       }
 
       .scan-option-icon {

@@ -80,11 +80,11 @@ export class AddWineDialog extends LitElement {
         align-items: center;
         gap: 12px;
         padding: 14px;
-        border: 2px solid var(--wc-border);
+        border: 2px solid rgba(255, 255, 255, 0.2);
         border-radius: 12px;
         cursor: pointer;
         transition: all 0.2s;
-        background: transparent;
+        background: rgba(255, 255, 255, 0.06);
         color: var(--wc-text);
         text-align: left;
         font-size: 0.95em;
@@ -93,7 +93,7 @@ export class AddWineDialog extends LitElement {
 
       .scan-option:hover {
         border-color: var(--wc-primary);
-        background: rgba(114, 47, 55, 0.05);
+        background: rgba(255, 255, 255, 0.12);
       }
 
       .scan-option-icon {

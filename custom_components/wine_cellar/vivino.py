@@ -452,6 +452,23 @@ def _parse_vivino_html(html: str) -> dict[str, Any] | None:
         if alc_match:
             alcohol = f"{alc_match.group(1)}%"
 
+        # Extract price from Vivino
+        price = None
+        for price_pattern in [
+            r'"price":\{"amount":([\d.]+)',
+            r'"median":\{"amount":([\d.]+)',
+            r'"amount":([\d.]+),"currency"',
+        ]:
+            price_match = re.search(price_pattern, decoded)
+            if price_match:
+                try:
+                    val = float(price_match.group(1))
+                    if 1.0 <= val <= 50000.0:
+                        price = round(val, 2)
+                        break
+                except ValueError:
+                    pass
+
         return {
             "name": wine_name,
             "winery": winery_match.group(1) if winery_match else "",
@@ -466,7 +483,7 @@ def _parse_vivino_html(html: str) -> dict[str, Any] | None:
             "description": description,
             "food_pairings": food_pairings,
             "alcohol": alcohol,
-            "price": None,
+            "price": price,
             "source": "vivino",
         }
 
