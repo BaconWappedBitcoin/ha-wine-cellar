@@ -373,6 +373,10 @@ export class WineCellarCard extends LitElement {
           price: this._copiedWine.price,
           drink_by: this._copiedWine.drink_by,
           notes: this._copiedWine.notes,
+          description: this._copiedWine.description,
+          food_pairings: this._copiedWine.food_pairings,
+          alcohol: this._copiedWine.alcohol,
+          ratings_count: this._copiedWine.ratings_count,
           cabinet_id: cabinetId,
           row,
           col,
@@ -458,13 +462,13 @@ export class WineCellarCard extends LitElement {
           </div>
           <div class="header-actions">
             <button
-              class="btn btn-outline"
-              style="font-size: 0.8em; padding: 4px 10px;"
+              class="btn btn-primary"
+              style="font-size: 0.85em; padding: 6px 14px; background: #1565c0;"
               @click=${this._analyzeWines}
               title="AI Drink/Hold Analysis"
               ?disabled=${this._analyzing}
             >
-              ${this._analyzing ? "⏳ Analyzing..." : "AI Scan"}
+              ${this._analyzing ? "Analyzing..." : "AI Scan"}
             </button>
             <button
               class="btn btn-icon"

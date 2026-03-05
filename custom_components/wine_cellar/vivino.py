@@ -385,16 +385,22 @@ def _parse_vivino_html(html: str) -> dict[str, Any] | None:
                     rating = round(val, 1)
                     break
 
-        # Extract image URL from Vivino HTML
+        # Extract image URL from Vivino HTML (handles both https:// and protocol-relative //)
         image_url = ""
         for img_pattern in [
-            r'"image":\{"location":"(https://[^"]+)"',
-            r'"image":\{[^}]*"location":"(https://[^"]+)"',
-            r'<img[^>]+class="[^"]*wine[^"]*"[^>]+src="(https://[^"]+)"',
+            r'"location":"((?:https?:)?//[^"]+images\.vivino\.com[^"]+)"',
+            r'"image":\{"location":"((?:https?:)?//[^"]+)"',
+            r'"image":\{[^}]*"location":"((?:https?:)?//[^"]+)"',
+            r'<img[^>]+class="[^"]*wine[^"]*"[^>]+src="((?:https?:)?//[^"]+)"',
+            r'"bottle_large":"((?:https?:)?//[^"]+)"',
+            r'"bottle_medium":"((?:https?:)?//[^"]+)"',
         ]:
             img_match = re.search(img_pattern, decoded)
             if img_match:
                 image_url = img_match.group(1)
+                # Fix protocol-relative URLs
+                if image_url.startswith("//"):
+                    image_url = "https:" + image_url
                 break
 
         # Extract grape variety
@@ -405,6 +411,43 @@ def _parse_vivino_html(html: str) -> dict[str, Any] | None:
         if grape_match:
             grape = grape_match.group(1)
 
+        # Extract ratings count
+        ratings_count = None
+        for rc_pattern in [
+            r'"wine_ratings_count":(\d+)',
+            r'"ratings_count":(\d+)',
+        ]:
+            rc_match = re.search(rc_pattern, decoded)
+            if rc_match:
+                val = int(rc_match.group(1))
+                if val > 0:
+                    ratings_count = val
+                    break
+
+        # Extract wine style description
+        description = ""
+        desc_match = re.search(
+            r'"description":"([^"]{10,500})"', decoded
+        )
+        if desc_match:
+            description = desc_match.group(1).replace("\\n", " ").strip()
+
+        # Extract food pairings
+        food_pairings = ""
+        food_matches = re.findall(
+            r'"food":\[([^\]]+)\]', decoded
+        )
+        if food_matches:
+            food_names = re.findall(r'"name":"([^"]+)"', food_matches[0])
+            if food_names:
+                food_pairings = ", ".join(food_names)
+
+        # Extract alcohol content
+        alcohol = ""
+        alc_match = re.search(r'"alcohol":([\d.]+)', decoded)
+        if alc_match:
+            alcohol = f"{alc_match.group(1)}%"
+
         return {
             "name": wine_name,
             "winery": winery_match.group(1) if winery_match else "",
@@ -414,7 +457,11 @@ def _parse_vivino_html(html: str) -> dict[str, Any] | None:
             "type": wine_type,
             "grape_variety": grape,
             "rating": rating,
+            "ratings_count": ratings_count,
             "image_url": image_url,
+            "description": description,
+            "food_pairings": food_pairings,
+            "alcohol": alcohol,
             "price": None,
             "source": "vivino",
         }

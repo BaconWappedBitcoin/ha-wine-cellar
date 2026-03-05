@@ -88,6 +88,61 @@ export class WineDetailDialog extends LitElement {
         color: #f5a623;
       }
 
+      .drink-by-banner {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 20px;
+        font-size: 0.9em;
+        font-weight: 500;
+      }
+
+      .drink-by-banner.drink {
+        background: rgba(46, 125, 50, 0.12);
+        color: #2e7d32;
+      }
+
+      .drink-by-banner.hold {
+        background: rgba(21, 101, 192, 0.12);
+        color: #1565c0;
+      }
+
+      .drink-by-banner.past {
+        background: rgba(198, 40, 40, 0.12);
+        color: #c62828;
+      }
+
+      .wine-description {
+        padding: 0 20px 12px;
+        font-size: 0.85em;
+        color: var(--wc-text-secondary);
+        line-height: 1.4;
+        font-style: italic;
+      }
+
+      .info-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 0 20px 12px;
+      }
+
+      .info-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 16px;
+        font-size: 0.75em;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid var(--wc-border);
+        color: var(--wc-text-secondary);
+      }
+
+      .info-chip-icon {
+        font-size: 1.1em;
+      }
+
       .details-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -213,8 +268,8 @@ export class WineDetailDialog extends LitElement {
         border-radius: 8px;
         resize: vertical;
         min-height: 50px;
-        background: var(--wc-surface, #fff);
-        color: var(--wc-text, #212121);
+        background: var(--wc-bg);
+        color: var(--wc-text);
       }
 
       .tasting-field textarea:focus {
@@ -389,12 +444,47 @@ export class WineDetailDialog extends LitElement {
                     <div class="wine-rating">
                       <span class="rating-star">★</span>
                       ${wine.rating.toFixed(1)}
-                      <span style="font-size:0.8em;color:var(--wc-text-secondary)">(Vivino)</span>
+                      <span style="font-size:0.8em;color:var(--wc-text-secondary)">
+                        Vivino${wine.ratings_count ? ` (${wine.ratings_count.toLocaleString()} ratings)` : ""}
+                      </span>
                     </div>
                   `
                 : nothing}
             </div>
           </div>
+
+          <!-- Drink by banner for disposition wines -->
+          ${wine.disposition && wine.drink_by
+            ? html`
+                <div class="drink-by-banner ${wine.disposition === 'D' ? 'drink' : wine.disposition === 'H' ? 'hold' : wine.disposition === 'P' ? 'past' : ''}">
+                  ${wine.disposition === "D" ? "Ready to drink" : wine.disposition === "H" ? "Hold until" : "Past peak since"}
+                  ${wine.drink_by}
+                </div>
+              `
+            : wine.disposition === "H" && !wine.drink_by
+              ? html`<div class="drink-by-banner hold">Hold — no drink date set</div>`
+              : nothing}
+
+          <!-- Description -->
+          ${wine.description
+            ? html`<div class="wine-description">${wine.description}</div>`
+            : nothing}
+
+          <!-- Info chips (food, alcohol, etc.) -->
+          ${wine.food_pairings || wine.alcohol
+            ? html`
+                <div class="info-chips">
+                  ${wine.alcohol
+                    ? html`<span class="info-chip"><span class="info-chip-icon">%</span> ${wine.alcohol}</span>`
+                    : nothing}
+                  ${wine.food_pairings
+                    ? wine.food_pairings.split(", ").map(
+                        (food: string) => html`<span class="info-chip">${food}</span>`
+                      )
+                    : nothing}
+                </div>
+              `
+            : nothing}
 
           <div class="details-grid">
             ${wine.vintage

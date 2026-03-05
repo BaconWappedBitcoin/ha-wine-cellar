@@ -1016,12 +1016,45 @@ let WineDetailDialog = class WineDetailDialog extends i {
                     <div class="wine-rating">
                       <span class="rating-star">★</span>
                       ${wine.rating.toFixed(1)}
-                      <span style="font-size:0.8em;color:var(--wc-text-secondary)">(Vivino)</span>
+                      <span style="font-size:0.8em;color:var(--wc-text-secondary)">
+                        Vivino${wine.ratings_count ? ` (${wine.ratings_count.toLocaleString()} ratings)` : ""}
+                      </span>
                     </div>
                   `
             : A}
             </div>
           </div>
+
+          <!-- Drink by banner for disposition wines -->
+          ${wine.disposition && wine.drink_by
+            ? b `
+                <div class="drink-by-banner ${wine.disposition === 'D' ? 'drink' : wine.disposition === 'H' ? 'hold' : wine.disposition === 'P' ? 'past' : ''}">
+                  ${wine.disposition === "D" ? "Ready to drink" : wine.disposition === "H" ? "Hold until" : "Past peak since"}
+                  ${wine.drink_by}
+                </div>
+              `
+            : wine.disposition === "H" && !wine.drink_by
+                ? b `<div class="drink-by-banner hold">Hold — no drink date set</div>`
+                : A}
+
+          <!-- Description -->
+          ${wine.description
+            ? b `<div class="wine-description">${wine.description}</div>`
+            : A}
+
+          <!-- Info chips (food, alcohol, etc.) -->
+          ${wine.food_pairings || wine.alcohol
+            ? b `
+                <div class="info-chips">
+                  ${wine.alcohol
+                ? b `<span class="info-chip"><span class="info-chip-icon">%</span> ${wine.alcohol}</span>`
+                : A}
+                  ${wine.food_pairings
+                ? wine.food_pairings.split(", ").map((food) => b `<span class="info-chip">${food}</span>`)
+                : A}
+                </div>
+              `
+            : A}
 
           <div class="details-grid">
             ${wine.vintage
@@ -1250,6 +1283,61 @@ WineDetailDialog.styles = [
         color: #f5a623;
       }
 
+      .drink-by-banner {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 20px;
+        font-size: 0.9em;
+        font-weight: 500;
+      }
+
+      .drink-by-banner.drink {
+        background: rgba(46, 125, 50, 0.12);
+        color: #2e7d32;
+      }
+
+      .drink-by-banner.hold {
+        background: rgba(21, 101, 192, 0.12);
+        color: #1565c0;
+      }
+
+      .drink-by-banner.past {
+        background: rgba(198, 40, 40, 0.12);
+        color: #c62828;
+      }
+
+      .wine-description {
+        padding: 0 20px 12px;
+        font-size: 0.85em;
+        color: var(--wc-text-secondary);
+        line-height: 1.4;
+        font-style: italic;
+      }
+
+      .info-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 0 20px 12px;
+      }
+
+      .info-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 16px;
+        font-size: 0.75em;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid var(--wc-border);
+        color: var(--wc-text-secondary);
+      }
+
+      .info-chip-icon {
+        font-size: 1.1em;
+      }
+
       .details-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -1375,8 +1463,8 @@ WineDetailDialog.styles = [
         border-radius: 8px;
         resize: vertical;
         min-height: 50px;
-        background: var(--wc-surface, #fff);
-        color: var(--wc-text, #212121);
+        background: var(--wc-bg);
+        color: var(--wc-text);
       }
 
       .tasting-field textarea:focus {
@@ -2094,7 +2182,11 @@ let AddWineDialog = class AddWineDialog extends i {
                     country: result.result.country || "",
                     grape_variety: result.result.grape_variety || "",
                     rating: result.result.rating,
+                    ratings_count: result.result.ratings_count || null,
                     image_url: result.result.image_url || "",
+                    description: result.result.description || "",
+                    food_pairings: result.result.food_pairings || "",
+                    alcohol: result.result.alcohol || "",
                 };
                 this._step = "details";
             }
@@ -2132,7 +2224,11 @@ let AddWineDialog = class AddWineDialog extends i {
                     country: first.country || "",
                     grape_variety: first.grape_variety || "",
                     rating: first.rating,
+                    ratings_count: first.ratings_count || null,
                     image_url: first.image_url || "",
+                    description: first.description || "",
+                    food_pairings: first.food_pairings || "",
+                    alcohol: first.alcohol || "",
                 };
                 this._step = "details";
             }
@@ -3934,6 +4030,10 @@ let WineCellarCard = class WineCellarCard extends i {
                     price: this._copiedWine.price,
                     drink_by: this._copiedWine.drink_by,
                     notes: this._copiedWine.notes,
+                    description: this._copiedWine.description,
+                    food_pairings: this._copiedWine.food_pairings,
+                    alcohol: this._copiedWine.alcohol,
+                    ratings_count: this._copiedWine.ratings_count,
                     cabinet_id: cabinetId,
                     row,
                     col,
@@ -4013,13 +4113,13 @@ let WineCellarCard = class WineCellarCard extends i {
           </div>
           <div class="header-actions">
             <button
-              class="btn btn-outline"
-              style="font-size: 0.8em; padding: 4px 10px;"
+              class="btn btn-primary"
+              style="font-size: 0.85em; padding: 6px 14px; background: #1565c0;"
               @click=${this._analyzeWines}
               title="AI Drink/Hold Analysis"
               ?disabled=${this._analyzing}
             >
-              ${this._analyzing ? "⏳ Analyzing..." : "AI Scan"}
+              ${this._analyzing ? "Analyzing..." : "AI Scan"}
             </button>
             <button
               class="btn btn-icon"

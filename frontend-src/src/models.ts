@@ -16,11 +16,15 @@ export interface Wine {
   type: WineType;
   grape_variety: string;
   rating: number | null;
+  ratings_count: number | null;
   image_url: string;
   price: number | null;
   purchase_date: string;
   drink_by: string;
   notes: string;
+  description: string;
+  food_pairings: string;
+  alcohol: string;
   cabinet_id: string;
   row: number | null;
   col: number | null;

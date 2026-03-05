@@ -417,7 +417,11 @@ export class AddWineDialog extends LitElement {
           country: result.result.country || "",
           grape_variety: result.result.grape_variety || "",
           rating: result.result.rating,
+          ratings_count: result.result.ratings_count || null,
           image_url: result.result.image_url || "",
+          description: result.result.description || "",
+          food_pairings: result.result.food_pairings || "",
+          alcohol: result.result.alcohol || "",
         };
         this._step = "details";
       } else {
@@ -459,7 +463,11 @@ export class AddWineDialog extends LitElement {
           country: first.country || "",
           grape_variety: first.grape_variety || "",
           rating: first.rating,
+          ratings_count: first.ratings_count || null,
           image_url: first.image_url || "",
+          description: first.description || "",
+          food_pairings: first.food_pairings || "",
+          alcohol: first.alcohol || "",
         };
         this._step = "details";
       } else {
