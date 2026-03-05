@@ -479,14 +479,15 @@ export class AddWineDialog extends LitElement {
         this._scanMode = "idle";
         this._step = "details";
       } else {
-        this._error = "Could not recognize the label. Try again or enter manually.";
+        // Show specific error from backend if available
+        const errorDetail = result.error || "Unknown error";
+        this._error = `Label recognition failed: ${errorDetail}`;
+        console.error("Wine Cellar: label recognition failed:", errorDetail);
       }
     } catch (err: any) {
-      if (err?.message?.includes("gemini_not_configured")) {
-        this._error = "Gemini API key not configured. Go to integration settings.";
-      } else {
-        this._error = "Label recognition failed. Try again or enter manually.";
-      }
+      const msg = err?.message || String(err);
+      console.error("Wine Cellar: label recognition error:", msg);
+      this._error = `Label recognition error: ${msg}`;
     }
 
     this._labelLoading = false;

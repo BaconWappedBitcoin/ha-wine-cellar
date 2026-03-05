@@ -288,15 +288,26 @@ async def ws_recognize_label(
     """Recognize wine from label photo using Gemini Vision."""
     gemini = hass.data[DOMAIN].get("gemini")
     if not gemini:
-        connection.send_error(
+        connection.send_result(
             msg["id"],
-            "gemini_not_configured",
-            "Gemini API key not configured. Go to Settings > Integrations > Wine Cellar > Configure.",
+            {
+                "result": None,
+                "error": "Gemini API key not configured. Go to Settings > Integrations > Wine Cellar > Configure.",
+            },
         )
         return
 
+    _LOGGER.debug("Recognizing label image (%d chars)", len(msg["image"]))
     result = await gemini.recognize_label(msg["image"])
-    connection.send_result(msg["id"], {"result": result})
+
+    # The gemini client now returns {"error": "..."} on failure
+    if "error" in result:
+        _LOGGER.warning("Label recognition failed: %s", result["error"])
+        connection.send_result(
+            msg["id"], {"result": None, "error": result["error"]}
+        )
+    else:
+        connection.send_result(msg["id"], {"result": result, "error": None})
 
 
 @websocket_api.websocket_command(

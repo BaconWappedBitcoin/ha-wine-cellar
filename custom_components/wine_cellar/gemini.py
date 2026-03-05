@@ -6,6 +6,8 @@ import json
 import logging
 from typing import Any
 
+import aiohttp
+
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -45,9 +47,20 @@ class GeminiVisionClient:
         self._hass = hass
         self._api_key = api_key
 
-    async def recognize_label(self, image_base64: str) -> dict[str, Any] | None:
-        """Send image to Gemini Vision and get structured wine data."""
+    async def recognize_label(self, image_base64: str) -> dict[str, Any]:
+        """Send image to Gemini Vision and get structured wine data.
+
+        Returns a dict with either wine data + source="gemini",
+        or {"error": "description"} on failure.
+        """
+        if not self._api_key:
+            return {"error": "Gemini API key is empty"}
+
         session = async_get_clientsession(self._hass)
+
+        _LOGGER.debug(
+            "Sending image to Gemini (%d chars base64)", len(image_base64)
+        )
 
         body = {
             "contents": [
@@ -70,40 +83,55 @@ class GeminiVisionClient:
         }
 
         try:
+            timeout = aiohttp.ClientTimeout(total=45)
             async with session.post(
                 GEMINI_API_URL,
                 params={"key": self._api_key},
                 json=body,
-                timeout=30,
+                timeout=timeout,
             ) as resp:
+                resp_text = await resp.text()
+
                 if resp.status == 401 or resp.status == 403:
-                    _LOGGER.error("Gemini API key is invalid (status %s)", resp.status)
-                    return None
+                    _LOGGER.error(
+                        "Gemini API key is invalid (status %s): %s",
+                        resp.status,
+                        resp_text[:200],
+                    )
+                    return {"error": f"Gemini API key is invalid (HTTP {resp.status})"}
 
                 if resp.status != 200:
-                    _LOGGER.error("Gemini API returned status %s", resp.status)
-                    return None
+                    _LOGGER.error(
+                        "Gemini API returned status %s: %s",
+                        resp.status,
+                        resp_text[:500],
+                    )
+                    return {"error": f"Gemini API error (HTTP {resp.status})"}
 
-                data = await resp.json()
+                data = json.loads(resp_text)
 
                 # Extract text from Gemini response
                 candidates = data.get("candidates", [])
                 if not candidates:
-                    _LOGGER.debug("Gemini returned no candidates")
-                    return None
+                    _LOGGER.warning(
+                        "Gemini returned no candidates: %s", resp_text[:500]
+                    )
+                    return {"error": "Gemini returned no results"}
 
                 content = candidates[0].get("content", {})
                 parts = content.get("parts", [])
                 if not parts:
-                    return None
+                    _LOGGER.warning("Gemini response has no parts")
+                    return {"error": "Gemini returned empty response"}
 
                 text = parts[0].get("text", "")
+                _LOGGER.debug("Gemini raw response: %s", text[:500])
                 result = json.loads(text)
 
-                # Check for error response
+                # Check for error response from Gemini
                 if "error" in result:
                     _LOGGER.debug("Gemini: %s", result["error"])
-                    return None
+                    return {"error": f"Not a wine label: {result['error']}"}
 
                 # Validate and normalize
                 valid_types = {"red", "white", "rosé", "sparkling", "dessert"}
@@ -120,8 +148,12 @@ class GeminiVisionClient:
                     except (ValueError, TypeError):
                         vintage = None
 
+                name = str(result.get("name", "")).strip()
+                if not name:
+                    return {"error": "Could not read wine name from label"}
+
                 return {
-                    "name": str(result.get("name", "")).strip(),
+                    "name": name,
                     "winery": str(result.get("winery", "")).strip(),
                     "region": str(result.get("region", "")).strip(),
                     "country": str(result.get("country", "")).strip(),
@@ -136,7 +168,13 @@ class GeminiVisionClient:
 
         except json.JSONDecodeError as err:
             _LOGGER.error("Failed to parse Gemini response: %s", err)
+            return {"error": f"Failed to parse Gemini response: {err}"}
+        except aiohttp.ClientError as err:
+            _LOGGER.error("Network error calling Gemini: %s", err)
+            return {"error": f"Network error: {err}"}
+        except TimeoutError:
+            _LOGGER.error("Gemini API timed out")
+            return {"error": "Gemini API timed out (45s)"}
         except Exception as err:
             _LOGGER.error("Gemini API error: %s", err)
-
-        return None
+            return {"error": f"Unexpected error: {err}"}

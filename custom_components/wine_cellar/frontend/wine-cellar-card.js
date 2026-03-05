@@ -1700,7 +1700,7 @@ LabelCamera.styles = [
       .camera-container {
         position: relative;
         width: 100%;
-        max-height: 350px;
+        max-height: 220px;
         border-radius: 12px;
         overflow: hidden;
         background: #000;
@@ -1711,14 +1711,14 @@ LabelCamera.styles = [
         height: 100%;
         object-fit: cover;
         display: block;
-        max-height: 350px;
+        max-height: 220px;
       }
 
       .captured-preview {
         width: 100%;
         border-radius: 12px;
         object-fit: contain;
-        max-height: 250px;
+        max-height: 180px;
       }
 
       .capture-btn-area {
@@ -2003,16 +2003,16 @@ let AddWineDialog = class AddWineDialog extends i {
                 this._step = "details";
             }
             else {
-                this._error = "Could not recognize the label. Try again or enter manually.";
+                // Show specific error from backend if available
+                const errorDetail = result.error || "Unknown error";
+                this._error = `Label recognition failed: ${errorDetail}`;
+                console.error("Wine Cellar: label recognition failed:", errorDetail);
             }
         }
         catch (err) {
-            if (err?.message?.includes("gemini_not_configured")) {
-                this._error = "Gemini API key not configured. Go to integration settings.";
-            }
-            else {
-                this._error = "Label recognition failed. Try again or enter manually.";
-            }
+            const msg = err?.message || String(err);
+            console.error("Wine Cellar: label recognition error:", msg);
+            this._error = `Label recognition error: ${msg}`;
         }
         this._labelLoading = false;
     }

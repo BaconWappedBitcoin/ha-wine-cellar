@@ -21,7 +21,7 @@ export class LabelCamera extends LitElement {
       .camera-container {
         position: relative;
         width: 100%;
-        max-height: 350px;
+        max-height: 220px;
         border-radius: 12px;
         overflow: hidden;
         background: #000;
@@ -32,14 +32,14 @@ export class LabelCamera extends LitElement {
         height: 100%;
         object-fit: cover;
         display: block;
-        max-height: 350px;
+        max-height: 220px;
       }
 
       .captured-preview {
         width: 100%;
         border-radius: 12px;
         object-fit: contain;
-        max-height: 250px;
+        max-height: 180px;
       }
 
       .capture-btn-area {
