@@ -233,6 +233,7 @@ Return ONLY a JSON object with these fields:
   "drink_by": "optimal year to drink by, e.g. 2028",
   "drink_window": "e.g. 2025-2030",
   "description": "2-3 sentence tasting profile and character of this wine",
+  "estimated_price": null,
   "rating_ws": null,
   "rating_rp": null,
   "rating_jd": null,
@@ -261,6 +262,7 @@ Rules:
   - "rating_rp": Robert Parker / Wine Advocate score (out of 100)
   - "rating_jd": James Suckling / Jeb Dunnuck score (out of 100)
   - "rating_ag": Antonio Galloni / Vinous score (out of 100)
+- "estimated_price": estimated current retail price in USD as a number (e.g. 45.00). Use your knowledge of the wine market to estimate what this bottle currently sells for. Return null only if you truly cannot estimate.
 - Only provide ratings you are reasonably confident about. Use null for wines you cannot rate with confidence.
 - Do NOT fabricate ratings. Better to return null than guess."""
 

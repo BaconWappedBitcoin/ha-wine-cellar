@@ -423,8 +423,8 @@ async def ws_refresh_wine(
         val = lookup.get(key)
         if val:
             updates[key] = val
-    # Store Vivino price as retail_price only if not already set
-    if lookup.get("price") and not wine.get("retail_price"):
+    # Store Vivino price as retail_price (always update — Vivino is real market data)
+    if lookup.get("price"):
         updates["retail_price"] = lookup["price"]
 
     # Clear bad descriptions (Vivino error page text)
@@ -505,6 +505,12 @@ async def ws_analyze_single_wine(
 
     if result.get("drink_window"):
         updates["drink_window"] = result["drink_window"]
+
+    # Store AI estimated price as retail_price if not already set
+    est_price = result.get("estimated_price")
+    if est_price and isinstance(est_price, (int, float)) and est_price > 0:
+        if not wine.get("retail_price"):
+            updates["retail_price"] = round(float(est_price), 2)
 
     if updates:
         updated_wine = storage.update_wine(msg["wine_id"], updates)
