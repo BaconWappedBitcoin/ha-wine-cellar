@@ -424,6 +424,7 @@ async def ws_refresh_wine(
         if val:
             updates[key] = val
     # Store Vivino price as retail_price (always update — Vivino is real market data)
+    _LOGGER.debug("Vivino lookup price: %s", lookup.get("price"))
     if lookup.get("price"):
         updates["retail_price"] = lookup["price"]
 
@@ -508,10 +509,12 @@ async def ws_analyze_single_wine(
 
     # Store AI estimated price as retail_price if not already set
     est_price = result.get("estimated_price")
+    _LOGGER.debug("AI estimated_price: %s, wine retail_price: %s", est_price, wine.get("retail_price"))
     if est_price and isinstance(est_price, (int, float)) and est_price > 0:
         if not wine.get("retail_price"):
             updates["retail_price"] = round(float(est_price), 2)
 
+    _LOGGER.debug("Final updates for wine %s: %s", msg["wine_id"], list(updates.keys()))
     if updates:
         updated_wine = storage.update_wine(msg["wine_id"], updates)
         await storage.async_save()
