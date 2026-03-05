@@ -1,42 +1,78 @@
-function t(t,e,i,s){var a,r=arguments.length,o=r<3?e:null===s?s=Object.getOwnPropertyDescriptor(e,i):s;if("object"==typeof Reflect&&"function"==typeof Reflect.decorate)o=Reflect.decorate(t,e,i,s);else for(var n=t.length-1;n>=0;n--)(a=t[n])&&(o=(r<3?a(o):r>3?a(e,i,o):a(e,i))||o);return r>3&&o&&Object.defineProperty(e,i,o),o}"function"==typeof SuppressedError&&SuppressedError;
+/******************************************************************************
+Copyright (c) Microsoft Corporation.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+***************************************************************************** */
+/* global Reflect, Promise, SuppressedError, Symbol, Iterator */
+
+
+function __decorate(decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+}
+
+typeof SuppressedError === "function" ? SuppressedError : function (error, suppressed, message) {
+    var e = new Error(message);
+    return e.name = "SuppressedError", e.error = error, e.suppressed = suppressed, e;
+};
+
 /**
  * @license
  * Copyright 2019 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
  */
-const e=globalThis,i=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,s=Symbol(),a=new WeakMap;let r=class{constructor(t,e,i){if(this._$cssResult$=!0,i!==s)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=t,this.t=e}get styleSheet(){let t=this.o;const e=this.t;if(i&&void 0===t){const i=void 0!==e&&1===e.length;i&&(t=a.get(e)),void 0===t&&((this.o=t=new CSSStyleSheet).replaceSync(this.cssText),i&&a.set(e,t))}return t}toString(){return this.cssText}};const o=(t,...e)=>{const i=1===t.length?t[0]:e.reduce((e,i,s)=>e+(t=>{if(!0===t._$cssResult$)return t.cssText;if("number"==typeof t)return t;throw Error("Value passed to 'css' function must be a 'css' function result: "+t+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(i)+t[s+1],t[0]);return new r(i,t,s)},n=i?t=>t:t=>t instanceof CSSStyleSheet?(t=>{let e="";for(const i of t.cssRules)e+=i.cssText;return(t=>new r("string"==typeof t?t:t+"",void 0,s))(e)})(t):t,{is:l,defineProperty:d,getOwnPropertyDescriptor:c,getOwnPropertyNames:p,getOwnPropertySymbols:h,getPrototypeOf:u}=Object,b=globalThis,g=b.trustedTypes,v=g?g.emptyScript:"",m=b.reactiveElementPolyfillSupport,_=(t,e)=>t,y={toAttribute(t,e){switch(e){case Boolean:t=t?v:null;break;case Object:case Array:t=null==t?t:JSON.stringify(t)}return t},fromAttribute(t,e){let i=t;switch(e){case Boolean:i=null!==t;break;case Number:i=null===t?null:Number(t);break;case Object:case Array:try{i=JSON.parse(t)}catch(t){i=null}}return i}},w=(t,e)=>!l(t,e),f={attribute:!0,type:String,converter:y,reflect:!1,useDefault:!1,hasChanged:w};
+const t$2=globalThis,e$2=t$2.ShadowRoot&&(void 0===t$2.ShadyCSS||t$2.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,s$2=Symbol(),o$4=new WeakMap;let n$3 = class n{constructor(t,e,o){if(this._$cssResult$=true,o!==s$2)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=t,this.t=e;}get styleSheet(){let t=this.o;const s=this.t;if(e$2&&void 0===t){const e=void 0!==s&&1===s.length;e&&(t=o$4.get(s)),void 0===t&&((this.o=t=new CSSStyleSheet).replaceSync(this.cssText),e&&o$4.set(s,t));}return t}toString(){return this.cssText}};const r$4=t=>new n$3("string"==typeof t?t:t+"",void 0,s$2),i$3=(t,...e)=>{const o=1===t.length?t[0]:e.reduce((e,s,o)=>e+(t=>{if(true===t._$cssResult$)return t.cssText;if("number"==typeof t)return t;throw Error("Value passed to 'css' function must be a 'css' function result: "+t+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(s)+t[o+1],t[0]);return new n$3(o,t,s$2)},S$1=(s,o)=>{if(e$2)s.adoptedStyleSheets=o.map(t=>t instanceof CSSStyleSheet?t:t.styleSheet);else for(const e of o){const o=document.createElement("style"),n=t$2.litNonce;void 0!==n&&o.setAttribute("nonce",n),o.textContent=e.cssText,s.appendChild(o);}},c$2=e$2?t=>t:t=>t instanceof CSSStyleSheet?(t=>{let e="";for(const s of t.cssRules)e+=s.cssText;return r$4(e)})(t):t;
+
 /**
  * @license
  * Copyright 2017 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
- */Symbol.metadata??=Symbol("metadata"),b.litPropertyMetadata??=new WeakMap;let $=class extends HTMLElement{static addInitializer(t){this._$Ei(),(this.l??=[]).push(t)}static get observedAttributes(){return this.finalize(),this._$Eh&&[...this._$Eh.keys()]}static createProperty(t,e=f){if(e.state&&(e.attribute=!1),this._$Ei(),this.prototype.hasOwnProperty(t)&&((e=Object.create(e)).wrapped=!0),this.elementProperties.set(t,e),!e.noAccessor){const i=Symbol(),s=this.getPropertyDescriptor(t,i,e);void 0!==s&&d(this.prototype,t,s)}}static getPropertyDescriptor(t,e,i){const{get:s,set:a}=c(this.prototype,t)??{get(){return this[e]},set(t){this[e]=t}};return{get:s,set(e){const r=s?.call(this);a?.call(this,e),this.requestUpdate(t,r,i)},configurable:!0,enumerable:!0}}static getPropertyOptions(t){return this.elementProperties.get(t)??f}static _$Ei(){if(this.hasOwnProperty(_("elementProperties")))return;const t=u(this);t.finalize(),void 0!==t.l&&(this.l=[...t.l]),this.elementProperties=new Map(t.elementProperties)}static finalize(){if(this.hasOwnProperty(_("finalized")))return;if(this.finalized=!0,this._$Ei(),this.hasOwnProperty(_("properties"))){const t=this.properties,e=[...p(t),...h(t)];for(const i of e)this.createProperty(i,t[i])}const t=this[Symbol.metadata];if(null!==t){const e=litPropertyMetadata.get(t);if(void 0!==e)for(const[t,i]of e)this.elementProperties.set(t,i)}this._$Eh=new Map;for(const[t,e]of this.elementProperties){const i=this._$Eu(t,e);void 0!==i&&this._$Eh.set(i,t)}this.elementStyles=this.finalizeStyles(this.styles)}static finalizeStyles(t){const e=[];if(Array.isArray(t)){const i=new Set(t.flat(1/0).reverse());for(const t of i)e.unshift(n(t))}else void 0!==t&&e.push(n(t));return e}static _$Eu(t,e){const i=e.attribute;return!1===i?void 0:"string"==typeof i?i:"string"==typeof t?t.toLowerCase():void 0}constructor(){super(),this._$Ep=void 0,this.isUpdatePending=!1,this.hasUpdated=!1,this._$Em=null,this._$Ev()}_$Ev(){this._$ES=new Promise(t=>this.enableUpdating=t),this._$AL=new Map,this._$E_(),this.requestUpdate(),this.constructor.l?.forEach(t=>t(this))}addController(t){(this._$EO??=new Set).add(t),void 0!==this.renderRoot&&this.isConnected&&t.hostConnected?.()}removeController(t){this._$EO?.delete(t)}_$E_(){const t=new Map,e=this.constructor.elementProperties;for(const i of e.keys())this.hasOwnProperty(i)&&(t.set(i,this[i]),delete this[i]);t.size>0&&(this._$Ep=t)}createRenderRoot(){const t=this.shadowRoot??this.attachShadow(this.constructor.shadowRootOptions);return((t,s)=>{if(i)t.adoptedStyleSheets=s.map(t=>t instanceof CSSStyleSheet?t:t.styleSheet);else for(const i of s){const s=document.createElement("style"),a=e.litNonce;void 0!==a&&s.setAttribute("nonce",a),s.textContent=i.cssText,t.appendChild(s)}})(t,this.constructor.elementStyles),t}connectedCallback(){this.renderRoot??=this.createRenderRoot(),this.enableUpdating(!0),this._$EO?.forEach(t=>t.hostConnected?.())}enableUpdating(t){}disconnectedCallback(){this._$EO?.forEach(t=>t.hostDisconnected?.())}attributeChangedCallback(t,e,i){this._$AK(t,i)}_$ET(t,e){const i=this.constructor.elementProperties.get(t),s=this.constructor._$Eu(t,i);if(void 0!==s&&!0===i.reflect){const a=(void 0!==i.converter?.toAttribute?i.converter:y).toAttribute(e,i.type);this._$Em=t,null==a?this.removeAttribute(s):this.setAttribute(s,a),this._$Em=null}}_$AK(t,e){const i=this.constructor,s=i._$Eh.get(t);if(void 0!==s&&this._$Em!==s){const t=i.getPropertyOptions(s),a="function"==typeof t.converter?{fromAttribute:t.converter}:void 0!==t.converter?.fromAttribute?t.converter:y;this._$Em=s;const r=a.fromAttribute(e,t.type);this[s]=r??this._$Ej?.get(s)??r,this._$Em=null}}requestUpdate(t,e,i,s=!1,a){if(void 0!==t){const r=this.constructor;if(!1===s&&(a=this[t]),i??=r.getPropertyOptions(t),!((i.hasChanged??w)(a,e)||i.useDefault&&i.reflect&&a===this._$Ej?.get(t)&&!this.hasAttribute(r._$Eu(t,i))))return;this.C(t,e,i)}!1===this.isUpdatePending&&(this._$ES=this._$EP())}C(t,e,{useDefault:i,reflect:s,wrapped:a},r){i&&!(this._$Ej??=new Map).has(t)&&(this._$Ej.set(t,r??e??this[t]),!0!==a||void 0!==r)||(this._$AL.has(t)||(this.hasUpdated||i||(e=void 0),this._$AL.set(t,e)),!0===s&&this._$Em!==t&&(this._$Eq??=new Set).add(t))}async _$EP(){this.isUpdatePending=!0;try{await this._$ES}catch(t){Promise.reject(t)}const t=this.scheduleUpdate();return null!=t&&await t,!this.isUpdatePending}scheduleUpdate(){return this.performUpdate()}performUpdate(){if(!this.isUpdatePending)return;if(!this.hasUpdated){if(this.renderRoot??=this.createRenderRoot(),this._$Ep){for(const[t,e]of this._$Ep)this[t]=e;this._$Ep=void 0}const t=this.constructor.elementProperties;if(t.size>0)for(const[e,i]of t){const{wrapped:t}=i,s=this[e];!0!==t||this._$AL.has(e)||void 0===s||this.C(e,void 0,i,s)}}let t=!1;const e=this._$AL;try{t=this.shouldUpdate(e),t?(this.willUpdate(e),this._$EO?.forEach(t=>t.hostUpdate?.()),this.update(e)):this._$EM()}catch(e){throw t=!1,this._$EM(),e}t&&this._$AE(e)}willUpdate(t){}_$AE(t){this._$EO?.forEach(t=>t.hostUpdated?.()),this.hasUpdated||(this.hasUpdated=!0,this.firstUpdated(t)),this.updated(t)}_$EM(){this._$AL=new Map,this.isUpdatePending=!1}get updateComplete(){return this.getUpdateComplete()}getUpdateComplete(){return this._$ES}shouldUpdate(t){return!0}update(t){this._$Eq&&=this._$Eq.forEach(t=>this._$ET(t,this[t])),this._$EM()}updated(t){}firstUpdated(t){}};$.elementStyles=[],$.shadowRootOptions={mode:"open"},$[_("elementProperties")]=new Map,$[_("finalized")]=new Map,m?.({ReactiveElement:$}),(b.reactiveElementVersions??=[]).push("2.1.2");
-/**
- * @license
- * Copyright 2017 Google LLC
- * SPDX-License-Identifier: BSD-3-Clause
- */
-const x=globalThis,A=t=>t,k=x.trustedTypes,S=k?k.createPolicy("lit-html",{createHTML:t=>t}):void 0,C="$lit$",E=`lit$${Math.random().toFixed(9).slice(2)}$`,D="?"+E,z=`<${D}>`,P=document,R=()=>P.createComment(""),T=t=>null===t||"object"!=typeof t&&"function"!=typeof t,W=Array.isArray,U="[ \t\n\f\r]",O=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,N=/-->/g,M=/>/g,F=RegExp(`>|${U}(?:([^\\s"'>=/]+)(${U}*=${U}*(?:[^ \t\n\f\r"'\`<>=]|("|')|))|$)`,"g"),H=/'/g,j=/"/g,B=/^(?:script|style|textarea|title)$/i,L=(t=>(e,...i)=>({_$litType$:t,strings:e,values:i}))(1),I=Symbol.for("lit-noChange"),q=Symbol.for("lit-nothing"),V=new WeakMap,Z=P.createTreeWalker(P,129);function Y(t,e){if(!W(t)||!t.hasOwnProperty("raw"))throw Error("invalid template strings array");return void 0!==S?S.createHTML(e):e}const Q=(t,e)=>{const i=t.length-1,s=[];let a,r=2===e?"<svg>":3===e?"<math>":"",o=O;for(let e=0;e<i;e++){const i=t[e];let n,l,d=-1,c=0;for(;c<i.length&&(o.lastIndex=c,l=o.exec(i),null!==l);)c=o.lastIndex,o===O?"!--"===l[1]?o=N:void 0!==l[1]?o=M:void 0!==l[2]?(B.test(l[2])&&(a=RegExp("</"+l[2],"g")),o=F):void 0!==l[3]&&(o=F):o===F?">"===l[0]?(o=a??O,d=-1):void 0===l[1]?d=-2:(d=o.lastIndex-l[2].length,n=l[1],o=void 0===l[3]?F:'"'===l[3]?j:H):o===j||o===H?o=F:o===N||o===M?o=O:(o=F,a=void 0);const p=o===F&&t[e+1].startsWith("/>")?" ":"";r+=o===O?i+z:d>=0?(s.push(n),i.slice(0,d)+C+i.slice(d)+E+p):i+E+(-2===d?e:p)}return[Y(t,r+(t[i]||"<?>")+(2===e?"</svg>":3===e?"</math>":"")),s]};class G{constructor({strings:t,_$litType$:e},i){let s;this.parts=[];let a=0,r=0;const o=t.length-1,n=this.parts,[l,d]=Q(t,e);if(this.el=G.createElement(l,i),Z.currentNode=this.el.content,2===e||3===e){const t=this.el.content.firstChild;t.replaceWith(...t.childNodes)}for(;null!==(s=Z.nextNode())&&n.length<o;){if(1===s.nodeType){if(s.hasAttributes())for(const t of s.getAttributeNames())if(t.endsWith(C)){const e=d[r++],i=s.getAttribute(t).split(E),o=/([.?@])?(.*)/.exec(e);n.push({type:1,index:a,name:o[2],strings:i,ctor:"."===o[1]?et:"?"===o[1]?it:"@"===o[1]?st:tt}),s.removeAttribute(t)}else t.startsWith(E)&&(n.push({type:6,index:a}),s.removeAttribute(t));if(B.test(s.tagName)){const t=s.textContent.split(E),e=t.length-1;if(e>0){s.textContent=k?k.emptyScript:"";for(let i=0;i<e;i++)s.append(t[i],R()),Z.nextNode(),n.push({type:2,index:++a});s.append(t[e],R())}}}else if(8===s.nodeType)if(s.data===D)n.push({type:2,index:a});else{let t=-1;for(;-1!==(t=s.data.indexOf(E,t+1));)n.push({type:7,index:a}),t+=E.length-1}a++}}static createElement(t,e){const i=P.createElement("template");return i.innerHTML=t,i}}function J(t,e,i=t,s){if(e===I)return e;let a=void 0!==s?i._$Co?.[s]:i._$Cl;const r=T(e)?void 0:e._$litDirective$;return a?.constructor!==r&&(a?._$AO?.(!1),void 0===r?a=void 0:(a=new r(t),a._$AT(t,i,s)),void 0!==s?(i._$Co??=[])[s]=a:i._$Cl=a),void 0!==a&&(e=J(t,a._$AS(t,e.values),a,s)),e}class K{constructor(t,e){this._$AV=[],this._$AN=void 0,this._$AD=t,this._$AM=e}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(t){const{el:{content:e},parts:i}=this._$AD,s=(t?.creationScope??P).importNode(e,!0);Z.currentNode=s;let a=Z.nextNode(),r=0,o=0,n=i[0];for(;void 0!==n;){if(r===n.index){let e;2===n.type?e=new X(a,a.nextSibling,this,t):1===n.type?e=new n.ctor(a,n.name,n.strings,this,t):6===n.type&&(e=new at(a,this,t)),this._$AV.push(e),n=i[++o]}r!==n?.index&&(a=Z.nextNode(),r++)}return Z.currentNode=P,s}p(t){let e=0;for(const i of this._$AV)void 0!==i&&(void 0!==i.strings?(i._$AI(t,i,e),e+=i.strings.length-2):i._$AI(t[e])),e++}}class X{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(t,e,i,s){this.type=2,this._$AH=q,this._$AN=void 0,this._$AA=t,this._$AB=e,this._$AM=i,this.options=s,this._$Cv=s?.isConnected??!0}get parentNode(){let t=this._$AA.parentNode;const e=this._$AM;return void 0!==e&&11===t?.nodeType&&(t=e.parentNode),t}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(t,e=this){t=J(this,t,e),T(t)?t===q||null==t||""===t?(this._$AH!==q&&this._$AR(),this._$AH=q):t!==this._$AH&&t!==I&&this._(t):void 0!==t._$litType$?this.$(t):void 0!==t.nodeType?this.T(t):(t=>W(t)||"function"==typeof t?.[Symbol.iterator])(t)?this.k(t):this._(t)}O(t){return this._$AA.parentNode.insertBefore(t,this._$AB)}T(t){this._$AH!==t&&(this._$AR(),this._$AH=this.O(t))}_(t){this._$AH!==q&&T(this._$AH)?this._$AA.nextSibling.data=t:this.T(P.createTextNode(t)),this._$AH=t}$(t){const{values:e,_$litType$:i}=t,s="number"==typeof i?this._$AC(t):(void 0===i.el&&(i.el=G.createElement(Y(i.h,i.h[0]),this.options)),i);if(this._$AH?._$AD===s)this._$AH.p(e);else{const t=new K(s,this),i=t.u(this.options);t.p(e),this.T(i),this._$AH=t}}_$AC(t){let e=V.get(t.strings);return void 0===e&&V.set(t.strings,e=new G(t)),e}k(t){W(this._$AH)||(this._$AH=[],this._$AR());const e=this._$AH;let i,s=0;for(const a of t)s===e.length?e.push(i=new X(this.O(R()),this.O(R()),this,this.options)):i=e[s],i._$AI(a),s++;s<e.length&&(this._$AR(i&&i._$AB.nextSibling,s),e.length=s)}_$AR(t=this._$AA.nextSibling,e){for(this._$AP?.(!1,!0,e);t!==this._$AB;){const e=A(t).nextSibling;A(t).remove(),t=e}}setConnected(t){void 0===this._$AM&&(this._$Cv=t,this._$AP?.(t))}}class tt{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(t,e,i,s,a){this.type=1,this._$AH=q,this._$AN=void 0,this.element=t,this.name=e,this._$AM=s,this.options=a,i.length>2||""!==i[0]||""!==i[1]?(this._$AH=Array(i.length-1).fill(new String),this.strings=i):this._$AH=q}_$AI(t,e=this,i,s){const a=this.strings;let r=!1;if(void 0===a)t=J(this,t,e,0),r=!T(t)||t!==this._$AH&&t!==I,r&&(this._$AH=t);else{const s=t;let o,n;for(t=a[0],o=0;o<a.length-1;o++)n=J(this,s[i+o],e,o),n===I&&(n=this._$AH[o]),r||=!T(n)||n!==this._$AH[o],n===q?t=q:t!==q&&(t+=(n??"")+a[o+1]),this._$AH[o]=n}r&&!s&&this.j(t)}j(t){t===q?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,t??"")}}class et extends tt{constructor(){super(...arguments),this.type=3}j(t){this.element[this.name]=t===q?void 0:t}}class it extends tt{constructor(){super(...arguments),this.type=4}j(t){this.element.toggleAttribute(this.name,!!t&&t!==q)}}class st extends tt{constructor(t,e,i,s,a){super(t,e,i,s,a),this.type=5}_$AI(t,e=this){if((t=J(this,t,e,0)??q)===I)return;const i=this._$AH,s=t===q&&i!==q||t.capture!==i.capture||t.once!==i.once||t.passive!==i.passive,a=t!==q&&(i===q||s);s&&this.element.removeEventListener(this.name,this,i),a&&this.element.addEventListener(this.name,this,t),this._$AH=t}handleEvent(t){"function"==typeof this._$AH?this._$AH.call(this.options?.host??this.element,t):this._$AH.handleEvent(t)}}class at{constructor(t,e,i){this.element=t,this.type=6,this._$AN=void 0,this._$AM=e,this.options=i}get _$AU(){return this._$AM._$AU}_$AI(t){J(this,t)}}const rt=x.litHtmlPolyfillSupport;rt?.(G,X),(x.litHtmlVersions??=[]).push("3.3.2");const ot=globalThis;
-/**
- * @license
- * Copyright 2017 Google LLC
- * SPDX-License-Identifier: BSD-3-Clause
- */class nt extends ${constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0}createRenderRoot(){const t=super.createRenderRoot();return this.renderOptions.renderBefore??=t.firstChild,t}update(t){const e=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(t),this._$Do=((t,e,i)=>{const s=i?.renderBefore??e;let a=s._$litPart$;if(void 0===a){const t=i?.renderBefore??null;s._$litPart$=a=new X(e.insertBefore(R(),t),t,void 0,i??{})}return a._$AI(t),a})(e,this.renderRoot,this.renderOptions)}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(!0)}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(!1)}render(){return I}}nt._$litElement$=!0,nt.finalized=!0,ot.litElementHydrateSupport?.({LitElement:nt});const lt=ot.litElementPolyfillSupport;lt?.({LitElement:nt}),(ot.litElementVersions??=[]).push("4.2.2");
+ */const{is:i$2,defineProperty:e$1,getOwnPropertyDescriptor:h$1,getOwnPropertyNames:r$3,getOwnPropertySymbols:o$3,getPrototypeOf:n$2}=Object,a$1=globalThis,c$1=a$1.trustedTypes,l$1=c$1?c$1.emptyScript:"",p$1=a$1.reactiveElementPolyfillSupport,d$1=(t,s)=>t,u$1={toAttribute(t,s){switch(s){case Boolean:t=t?l$1:null;break;case Object:case Array:t=null==t?t:JSON.stringify(t);}return t},fromAttribute(t,s){let i=t;switch(s){case Boolean:i=null!==t;break;case Number:i=null===t?null:Number(t);break;case Object:case Array:try{i=JSON.parse(t);}catch(t){i=null;}}return i}},f$1=(t,s)=>!i$2(t,s),b$1={attribute:true,type:String,converter:u$1,reflect:false,useDefault:false,hasChanged:f$1};Symbol.metadata??=Symbol("metadata"),a$1.litPropertyMetadata??=new WeakMap;let y$1 = class y extends HTMLElement{static addInitializer(t){this._$Ei(),(this.l??=[]).push(t);}static get observedAttributes(){return this.finalize(),this._$Eh&&[...this._$Eh.keys()]}static createProperty(t,s=b$1){if(s.state&&(s.attribute=false),this._$Ei(),this.prototype.hasOwnProperty(t)&&((s=Object.create(s)).wrapped=true),this.elementProperties.set(t,s),!s.noAccessor){const i=Symbol(),h=this.getPropertyDescriptor(t,i,s);void 0!==h&&e$1(this.prototype,t,h);}}static getPropertyDescriptor(t,s,i){const{get:e,set:r}=h$1(this.prototype,t)??{get(){return this[s]},set(t){this[s]=t;}};return {get:e,set(s){const h=e?.call(this);r?.call(this,s),this.requestUpdate(t,h,i);},configurable:true,enumerable:true}}static getPropertyOptions(t){return this.elementProperties.get(t)??b$1}static _$Ei(){if(this.hasOwnProperty(d$1("elementProperties")))return;const t=n$2(this);t.finalize(),void 0!==t.l&&(this.l=[...t.l]),this.elementProperties=new Map(t.elementProperties);}static finalize(){if(this.hasOwnProperty(d$1("finalized")))return;if(this.finalized=true,this._$Ei(),this.hasOwnProperty(d$1("properties"))){const t=this.properties,s=[...r$3(t),...o$3(t)];for(const i of s)this.createProperty(i,t[i]);}const t=this[Symbol.metadata];if(null!==t){const s=litPropertyMetadata.get(t);if(void 0!==s)for(const[t,i]of s)this.elementProperties.set(t,i);}this._$Eh=new Map;for(const[t,s]of this.elementProperties){const i=this._$Eu(t,s);void 0!==i&&this._$Eh.set(i,t);}this.elementStyles=this.finalizeStyles(this.styles);}static finalizeStyles(s){const i=[];if(Array.isArray(s)){const e=new Set(s.flat(1/0).reverse());for(const s of e)i.unshift(c$2(s));}else void 0!==s&&i.push(c$2(s));return i}static _$Eu(t,s){const i=s.attribute;return  false===i?void 0:"string"==typeof i?i:"string"==typeof t?t.toLowerCase():void 0}constructor(){super(),this._$Ep=void 0,this.isUpdatePending=false,this.hasUpdated=false,this._$Em=null,this._$Ev();}_$Ev(){this._$ES=new Promise(t=>this.enableUpdating=t),this._$AL=new Map,this._$E_(),this.requestUpdate(),this.constructor.l?.forEach(t=>t(this));}addController(t){(this._$EO??=new Set).add(t),void 0!==this.renderRoot&&this.isConnected&&t.hostConnected?.();}removeController(t){this._$EO?.delete(t);}_$E_(){const t=new Map,s=this.constructor.elementProperties;for(const i of s.keys())this.hasOwnProperty(i)&&(t.set(i,this[i]),delete this[i]);t.size>0&&(this._$Ep=t);}createRenderRoot(){const t=this.shadowRoot??this.attachShadow(this.constructor.shadowRootOptions);return S$1(t,this.constructor.elementStyles),t}connectedCallback(){this.renderRoot??=this.createRenderRoot(),this.enableUpdating(true),this._$EO?.forEach(t=>t.hostConnected?.());}enableUpdating(t){}disconnectedCallback(){this._$EO?.forEach(t=>t.hostDisconnected?.());}attributeChangedCallback(t,s,i){this._$AK(t,i);}_$ET(t,s){const i=this.constructor.elementProperties.get(t),e=this.constructor._$Eu(t,i);if(void 0!==e&&true===i.reflect){const h=(void 0!==i.converter?.toAttribute?i.converter:u$1).toAttribute(s,i.type);this._$Em=t,null==h?this.removeAttribute(e):this.setAttribute(e,h),this._$Em=null;}}_$AK(t,s){const i=this.constructor,e=i._$Eh.get(t);if(void 0!==e&&this._$Em!==e){const t=i.getPropertyOptions(e),h="function"==typeof t.converter?{fromAttribute:t.converter}:void 0!==t.converter?.fromAttribute?t.converter:u$1;this._$Em=e;const r=h.fromAttribute(s,t.type);this[e]=r??this._$Ej?.get(e)??r,this._$Em=null;}}requestUpdate(t,s,i,e=false,h){if(void 0!==t){const r=this.constructor;if(false===e&&(h=this[t]),i??=r.getPropertyOptions(t),!((i.hasChanged??f$1)(h,s)||i.useDefault&&i.reflect&&h===this._$Ej?.get(t)&&!this.hasAttribute(r._$Eu(t,i))))return;this.C(t,s,i);} false===this.isUpdatePending&&(this._$ES=this._$EP());}C(t,s,{useDefault:i,reflect:e,wrapped:h},r){i&&!(this._$Ej??=new Map).has(t)&&(this._$Ej.set(t,r??s??this[t]),true!==h||void 0!==r)||(this._$AL.has(t)||(this.hasUpdated||i||(s=void 0),this._$AL.set(t,s)),true===e&&this._$Em!==t&&(this._$Eq??=new Set).add(t));}async _$EP(){this.isUpdatePending=true;try{await this._$ES;}catch(t){Promise.reject(t);}const t=this.scheduleUpdate();return null!=t&&await t,!this.isUpdatePending}scheduleUpdate(){return this.performUpdate()}performUpdate(){if(!this.isUpdatePending)return;if(!this.hasUpdated){if(this.renderRoot??=this.createRenderRoot(),this._$Ep){for(const[t,s]of this._$Ep)this[t]=s;this._$Ep=void 0;}const t=this.constructor.elementProperties;if(t.size>0)for(const[s,i]of t){const{wrapped:t}=i,e=this[s];true!==t||this._$AL.has(s)||void 0===e||this.C(s,void 0,i,e);}}let t=false;const s=this._$AL;try{t=this.shouldUpdate(s),t?(this.willUpdate(s),this._$EO?.forEach(t=>t.hostUpdate?.()),this.update(s)):this._$EM();}catch(s){throw t=false,this._$EM(),s}t&&this._$AE(s);}willUpdate(t){}_$AE(t){this._$EO?.forEach(t=>t.hostUpdated?.()),this.hasUpdated||(this.hasUpdated=true,this.firstUpdated(t)),this.updated(t);}_$EM(){this._$AL=new Map,this.isUpdatePending=false;}get updateComplete(){return this.getUpdateComplete()}getUpdateComplete(){return this._$ES}shouldUpdate(t){return  true}update(t){this._$Eq&&=this._$Eq.forEach(t=>this._$ET(t,this[t])),this._$EM();}updated(t){}firstUpdated(t){}};y$1.elementStyles=[],y$1.shadowRootOptions={mode:"open"},y$1[d$1("elementProperties")]=new Map,y$1[d$1("finalized")]=new Map,p$1?.({ReactiveElement:y$1}),(a$1.reactiveElementVersions??=[]).push("2.1.2");
+
 /**
  * @license
  * Copyright 2017 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
  */
-const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}):customElements.define(t,e)},ct={attribute:!0,type:String,converter:y,reflect:!1,hasChanged:w},pt=(t=ct,e,i)=>{const{kind:s,metadata:a}=i;let r=globalThis.litPropertyMetadata.get(a);if(void 0===r&&globalThis.litPropertyMetadata.set(a,r=new Map),"setter"===s&&((t=Object.create(t)).wrapped=!0),r.set(i.name,t),"accessor"===s){const{name:s}=i;return{set(i){const a=e.get.call(this);e.set.call(this,i),this.requestUpdate(s,a,t,!0,i)},init(e){return void 0!==e&&this.C(s,void 0,t,e),e}}}if("setter"===s){const{name:s}=i;return function(i){const a=this[s];e.call(this,i),this.requestUpdate(s,a,t,!0,i)}}throw Error("Unsupported decorator location: "+s)};
+const t$1=globalThis,i$1=t=>t,s$1=t$1.trustedTypes,e=s$1?s$1.createPolicy("lit-html",{createHTML:t=>t}):void 0,h="$lit$",o$2=`lit$${Math.random().toFixed(9).slice(2)}$`,n$1="?"+o$2,r$2=`<${n$1}>`,l=document,c=()=>l.createComment(""),a=t=>null===t||"object"!=typeof t&&"function"!=typeof t,u=Array.isArray,d=t=>u(t)||"function"==typeof t?.[Symbol.iterator],f="[ \t\n\f\r]",v=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,_=/-->/g,m=/>/g,p=RegExp(`>|${f}(?:([^\\s"'>=/]+)(${f}*=${f}*(?:[^ \t\n\f\r"'\`<>=]|("|')|))|$)`,"g"),g=/'/g,$=/"/g,y=/^(?:script|style|textarea|title)$/i,x=t=>(i,...s)=>({_$litType$:t,strings:i,values:s}),b=x(1),E=Symbol.for("lit-noChange"),A=Symbol.for("lit-nothing"),C=new WeakMap,P=l.createTreeWalker(l,129);function V(t,i){if(!u(t)||!t.hasOwnProperty("raw"))throw Error("invalid template strings array");return void 0!==e?e.createHTML(i):i}const N=(t,i)=>{const s=t.length-1,e=[];let n,l=2===i?"<svg>":3===i?"<math>":"",c=v;for(let i=0;i<s;i++){const s=t[i];let a,u,d=-1,f=0;for(;f<s.length&&(c.lastIndex=f,u=c.exec(s),null!==u);)f=c.lastIndex,c===v?"!--"===u[1]?c=_:void 0!==u[1]?c=m:void 0!==u[2]?(y.test(u[2])&&(n=RegExp("</"+u[2],"g")),c=p):void 0!==u[3]&&(c=p):c===p?">"===u[0]?(c=n??v,d=-1):void 0===u[1]?d=-2:(d=c.lastIndex-u[2].length,a=u[1],c=void 0===u[3]?p:'"'===u[3]?$:g):c===$||c===g?c=p:c===_||c===m?c=v:(c=p,n=void 0);const x=c===p&&t[i+1].startsWith("/>")?" ":"";l+=c===v?s+r$2:d>=0?(e.push(a),s.slice(0,d)+h+s.slice(d)+o$2+x):s+o$2+(-2===d?i:x);}return [V(t,l+(t[s]||"<?>")+(2===i?"</svg>":3===i?"</math>":"")),e]};class S{constructor({strings:t,_$litType$:i},e){let r;this.parts=[];let l=0,a=0;const u=t.length-1,d=this.parts,[f,v]=N(t,i);if(this.el=S.createElement(f,e),P.currentNode=this.el.content,2===i||3===i){const t=this.el.content.firstChild;t.replaceWith(...t.childNodes);}for(;null!==(r=P.nextNode())&&d.length<u;){if(1===r.nodeType){if(r.hasAttributes())for(const t of r.getAttributeNames())if(t.endsWith(h)){const i=v[a++],s=r.getAttribute(t).split(o$2),e=/([.?@])?(.*)/.exec(i);d.push({type:1,index:l,name:e[2],strings:s,ctor:"."===e[1]?I:"?"===e[1]?L:"@"===e[1]?z:H}),r.removeAttribute(t);}else t.startsWith(o$2)&&(d.push({type:6,index:l}),r.removeAttribute(t));if(y.test(r.tagName)){const t=r.textContent.split(o$2),i=t.length-1;if(i>0){r.textContent=s$1?s$1.emptyScript:"";for(let s=0;s<i;s++)r.append(t[s],c()),P.nextNode(),d.push({type:2,index:++l});r.append(t[i],c());}}}else if(8===r.nodeType)if(r.data===n$1)d.push({type:2,index:l});else {let t=-1;for(;-1!==(t=r.data.indexOf(o$2,t+1));)d.push({type:7,index:l}),t+=o$2.length-1;}l++;}}static createElement(t,i){const s=l.createElement("template");return s.innerHTML=t,s}}function M(t,i,s=t,e){if(i===E)return i;let h=void 0!==e?s._$Co?.[e]:s._$Cl;const o=a(i)?void 0:i._$litDirective$;return h?.constructor!==o&&(h?._$AO?.(false),void 0===o?h=void 0:(h=new o(t),h._$AT(t,s,e)),void 0!==e?(s._$Co??=[])[e]=h:s._$Cl=h),void 0!==h&&(i=M(t,h._$AS(t,i.values),h,e)),i}class R{constructor(t,i){this._$AV=[],this._$AN=void 0,this._$AD=t,this._$AM=i;}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(t){const{el:{content:i},parts:s}=this._$AD,e=(t?.creationScope??l).importNode(i,true);P.currentNode=e;let h=P.nextNode(),o=0,n=0,r=s[0];for(;void 0!==r;){if(o===r.index){let i;2===r.type?i=new k(h,h.nextSibling,this,t):1===r.type?i=new r.ctor(h,r.name,r.strings,this,t):6===r.type&&(i=new Z(h,this,t)),this._$AV.push(i),r=s[++n];}o!==r?.index&&(h=P.nextNode(),o++);}return P.currentNode=l,e}p(t){let i=0;for(const s of this._$AV) void 0!==s&&(void 0!==s.strings?(s._$AI(t,s,i),i+=s.strings.length-2):s._$AI(t[i])),i++;}}class k{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(t,i,s,e){this.type=2,this._$AH=A,this._$AN=void 0,this._$AA=t,this._$AB=i,this._$AM=s,this.options=e,this._$Cv=e?.isConnected??true;}get parentNode(){let t=this._$AA.parentNode;const i=this._$AM;return void 0!==i&&11===t?.nodeType&&(t=i.parentNode),t}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(t,i=this){t=M(this,t,i),a(t)?t===A||null==t||""===t?(this._$AH!==A&&this._$AR(),this._$AH=A):t!==this._$AH&&t!==E&&this._(t):void 0!==t._$litType$?this.$(t):void 0!==t.nodeType?this.T(t):d(t)?this.k(t):this._(t);}O(t){return this._$AA.parentNode.insertBefore(t,this._$AB)}T(t){this._$AH!==t&&(this._$AR(),this._$AH=this.O(t));}_(t){this._$AH!==A&&a(this._$AH)?this._$AA.nextSibling.data=t:this.T(l.createTextNode(t)),this._$AH=t;}$(t){const{values:i,_$litType$:s}=t,e="number"==typeof s?this._$AC(t):(void 0===s.el&&(s.el=S.createElement(V(s.h,s.h[0]),this.options)),s);if(this._$AH?._$AD===e)this._$AH.p(i);else {const t=new R(e,this),s=t.u(this.options);t.p(i),this.T(s),this._$AH=t;}}_$AC(t){let i=C.get(t.strings);return void 0===i&&C.set(t.strings,i=new S(t)),i}k(t){u(this._$AH)||(this._$AH=[],this._$AR());const i=this._$AH;let s,e=0;for(const h of t)e===i.length?i.push(s=new k(this.O(c()),this.O(c()),this,this.options)):s=i[e],s._$AI(h),e++;e<i.length&&(this._$AR(s&&s._$AB.nextSibling,e),i.length=e);}_$AR(t=this._$AA.nextSibling,s){for(this._$AP?.(false,true,s);t!==this._$AB;){const s=i$1(t).nextSibling;i$1(t).remove(),t=s;}}setConnected(t){ void 0===this._$AM&&(this._$Cv=t,this._$AP?.(t));}}class H{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(t,i,s,e,h){this.type=1,this._$AH=A,this._$AN=void 0,this.element=t,this.name=i,this._$AM=e,this.options=h,s.length>2||""!==s[0]||""!==s[1]?(this._$AH=Array(s.length-1).fill(new String),this.strings=s):this._$AH=A;}_$AI(t,i=this,s,e){const h=this.strings;let o=false;if(void 0===h)t=M(this,t,i,0),o=!a(t)||t!==this._$AH&&t!==E,o&&(this._$AH=t);else {const e=t;let n,r;for(t=h[0],n=0;n<h.length-1;n++)r=M(this,e[s+n],i,n),r===E&&(r=this._$AH[n]),o||=!a(r)||r!==this._$AH[n],r===A?t=A:t!==A&&(t+=(r??"")+h[n+1]),this._$AH[n]=r;}o&&!e&&this.j(t);}j(t){t===A?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,t??"");}}class I extends H{constructor(){super(...arguments),this.type=3;}j(t){this.element[this.name]=t===A?void 0:t;}}class L extends H{constructor(){super(...arguments),this.type=4;}j(t){this.element.toggleAttribute(this.name,!!t&&t!==A);}}class z extends H{constructor(t,i,s,e,h){super(t,i,s,e,h),this.type=5;}_$AI(t,i=this){if((t=M(this,t,i,0)??A)===E)return;const s=this._$AH,e=t===A&&s!==A||t.capture!==s.capture||t.once!==s.once||t.passive!==s.passive,h=t!==A&&(s===A||e);e&&this.element.removeEventListener(this.name,this,s),h&&this.element.addEventListener(this.name,this,t),this._$AH=t;}handleEvent(t){"function"==typeof this._$AH?this._$AH.call(this.options?.host??this.element,t):this._$AH.handleEvent(t);}}class Z{constructor(t,i,s){this.element=t,this.type=6,this._$AN=void 0,this._$AM=i,this.options=s;}get _$AU(){return this._$AM._$AU}_$AI(t){M(this,t);}}const B=t$1.litHtmlPolyfillSupport;B?.(S,k),(t$1.litHtmlVersions??=[]).push("3.3.2");const D=(t,i,s)=>{const e=s?.renderBefore??i;let h=e._$litPart$;if(void 0===h){const t=s?.renderBefore??null;e._$litPart$=h=new k(i.insertBefore(c(),t),t,void 0,s??{});}return h._$AI(t),h};
+
 /**
  * @license
  * Copyright 2017 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
- */function ht(t){return(e,i)=>"object"==typeof i?pt(t,e,i):((t,e,i)=>{const s=e.hasOwnProperty(i);return e.constructor.createProperty(i,t),s?Object.getOwnPropertyDescriptor(e,i):void 0})(t,e,i)}
+ */const s=globalThis;class i extends y$1{constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0;}createRenderRoot(){const t=super.createRenderRoot();return this.renderOptions.renderBefore??=t.firstChild,t}update(t){const r=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(t),this._$Do=D(r,this.renderRoot,this.renderOptions);}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(true);}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(false);}render(){return E}}i._$litElement$=true,i["finalized"]=true,s.litElementHydrateSupport?.({LitElement:i});const o$1=s.litElementPolyfillSupport;o$1?.({LitElement:i});(s.litElementVersions??=[]).push("4.2.2");
+
 /**
  * @license
  * Copyright 2017 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
- */function ut(t){return ht({...t,state:!0,attribute:!1})}const bt=o`
+ */
+const t=t=>(e,o)=>{ void 0!==o?o.addInitializer(()=>{customElements.define(t,e);}):customElements.define(t,e);};
+
+/**
+ * @license
+ * Copyright 2017 Google LLC
+ * SPDX-License-Identifier: BSD-3-Clause
+ */const o={attribute:true,type:String,converter:u$1,reflect:false,hasChanged:f$1},r$1=(t=o,e,r)=>{const{kind:n,metadata:i}=r;let s=globalThis.litPropertyMetadata.get(i);if(void 0===s&&globalThis.litPropertyMetadata.set(i,s=new Map),"setter"===n&&((t=Object.create(t)).wrapped=true),s.set(r.name,t),"accessor"===n){const{name:o}=r;return {set(r){const n=e.get.call(this);e.set.call(this,r),this.requestUpdate(o,n,t,true,r);},init(e){return void 0!==e&&this.C(o,void 0,t,e),e}}}if("setter"===n){const{name:o}=r;return function(r){const n=this[o];e.call(this,r),this.requestUpdate(o,n,t,true,r);}}throw Error("Unsupported decorator location: "+n)};function n(t){return (e,o)=>"object"==typeof o?r$1(t,e,o):((t,e,o)=>{const r=e.hasOwnProperty(o);return e.constructor.createProperty(o,t),r?Object.getOwnPropertyDescriptor(e,o):void 0})(t,e,o)}
+
+/**
+ * @license
+ * Copyright 2017 Google LLC
+ * SPDX-License-Identifier: BSD-3-Clause
+ */function r(r){return n({...r,state:true,attribute:false})}
+
+const sharedStyles = i$3 `
   :host {
     --wc-primary: #722f37;
     --wc-primary-light: #9a4a54;
@@ -247,44 +283,115 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
     from { transform: translateY(20px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
   }
-`,gt={red:"#722F37",white:"#F5E6CA","rosé":"#E8A0BF",sparkling:"#D4E09B",dessert:"#DAA520"},vt={red:"Red",white:"White","rosé":"Rosé",sparkling:"Sparkling",dessert:"Dessert"};let mt=class extends nt{constructor(){super(...arguments),this.wines=[]}_getWineAt(t,e){return this.wines.find(i=>i.cabinet_id===this.cabinet.id&&i.row===t&&i.col===e)}_getBottomZoneWines(){return this.wines.filter(t=>t.cabinet_id===this.cabinet.id&&"bottom"===t.zone)}_onCellClick(t,e,i){this.dispatchEvent(new CustomEvent("cell-click",{detail:{cabinet:this.cabinet,row:t,col:e,wine:i},bubbles:!0,composed:!0}))}_onZoneClick(t){this.dispatchEvent(new CustomEvent("zone-click",{detail:{cabinet:this.cabinet,zone:"bottom",wine:t},bubbles:!0,composed:!0}))}render(){const{rows:t,cols:e}=this.cabinet;return L`
+`;
+
+const WINE_TYPE_COLORS = {
+    red: "#722F37",
+    white: "#F5E6CA",
+    rosé: "#E8A0BF",
+    sparkling: "#D4E09B",
+    dessert: "#DAA520",
+};
+const WINE_TYPE_LABELS = {
+    red: "Red",
+    white: "White",
+    rosé: "Rosé",
+    sparkling: "Sparkling",
+    dessert: "Dessert",
+};
+
+let CabinetGrid = class CabinetGrid extends i {
+    constructor() {
+        super(...arguments);
+        this.wines = [];
+    }
+    _getWineAt(row, col) {
+        return this.wines.find((w) => w.cabinet_id === this.cabinet.id && w.row === row && w.col === col);
+    }
+    _getBottomZoneWines() {
+        return this.wines.filter((w) => w.cabinet_id === this.cabinet.id && w.zone === "bottom");
+    }
+    _onCellClick(row, col, wine) {
+        this.dispatchEvent(new CustomEvent("cell-click", {
+            detail: {
+                cabinet: this.cabinet,
+                row,
+                col,
+                wine,
+            },
+            bubbles: true,
+            composed: true,
+        }));
+    }
+    _onZoneClick(wine) {
+        this.dispatchEvent(new CustomEvent("zone-click", {
+            detail: {
+                cabinet: this.cabinet,
+                zone: "bottom",
+                wine,
+            },
+            bubbles: true,
+            composed: true,
+        }));
+    }
+    render() {
+        const { rows, cols } = this.cabinet;
+        return b `
       <div class="cabinet">
         <div class="cabinet-name">${this.cabinet.name}</div>
         <div class="grid-inner">
-          ${Array.from({length:t},(t,i)=>L`
+          ${Array.from({ length: rows }, (_, row) => b `
             <div class="row">
-              ${Array.from({length:e},(t,e)=>{const s=this._getWineAt(i,e),a=s?gt[s.type]||gt.red:"transparent";return L`
+              ${Array.from({ length: cols }, (_, col) => {
+            const wine = this._getWineAt(row, col);
+            const bgColor = wine
+                ? WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red
+                : "transparent";
+            return b `
                   <div
-                    class="cell ${s?"filled":"empty"}"
-                    style=${s?`background: ${a}`:""}
-                    @click=${()=>this._onCellClick(i,e,s)}
-                    title=${s?`${s.name} (${s.vintage||"NV"})`:`Empty - Row ${i+1}, Col ${e+1}`}
+                    class="cell ${wine ? "filled" : "empty"}"
+                    style=${wine ? `background: ${bgColor}` : ""}
+                    @click=${() => this._onCellClick(row, col, wine)}
+                    title=${wine ? `${wine.name} (${wine.vintage || "NV"})` : `Empty - Row ${row + 1}, Col ${col + 1}`}
                   >
-                    ${s?L`<span class="bottle-label">${s.vintage||"NV"}</span>`:q}
+                    ${wine
+                ? b `<span class="bottle-label">${wine.vintage || "NV"}</span>`
+                : A}
                   </div>
-                `})}
+                `;
+        })}
             </div>
           `)}
         </div>
-        ${this.cabinet.has_bottom_zone?L`
-              <div class="bottom-zone" @click=${()=>this._onZoneClick()}>
+        ${this.cabinet.has_bottom_zone
+            ? b `
+              <div class="bottom-zone" @click=${() => this._onZoneClick()}>
                 <div class="bottom-zone-label">
                   ${this.cabinet.bottom_zone_name}
                 </div>
-                ${this._getBottomZoneWines().map(t=>L`
+                ${this._getBottomZoneWines().map((wine) => b `
                     <div
                       class="zone-bottle"
-                      style="background: ${gt[t.type]||gt.red}"
-                      @click=${e=>{e.stopPropagation(),this._onZoneClick(t)}}
-                      title="${t.name}"
+                      style="background: ${WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red}"
+                      @click=${(e) => {
+                e.stopPropagation();
+                this._onZoneClick(wine);
+            }}
+                      title="${wine.name}"
                     >
-                      ${(t.vintage||"NV").toString().slice(-2)}
+                      ${(wine.vintage || "NV").toString().slice(-2)}
                     </div>
                   `)}
               </div>
-            `:q}
+            `
+            : A}
       </div>
-    `}};mt.styles=[bt,o`
+    `;
+    }
+};
+CabinetGrid.styles = [
+    sharedStyles,
+    i$3 `
       :host {
         display: block;
       }
@@ -446,95 +553,165 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
       .zone-bottle:hover {
         transform: scale(1.1);
       }
-    `],t([ht({attribute:!1})],mt.prototype,"cabinet",void 0),t([ht({attribute:!1})],mt.prototype,"wines",void 0),mt=t([dt("cabinet-grid")],mt);let _t=class extends nt{constructor(){super(...arguments),this.wine=null,this.open=!1}_close(){this.open=!1,this.dispatchEvent(new CustomEvent("close"))}_onRemove(){this.wine&&(this.dispatchEvent(new CustomEvent("remove-wine",{detail:{wine_id:this.wine.id},bubbles:!0,composed:!0})),this._close())}_onMove(){this.wine&&(this.dispatchEvent(new CustomEvent("move-wine",{detail:{wine:this.wine},bubbles:!0,composed:!0})),this._close())}render(){if(!this.open||!this.wine)return q;const t=this.wine,e=gt[t.type]||gt.red,i=vt[t.type]||t.type;return L`
+    `,
+];
+__decorate([
+    n({ attribute: false })
+], CabinetGrid.prototype, "cabinet", void 0);
+__decorate([
+    n({ attribute: false })
+], CabinetGrid.prototype, "wines", void 0);
+CabinetGrid = __decorate([
+    t("cabinet-grid")
+], CabinetGrid);
+
+let WineDetailDialog = class WineDetailDialog extends i {
+    constructor() {
+        super(...arguments);
+        this.wine = null;
+        this.open = false;
+    }
+    _close() {
+        this.open = false;
+        this.dispatchEvent(new CustomEvent("close"));
+    }
+    _onRemove() {
+        if (this.wine) {
+            this.dispatchEvent(new CustomEvent("remove-wine", {
+                detail: { wine_id: this.wine.id },
+                bubbles: true,
+                composed: true,
+            }));
+            this._close();
+        }
+    }
+    _onMove() {
+        if (this.wine) {
+            this.dispatchEvent(new CustomEvent("move-wine", {
+                detail: { wine: this.wine },
+                bubbles: true,
+                composed: true,
+            }));
+            this._close();
+        }
+    }
+    render() {
+        if (!this.open || !this.wine)
+            return A;
+        const wine = this.wine;
+        const typeColor = WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red;
+        const typeLabel = WINE_TYPE_LABELS[wine.type] || wine.type;
+        return b `
       <div class="dialog-overlay" @click=${this._close}>
-        <div class="dialog" @click=${t=>t.stopPropagation()}>
+        <div class="dialog" @click=${(e) => e.stopPropagation()}>
           <div class="wine-header">
-            ${t.image_url?L`<img class="wine-image" src="${t.image_url}" alt="${t.name}" />`:L`
+            ${wine.image_url
+            ? b `<img class="wine-image" src="${wine.image_url}" alt="${wine.name}" />`
+            : b `
                   <div
                     class="wine-image-placeholder"
-                    style="background: ${e}"
+                    style="background: ${typeColor}"
                   >
                     🍷
                   </div>
                 `}
             <div class="wine-title">
-              <div class="wine-name">${t.name}</div>
-              <div class="wine-winery">${t.winery}</div>
+              <div class="wine-name">${wine.name}</div>
+              <div class="wine-winery">${wine.winery}</div>
               <span
                 class="wine-type-badge"
-                style="background: ${e}"
+                style="background: ${typeColor}"
               >
-                ${i}
+                ${typeLabel}
               </span>
-              ${t.rating?L`
+              ${wine.rating
+            ? b `
                     <div class="wine-rating">
                       <span class="rating-star">★</span>
-                      ${t.rating.toFixed(1)}
+                      ${wine.rating.toFixed(1)}
                     </div>
-                  `:q}
+                  `
+            : A}
             </div>
           </div>
 
           <div class="details-grid">
-            ${t.vintage?L`
+            ${wine.vintage
+            ? b `
                   <div class="detail-item">
                     <span class="detail-label">Vintage</span>
-                    <span class="detail-value">${t.vintage}</span>
+                    <span class="detail-value">${wine.vintage}</span>
                   </div>
-                `:q}
-            ${t.region?L`
+                `
+            : A}
+            ${wine.region
+            ? b `
                   <div class="detail-item">
                     <span class="detail-label">Region</span>
-                    <span class="detail-value">${t.region}</span>
+                    <span class="detail-value">${wine.region}</span>
                   </div>
-                `:q}
-            ${t.country?L`
+                `
+            : A}
+            ${wine.country
+            ? b `
                   <div class="detail-item">
                     <span class="detail-label">Country</span>
-                    <span class="detail-value">${t.country}</span>
+                    <span class="detail-value">${wine.country}</span>
                   </div>
-                `:q}
-            ${t.grape_variety?L`
+                `
+            : A}
+            ${wine.grape_variety
+            ? b `
                   <div class="detail-item">
                     <span class="detail-label">Grape</span>
-                    <span class="detail-value">${t.grape_variety}</span>
+                    <span class="detail-value">${wine.grape_variety}</span>
                   </div>
-                `:q}
-            ${t.price?L`
+                `
+            : A}
+            ${wine.price
+            ? b `
                   <div class="detail-item">
                     <span class="detail-label">Price</span>
-                    <span class="detail-value">$${t.price.toFixed(2)}</span>
+                    <span class="detail-value">$${wine.price.toFixed(2)}</span>
                   </div>
-                `:q}
-            ${t.purchase_date?L`
+                `
+            : A}
+            ${wine.purchase_date
+            ? b `
                   <div class="detail-item">
                     <span class="detail-label">Purchased</span>
-                    <span class="detail-value">${t.purchase_date}</span>
+                    <span class="detail-value">${wine.purchase_date}</span>
                   </div>
-                `:q}
-            ${t.drink_by?L`
+                `
+            : A}
+            ${wine.drink_by
+            ? b `
                   <div class="detail-item">
                     <span class="detail-label">Drink By</span>
-                    <span class="detail-value">${t.drink_by}</span>
+                    <span class="detail-value">${wine.drink_by}</span>
                   </div>
-                `:q}
-            ${t.barcode?L`
+                `
+            : A}
+            ${wine.barcode
+            ? b `
                   <div class="detail-item">
                     <span class="detail-label">Barcode</span>
-                    <span class="detail-value">${t.barcode}</span>
+                    <span class="detail-value">${wine.barcode}</span>
                   </div>
-                `:q}
+                `
+            : A}
           </div>
 
-          ${t.notes?L`
+          ${wine.notes
+            ? b `
                 <div class="wine-notes">
                   <div class="detail-label" style="margin-bottom: 4px">
                     Notes
                   </div>
-                  <div class="wine-notes-text">${t.notes}</div>
+                  <div class="wine-notes-text">${wine.notes}</div>
                 </div>
-              `:q}
+              `
+            : A}
 
           <div class="actions">
             <button class="btn btn-outline" @click=${this._onMove}>
@@ -554,7 +731,12 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
           </div>
         </div>
       </div>
-    `}};_t.styles=[bt,o`
+    `;
+    }
+};
+WineDetailDialog.styles = [
+    sharedStyles,
+    i$3 `
       .wine-header {
         display: flex;
         gap: 16px;
@@ -669,15 +851,170 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
         padding: 12px 20px 20px;
         border-top: 1px solid var(--wc-border);
       }
-    `],t([ht({attribute:!1})],_t.prototype,"wine",void 0),t([ht({type:Boolean})],_t.prototype,"open",void 0),_t=t([dt("wine-detail-dialog")],_t);let yt=class extends nt{constructor(){super(...arguments),this.open=!1,this.cabinets=[],this.preselectedCabinet="",this.preselectedRow=null,this.preselectedCol=null,this._step="scan",this._barcode="",this._loading=!1,this._lookupResult=null,this._wineData={},this._error="",this._steps=["scan","details","location","confirm"]}updated(t){t.has("open")&&this.open&&(this._step="scan",this._barcode="",this._lookupResult=null,this._error="",this._loading=!1,this._wineData={name:"",winery:"",type:"red",vintage:null,region:"",country:"",grape_variety:"",price:null,notes:"",cabinet_id:this.preselectedCabinet||"",row:this.preselectedRow,col:this.preselectedCol})}_close(){this.open=!1,this.dispatchEvent(new CustomEvent("close"))}async _lookupBarcode(){if(this._barcode.trim()){this._loading=!0,this._error="";try{const t=await this.hass.callWS({type:"wine_cellar/lookup_barcode",barcode:this._barcode.trim()});t.result?(this._lookupResult=t.result,this._wineData={...this._wineData,barcode:this._barcode.trim(),name:t.result.name||"",winery:t.result.winery||"",type:t.result.type||"red",vintage:t.result.vintage,region:t.result.region||"",country:t.result.country||"",grape_variety:t.result.grape_variety||"",rating:t.result.rating,image_url:t.result.image_url||""},this._step="details"):(this._error="No results found. You can enter details manually.",this._wineData={...this._wineData,barcode:this._barcode.trim()})}catch(t){this._error="Lookup failed. You can enter details manually."}this._loading=!1}}async _searchWine(){const t=this.shadowRoot?.querySelector(".search-input");if(t?.value.trim()){this._loading=!0,this._error="";try{const e=await this.hass.callWS({type:"wine_cellar/search_wine",query:t.value.trim()});if(e.results&&e.results.length>0){const t=e.results[0];this._lookupResult=t,this._wineData={...this._wineData,name:t.name||"",winery:t.winery||"",type:t.type||"red",vintage:t.vintage,region:t.region||"",country:t.country||"",grape_variety:t.grape_variety||"",rating:t.rating,image_url:t.image_url||""},this._step="details"}else this._error="No results found. You can enter details manually."}catch{this._error="Search failed. You can enter details manually."}this._loading=!1}}_goToStep(t){this._step=t}_updateField(t,e){this._wineData={...this._wineData,[t]:e}}async _addWine(){this._loading=!0;try{await this.hass.callWS({type:"wine_cellar/add_wine",wine:this._wineData}),this.dispatchEvent(new CustomEvent("wine-added",{bubbles:!0,composed:!0})),this._close()}catch(t){this._error="Failed to add wine."}this._loading=!1}_renderStepIndicator(){const t=this._steps.indexOf(this._step);return L`
+    `,
+];
+__decorate([
+    n({ attribute: false })
+], WineDetailDialog.prototype, "wine", void 0);
+__decorate([
+    n({ type: Boolean })
+], WineDetailDialog.prototype, "open", void 0);
+WineDetailDialog = __decorate([
+    t("wine-detail-dialog")
+], WineDetailDialog);
+
+let AddWineDialog = class AddWineDialog extends i {
+    constructor() {
+        super(...arguments);
+        this.open = false;
+        this.cabinets = [];
+        this.preselectedCabinet = "";
+        this.preselectedRow = null;
+        this.preselectedCol = null;
+        this._step = "scan";
+        this._barcode = "";
+        this._loading = false;
+        this._lookupResult = null;
+        this._wineData = {};
+        this._error = "";
+        this._steps = ["scan", "details", "location", "confirm"];
+    }
+    updated(changedProps) {
+        if (changedProps.has("open") && this.open) {
+            this._step = "scan";
+            this._barcode = "";
+            this._lookupResult = null;
+            this._error = "";
+            this._loading = false;
+            this._wineData = {
+                name: "",
+                winery: "",
+                type: "red",
+                vintage: null,
+                region: "",
+                country: "",
+                grape_variety: "",
+                price: null,
+                notes: "",
+                cabinet_id: this.preselectedCabinet || "",
+                row: this.preselectedRow,
+                col: this.preselectedCol,
+            };
+        }
+    }
+    _close() {
+        this.open = false;
+        this.dispatchEvent(new CustomEvent("close"));
+    }
+    async _lookupBarcode() {
+        if (!this._barcode.trim())
+            return;
+        this._loading = true;
+        this._error = "";
+        try {
+            const result = await this.hass.callWS({
+                type: "wine_cellar/lookup_barcode",
+                barcode: this._barcode.trim(),
+            });
+            if (result.result) {
+                this._lookupResult = result.result;
+                this._wineData = {
+                    ...this._wineData,
+                    barcode: this._barcode.trim(),
+                    name: result.result.name || "",
+                    winery: result.result.winery || "",
+                    type: result.result.type || "red",
+                    vintage: result.result.vintage,
+                    region: result.result.region || "",
+                    country: result.result.country || "",
+                    grape_variety: result.result.grape_variety || "",
+                    rating: result.result.rating,
+                    image_url: result.result.image_url || "",
+                };
+                this._step = "details";
+            }
+            else {
+                this._error = "No results found. You can enter details manually.";
+                this._wineData = { ...this._wineData, barcode: this._barcode.trim() };
+            }
+        }
+        catch (err) {
+            this._error = "Lookup failed. You can enter details manually.";
+        }
+        this._loading = false;
+    }
+    async _searchWine() {
+        const input = this.shadowRoot?.querySelector(".search-input");
+        if (!input?.value.trim())
+            return;
+        this._loading = true;
+        this._error = "";
+        try {
+            const result = await this.hass.callWS({
+                type: "wine_cellar/search_wine",
+                query: input.value.trim(),
+            });
+            if (result.results && result.results.length > 0) {
+                const first = result.results[0];
+                this._lookupResult = first;
+                this._wineData = {
+                    ...this._wineData,
+                    name: first.name || "",
+                    winery: first.winery || "",
+                    type: first.type || "red",
+                    vintage: first.vintage,
+                    region: first.region || "",
+                    country: first.country || "",
+                    grape_variety: first.grape_variety || "",
+                    rating: first.rating,
+                    image_url: first.image_url || "",
+                };
+                this._step = "details";
+            }
+            else {
+                this._error = "No results found. You can enter details manually.";
+            }
+        }
+        catch {
+            this._error = "Search failed. You can enter details manually.";
+        }
+        this._loading = false;
+    }
+    _goToStep(step) {
+        this._step = step;
+    }
+    _updateField(field, value) {
+        this._wineData = { ...this._wineData, [field]: value };
+    }
+    async _addWine() {
+        this._loading = true;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/add_wine",
+                wine: this._wineData,
+            });
+            this.dispatchEvent(new CustomEvent("wine-added", { bubbles: true, composed: true }));
+            this._close();
+        }
+        catch (err) {
+            this._error = "Failed to add wine.";
+        }
+        this._loading = false;
+    }
+    _renderStepIndicator() {
+        const currentIdx = this._steps.indexOf(this._step);
+        return b `
       <div class="step-indicator">
-        ${this._steps.map((e,i)=>L`
+        ${this._steps.map((s, i) => b `
             <div
-              class="step-dot ${i===t?"active":""} ${i<t?"done":""}"
+              class="step-dot ${i === currentIdx ? "active" : ""} ${i < currentIdx ? "done" : ""}"
             ></div>
           `)}
       </div>
-    `}_renderScanStep(){return L`
+    `;
+    }
+    _renderScanStep() {
+        return b `
       <div class="scan-section">
         <div style="font-size: 2.5em; margin-bottom: 8px">📷</div>
         <div style="font-weight: 500; margin-bottom: 4px">Scan or Enter Barcode</div>
@@ -690,23 +1027,29 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
             type="text"
             placeholder="Enter barcode..."
             .value=${this._barcode}
-            @input=${t=>this._barcode=t.target.value}
-            @keypress=${t=>"Enter"===t.key&&this._lookupBarcode()}
+            @input=${(e) => (this._barcode = e.target.value)}
+            @keypress=${(e) => e.key === "Enter" && this._lookupBarcode()}
           />
           <button class="btn btn-primary" @click=${this._lookupBarcode}>
-            ${this._loading?L`<span class="loading-spinner"></span>`:"Look Up"}
+            ${this._loading
+            ? b `<span class="loading-spinner"></span>`
+            : "Look Up"}
           </button>
         </div>
 
-        ${this._lookupResult?L`
+        ${this._lookupResult
+            ? b `
               <div class="lookup-result">
                 <div class="result-name">${this._lookupResult.name}</div>
                 <div class="result-detail">
                   ${this._lookupResult.winery}
-                  ${this._lookupResult.vintage?` · ${this._lookupResult.vintage}`:""}
+                  ${this._lookupResult.vintage
+                ? ` · ${this._lookupResult.vintage}`
+                : ""}
                 </div>
               </div>
-            `:q}
+            `
+            : A}
 
         <div class="or-divider">or search by name</div>
 
@@ -715,33 +1058,38 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
             class="search-input"
             type="text"
             placeholder="Search wine name..."
-            @keypress=${t=>"Enter"===t.key&&this._searchWine()}
+            @keypress=${(e) => e.key === "Enter" && this._searchWine()}
           />
           <button class="btn btn-outline" @click=${this._searchWine}>
             Search
           </button>
         </div>
 
-        ${this._error?L`<div class="error-msg">${this._error}</div>`:q}
+        ${this._error
+            ? b `<div class="error-msg">${this._error}</div>`
+            : A}
       </div>
 
       <div class="dialog-footer">
         <button class="btn btn-outline" @click=${this._close}>Cancel</button>
         <button
           class="btn btn-outline"
-          @click=${()=>this._goToStep("details")}
+          @click=${() => this._goToStep("details")}
         >
           Skip → Manual Entry
         </button>
       </div>
-    `}_renderDetailsStep(){return L`
+    `;
+    }
+    _renderDetailsStep() {
+        return b `
       <div class="dialog-body">
         <div class="form-group">
           <label>Wine Name *</label>
           <input
             type="text"
-            .value=${this._wineData.name||""}
-            @input=${t=>this._updateField("name",t.target.value)}
+            .value=${this._wineData.name || ""}
+            @input=${(e) => this._updateField("name", e.target.value)}
           />
         </div>
 
@@ -750,16 +1098,16 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
             <label>Winery</label>
             <input
               type="text"
-              .value=${this._wineData.winery||""}
-              @input=${t=>this._updateField("winery",t.target.value)}
+              .value=${this._wineData.winery || ""}
+              @input=${(e) => this._updateField("winery", e.target.value)}
             />
           </div>
           <div class="form-group">
             <label>Vintage</label>
             <input
               type="number"
-              .value=${this._wineData.vintage?.toString()||""}
-              @input=${t=>this._updateField("vintage",parseInt(t.target.value)||null)}
+              .value=${this._wineData.vintage?.toString() || ""}
+              @input=${(e) => this._updateField("vintage", parseInt(e.target.value) || null)}
             />
           </div>
         </div>
@@ -768,10 +1116,10 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
           <div class="form-group">
             <label>Type</label>
             <select
-              .value=${this._wineData.type||"red"}
-              @change=${t=>this._updateField("type",t.target.value)}
+              .value=${this._wineData.type || "red"}
+              @change=${(e) => this._updateField("type", e.target.value)}
             >
-              ${Object.entries(vt).map(([t,e])=>L`<option value=${t}>${e}</option>`)}
+              ${Object.entries(WINE_TYPE_LABELS).map(([value, label]) => b `<option value=${value}>${label}</option>`)}
             </select>
           </div>
           <div class="form-group">
@@ -779,8 +1127,8 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
             <input
               type="number"
               step="0.01"
-              .value=${this._wineData.price?.toString()||""}
-              @input=${t=>this._updateField("price",parseFloat(t.target.value)||null)}
+              .value=${this._wineData.price?.toString() || ""}
+              @input=${(e) => this._updateField("price", parseFloat(e.target.value) || null)}
             />
           </div>
         </div>
@@ -790,16 +1138,16 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
             <label>Region</label>
             <input
               type="text"
-              .value=${this._wineData.region||""}
-              @input=${t=>this._updateField("region",t.target.value)}
+              .value=${this._wineData.region || ""}
+              @input=${(e) => this._updateField("region", e.target.value)}
             />
           </div>
           <div class="form-group">
             <label>Country</label>
             <input
               type="text"
-              .value=${this._wineData.country||""}
-              @input=${t=>this._updateField("country",t.target.value)}
+              .value=${this._wineData.country || ""}
+              @input=${(e) => this._updateField("country", e.target.value)}
             />
           </div>
         </div>
@@ -808,8 +1156,8 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
           <label>Grape Variety</label>
           <input
             type="text"
-            .value=${this._wineData.grape_variety||""}
-            @input=${t=>this._updateField("grape_variety",t.target.value)}
+            .value=${this._wineData.grape_variety || ""}
+            @input=${(e) => this._updateField("grape_variety", e.target.value)}
           />
         </div>
 
@@ -818,8 +1166,8 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
             <label>Purchase Date</label>
             <input
               type="date"
-              .value=${this._wineData.purchase_date||""}
-              @input=${t=>this._updateField("purchase_date",t.target.value)}
+              .value=${this._wineData.purchase_date || ""}
+              @input=${(e) => this._updateField("purchase_date", e.target.value)}
             />
           </div>
           <div class="form-group">
@@ -827,8 +1175,8 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
             <input
               type="text"
               placeholder="e.g. 2030"
-              .value=${this._wineData.drink_by||""}
-              @input=${t=>this._updateField("drink_by",t.target.value)}
+              .value=${this._wineData.drink_by || ""}
+              @input=${(e) => this._updateField("drink_by", e.target.value)}
             />
           </div>
         </div>
@@ -836,25 +1184,28 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
         <div class="form-group">
           <label>Notes</label>
           <textarea
-            .value=${this._wineData.notes||""}
-            @input=${t=>this._updateField("notes",t.target.value)}
+            .value=${this._wineData.notes || ""}
+            @input=${(e) => this._updateField("notes", e.target.value)}
           ></textarea>
         </div>
       </div>
 
       <div class="dialog-footer">
-        <button class="btn btn-outline" @click=${()=>this._goToStep("scan")}>
+        <button class="btn btn-outline" @click=${() => this._goToStep("scan")}>
           ← Back
         </button>
         <button
           class="btn btn-primary"
-          @click=${()=>this._goToStep("location")}
+          @click=${() => this._goToStep("location")}
           ?disabled=${!this._wineData.name}
         >
           Next →
         </button>
       </div>
-    `}_renderLocationStep(){return L`
+    `;
+    }
+    _renderLocationStep() {
+        return b `
       <div class="dialog-body">
         <div style="font-weight: 500; margin-bottom: 8px">Choose Location</div>
         <div
@@ -864,26 +1215,27 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
         </div>
 
         <div class="location-grid">
-          ${this.cabinets.map(t=>L`
+          ${this.cabinets.map((cab) => b `
               <div
-                class="location-cabinet ${this._wineData.cabinet_id===t.id?"selected":""}"
-                @click=${()=>this._updateField("cabinet_id",t.id)}
+                class="location-cabinet ${this._wineData.cabinet_id === cab.id ? "selected" : ""}"
+                @click=${() => this._updateField("cabinet_id", cab.id)}
               >
-                <div class="cab-name">${t.name}</div>
-                <div class="cab-info">${t.rows}×${t.cols} slots</div>
+                <div class="cab-name">${cab.name}</div>
+                <div class="cab-info">${cab.rows}×${cab.cols} slots</div>
               </div>
             `)}
         </div>
 
-        ${this._wineData.cabinet_id?L`
+        ${this._wineData.cabinet_id
+            ? b `
               <div class="pos-inputs">
                 <div class="form-group">
                   <label>Row (1-based)</label>
                   <input
                     type="number"
                     min="1"
-                    .value=${null!=this._wineData.row?(this._wineData.row+1).toString():""}
-                    @input=${t=>this._updateField("row",parseInt(t.target.value)-1)}
+                    .value=${this._wineData.row != null ? (this._wineData.row + 1).toString() : ""}
+                    @input=${(e) => this._updateField("row", parseInt(e.target.value) - 1)}
                   />
                 </div>
                 <div class="form-group">
@@ -891,29 +1243,38 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
                   <input
                     type="number"
                     min="1"
-                    .value=${null!=this._wineData.col?(this._wineData.col+1).toString():""}
-                    @input=${t=>this._updateField("col",parseInt(t.target.value)-1)}
+                    .value=${this._wineData.col != null ? (this._wineData.col + 1).toString() : ""}
+                    @input=${(e) => this._updateField("col", parseInt(e.target.value) - 1)}
                   />
                 </div>
               </div>
-            `:q}
+            `
+            : A}
       </div>
 
       <div class="dialog-footer">
         <button
           class="btn btn-outline"
-          @click=${()=>this._goToStep("details")}
+          @click=${() => this._goToStep("details")}
         >
           ← Back
         </button>
         <button
           class="btn btn-primary"
-          @click=${()=>this._goToStep("confirm")}
+          @click=${() => this._goToStep("confirm")}
         >
           Next →
         </button>
       </div>
-    `}_renderConfirmStep(){const t=this.cabinets.find(t=>t.id===this._wineData.cabinet_id)?.name||"Unassigned",e=null!=this._wineData.row&&null!=this._wineData.col?`Row ${(this._wineData.row??0)+1}, Col ${(this._wineData.col??0)+1}`:"Not specified";return L`
+    `;
+    }
+    _renderConfirmStep() {
+        const cabinetName = this.cabinets.find((c) => c.id === this._wineData.cabinet_id)?.name ||
+            "Unassigned";
+        const posLabel = this._wineData.row != null && this._wineData.col != null
+            ? `Row ${(this._wineData.row ?? 0) + 1}, Col ${(this._wineData.col ?? 0) + 1}`
+            : "Not specified";
+        return b `
       <div class="dialog-body">
         <div style="font-weight: 500; margin-bottom: 12px">Confirm & Add</div>
 
@@ -922,60 +1283,78 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
             <span class="summary-label">Name</span>
             <span class="summary-value">${this._wineData.name}</span>
           </div>
-          ${this._wineData.winery?L`
+          ${this._wineData.winery
+            ? b `
                 <div class="summary-row">
                   <span class="summary-label">Winery</span>
                   <span class="summary-value">${this._wineData.winery}</span>
                 </div>
-              `:q}
-          ${this._wineData.vintage?L`
+              `
+            : A}
+          ${this._wineData.vintage
+            ? b `
                 <div class="summary-row">
                   <span class="summary-label">Vintage</span>
                   <span class="summary-value">${this._wineData.vintage}</span>
                 </div>
-              `:q}
+              `
+            : A}
           <div class="summary-row">
             <span class="summary-label">Type</span>
             <span class="summary-value">
-              ${vt[this._wineData.type||"red"]}
+              ${WINE_TYPE_LABELS[this._wineData.type || "red"]}
             </span>
           </div>
           <div class="summary-row">
             <span class="summary-label">Cabinet</span>
-            <span class="summary-value">${t}</span>
+            <span class="summary-value">${cabinetName}</span>
           </div>
           <div class="summary-row">
             <span class="summary-label">Position</span>
-            <span class="summary-value">${e}</span>
+            <span class="summary-value">${posLabel}</span>
           </div>
         </div>
 
-        ${this._error?L`<div class="error-msg">${this._error}</div>`:q}
+        ${this._error
+            ? b `<div class="error-msg">${this._error}</div>`
+            : A}
       </div>
 
       <div class="dialog-footer">
         <button
           class="btn btn-outline"
-          @click=${()=>this._goToStep("location")}
+          @click=${() => this._goToStep("location")}
         >
           ← Back
         </button>
         <button class="btn btn-primary" @click=${this._addWine}>
-          ${this._loading?L`<span class="loading-spinner"></span>`:"Add Wine"}
+          ${this._loading
+            ? b `<span class="loading-spinner"></span>`
+            : "Add Wine"}
         </button>
       </div>
-    `}render(){return this.open?L`
+    `;
+    }
+    render() {
+        if (!this.open)
+            return A;
+        return b `
       <div class="dialog-overlay" @click=${this._close}>
-        <div class="dialog" @click=${t=>t.stopPropagation()}>
+        <div class="dialog" @click=${(e) => e.stopPropagation()}>
           <div class="dialog-header">Add Wine</div>
           ${this._renderStepIndicator()}
-          ${"scan"===this._step?this._renderScanStep():q}
-          ${"details"===this._step?this._renderDetailsStep():q}
-          ${"location"===this._step?this._renderLocationStep():q}
-          ${"confirm"===this._step?this._renderConfirmStep():q}
+          ${this._step === "scan" ? this._renderScanStep() : A}
+          ${this._step === "details" ? this._renderDetailsStep() : A}
+          ${this._step === "location" ? this._renderLocationStep() : A}
+          ${this._step === "confirm" ? this._renderConfirmStep() : A}
         </div>
       </div>
-    `:q}};yt.styles=[bt,o`
+    `;
+    }
+};
+AddWineDialog.styles = [
+    sharedStyles,
+    i$3 `
       .step-indicator {
         display: flex;
         justify-content: center;
@@ -1165,7 +1544,81 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
       .confirm-summary .summary-value {
         font-weight: 500;
       }
-    `],t([ht({type:Boolean})],yt.prototype,"open",void 0),t([ht({attribute:!1})],yt.prototype,"hass",void 0),t([ht({attribute:!1})],yt.prototype,"cabinets",void 0),t([ht({attribute:!1})],yt.prototype,"preselectedCabinet",void 0),t([ht({attribute:!1})],yt.prototype,"preselectedRow",void 0),t([ht({attribute:!1})],yt.prototype,"preselectedCol",void 0),t([ut()],yt.prototype,"_step",void 0),t([ut()],yt.prototype,"_barcode",void 0),t([ut()],yt.prototype,"_loading",void 0),t([ut()],yt.prototype,"_lookupResult",void 0),t([ut()],yt.prototype,"_wineData",void 0),t([ut()],yt.prototype,"_error",void 0),yt=t([dt("add-wine-dialog")],yt);let wt=class extends nt{constructor(){super(...arguments),this.value="",this._filter="all"}_onInput(t){const e=t.target.value;this.dispatchEvent(new CustomEvent("search-change",{detail:{query:e,filter:this._filter},bubbles:!0,composed:!0}))}_onFilterChange(t){this._filter=t;const e=this.shadowRoot?.querySelector("input");this.dispatchEvent(new CustomEvent("search-change",{detail:{query:e?.value||"",filter:t},bubbles:!0,composed:!0}))}render(){return L`
+    `,
+];
+__decorate([
+    n({ type: Boolean })
+], AddWineDialog.prototype, "open", void 0);
+__decorate([
+    n({ attribute: false })
+], AddWineDialog.prototype, "hass", void 0);
+__decorate([
+    n({ attribute: false })
+], AddWineDialog.prototype, "cabinets", void 0);
+__decorate([
+    n({ attribute: false })
+], AddWineDialog.prototype, "preselectedCabinet", void 0);
+__decorate([
+    n({ attribute: false })
+], AddWineDialog.prototype, "preselectedRow", void 0);
+__decorate([
+    n({ attribute: false })
+], AddWineDialog.prototype, "preselectedCol", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_step", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_barcode", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_loading", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_lookupResult", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_wineData", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_error", void 0);
+AddWineDialog = __decorate([
+    t("add-wine-dialog")
+], AddWineDialog);
+
+let WineSearchBar = class WineSearchBar extends i {
+    constructor() {
+        super(...arguments);
+        this.value = "";
+        this._filter = "all";
+    }
+    _onInput(e) {
+        const value = e.target.value;
+        this.dispatchEvent(new CustomEvent("search-change", {
+            detail: { query: value, filter: this._filter },
+            bubbles: true,
+            composed: true,
+        }));
+    }
+    _onFilterChange(filter) {
+        this._filter = filter;
+        const input = this.shadowRoot?.querySelector("input");
+        this.dispatchEvent(new CustomEvent("search-change", {
+            detail: { query: input?.value || "", filter },
+            bubbles: true,
+            composed: true,
+        }));
+    }
+    render() {
+        const filters = [
+            { id: "all", label: "All" },
+            { id: "red", label: "Red" },
+            { id: "white", label: "White" },
+            { id: "rosé", label: "Rosé" },
+            { id: "sparkling", label: "Sparkling" },
+            { id: "dessert", label: "Dessert" },
+        ];
+        return b `
       <div class="search-container">
         <div class="search-input-wrapper">
           <span class="search-icon">🔍</span>
@@ -1177,17 +1630,22 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
           />
         </div>
         <div class="filter-chips">
-          ${[{id:"all",label:"All"},{id:"red",label:"Red"},{id:"white",label:"White"},{id:"rosé",label:"Rosé"},{id:"sparkling",label:"Sparkling"},{id:"dessert",label:"Dessert"}].map(t=>L`
+          ${filters.map((f) => b `
               <button
-                class="chip ${this._filter===t.id?"active":""}"
-                @click=${()=>this._onFilterChange(t.id)}
+                class="chip ${this._filter === f.id ? "active" : ""}"
+                @click=${() => this._onFilterChange(f.id)}
               >
-                ${t.label}
+                ${f.label}
               </button>
             `)}
         </div>
       </div>
-    `}};wt.styles=[bt,o`
+    `;
+    }
+};
+WineSearchBar.styles = [
+    sharedStyles,
+    i$3 `
       :host {
         display: block;
       }
@@ -1257,21 +1715,160 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
         color: #fff;
         border-color: var(--wc-primary);
       }
-    `],t([ht({type:String})],wt.prototype,"value",void 0),t([ut()],wt.prototype,"_filter",void 0),wt=t([dt("wine-search-bar")],wt);let ft=class extends nt{constructor(){super(...arguments),this._wines=[],this._cabinets=[],this._stats=null,this._activeTab="all",this._searchQuery="",this._searchFilter="all",this._selectedWine=null,this._showDetail=!1,this._showAddDialog=!1,this._addPreselect={cabinet:"",row:null,col:null},this._loading=!0}setConfig(t){this._config=t}static getConfigElement(){return document.createElement("wine-cellar-card-editor")}static getStubConfig(){return{type:"custom:wine-cellar-card"}}connectedCallback(){super.connectedCallback(),this._loadData()}updated(t){t.has("hass")&&this.hass}async _loadData(){if(this.hass){this._loading=!0;try{const[t,e,i]=await Promise.all([this.hass.callWS({type:"wine_cellar/get_wines"}),this.hass.callWS({type:"wine_cellar/get_cabinets"}),this.hass.callWS({type:"wine_cellar/get_stats"})]);this._wines=t.wines||[],this._cabinets=(e.cabinets||[]).sort((t,e)=>t.order-e.order),this._stats=i}catch(t){console.error("Wine Cellar: Failed to load data",t)}this._loading=!1}else setTimeout(()=>this._loadData(),500)}_getFilteredWines(){let t=[...this._wines];if("all"!==this._activeTab&&(t=t.filter(t=>t.cabinet_id===this._activeTab)),"all"!==this._searchFilter&&(t=t.filter(t=>t.type===this._searchFilter)),this._searchQuery){const e=this._searchQuery.toLowerCase();t=t.filter(t=>t.name.toLowerCase().includes(e)||t.winery.toLowerCase().includes(e)||t.region.toLowerCase().includes(e)||t.grape_variety.toLowerCase().includes(e))}return t}_onCellClick(t){const{wine:e,cabinet:i,row:s,col:a}=t.detail;e?(this._selectedWine=e,this._showDetail=!0):(this._addPreselect={cabinet:i.id,row:s,col:a},this._showAddDialog=!0)}_onZoneClick(t){const{wine:e,cabinet:i}=t.detail;e?(this._selectedWine=e,this._showDetail=!0):(this._addPreselect={cabinet:i.id,row:null,col:null},this._showAddDialog=!0)}async _onRemoveWine(t){try{await this.hass.callWS({type:"wine_cellar/remove_wine",wine_id:t.detail.wine_id}),await this._loadData()}catch(t){console.error("Failed to remove wine",t)}}async _onWineAdded(){await this._loadData()}_onSearch(t){this._searchQuery=t.detail.query,this._searchFilter=t.detail.filter}_getCabinetWines(t){return this._wines.filter(e=>e.cabinet_id===t)}render(){if(this._loading)return L`
+    `,
+];
+__decorate([
+    n({ type: String })
+], WineSearchBar.prototype, "value", void 0);
+__decorate([
+    r()
+], WineSearchBar.prototype, "_filter", void 0);
+WineSearchBar = __decorate([
+    t("wine-search-bar")
+], WineSearchBar);
+
+let WineCellarCard = class WineCellarCard extends i {
+    constructor() {
+        super(...arguments);
+        this._wines = [];
+        this._cabinets = [];
+        this._stats = null;
+        this._activeTab = "all";
+        this._searchQuery = "";
+        this._searchFilter = "all";
+        this._selectedWine = null;
+        this._showDetail = false;
+        this._showAddDialog = false;
+        this._addPreselect = { cabinet: "", row: null, col: null };
+        this._loading = true;
+    }
+    setConfig(config) {
+        this._config = config;
+    }
+    static getConfigElement() {
+        return document.createElement("wine-cellar-card-editor");
+    }
+    static getStubConfig() {
+        return { type: "custom:wine-cellar-card" };
+    }
+    connectedCallback() {
+        super.connectedCallback();
+        this._loadData();
+    }
+    updated(changedProps) {
+        if (changedProps.has("hass") && this.hass) ;
+    }
+    async _loadData() {
+        if (!this.hass) {
+            // Retry after hass is set
+            setTimeout(() => this._loadData(), 500);
+            return;
+        }
+        this._loading = true;
+        try {
+            const [winesResult, cabinetsResult, statsResult] = await Promise.all([
+                this.hass.callWS({ type: "wine_cellar/get_wines" }),
+                this.hass.callWS({ type: "wine_cellar/get_cabinets" }),
+                this.hass.callWS({ type: "wine_cellar/get_stats" }),
+            ]);
+            this._wines = winesResult.wines || [];
+            this._cabinets = (cabinetsResult.cabinets || []).sort((a, b) => a.order - b.order);
+            this._stats = statsResult;
+        }
+        catch (err) {
+            console.error("Wine Cellar: Failed to load data", err);
+        }
+        this._loading = false;
+    }
+    _getFilteredWines() {
+        let wines = [...this._wines];
+        // Filter by active tab (cabinet)
+        if (this._activeTab !== "all") {
+            wines = wines.filter((w) => w.cabinet_id === this._activeTab);
+        }
+        // Filter by wine type
+        if (this._searchFilter !== "all") {
+            wines = wines.filter((w) => w.type === this._searchFilter);
+        }
+        // Filter by search query
+        if (this._searchQuery) {
+            const q = this._searchQuery.toLowerCase();
+            wines = wines.filter((w) => w.name.toLowerCase().includes(q) ||
+                w.winery.toLowerCase().includes(q) ||
+                w.region.toLowerCase().includes(q) ||
+                w.grape_variety.toLowerCase().includes(q));
+        }
+        return wines;
+    }
+    _onCellClick(e) {
+        const { wine, cabinet, row, col } = e.detail;
+        if (wine) {
+            this._selectedWine = wine;
+            this._showDetail = true;
+        }
+        else {
+            this._addPreselect = { cabinet: cabinet.id, row, col };
+            this._showAddDialog = true;
+        }
+    }
+    _onZoneClick(e) {
+        const { wine, cabinet } = e.detail;
+        if (wine) {
+            this._selectedWine = wine;
+            this._showDetail = true;
+        }
+        else {
+            this._addPreselect = { cabinet: cabinet.id, row: null, col: null };
+            this._showAddDialog = true;
+        }
+    }
+    async _onRemoveWine(e) {
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/remove_wine",
+                wine_id: e.detail.wine_id,
+            });
+            await this._loadData();
+        }
+        catch (err) {
+            console.error("Failed to remove wine", err);
+        }
+    }
+    async _onWineAdded() {
+        await this._loadData();
+    }
+    _onSearch(e) {
+        this._searchQuery = e.detail.query;
+        this._searchFilter = e.detail.filter;
+    }
+    _getCabinetWines(cabinetId) {
+        return this._wines.filter((w) => w.cabinet_id === cabinetId);
+    }
+    render() {
+        if (this._loading) {
+            return b `
         <ha-card>
           <div class="loading">Loading wine cellar...</div>
         </ha-card>
-      `;const t=this._config?.title||"Wine Cellar",e=this._getFilteredWines(),i="all"===this._activeTab||this._cabinets.some(t=>t.id===this._activeTab);return L`
+      `;
+        }
+        const title = this._config?.title || "Wine Cellar";
+        const filteredWines = this._getFilteredWines();
+        const showGrid = this._activeTab === "all" || this._cabinets.some((c) => c.id === this._activeTab);
+        return b `
       <ha-card>
         <div class="header-row">
           <div class="title">
             <span class="title-icon">🍷</span>
-            ${t}
+            ${title}
           </div>
           <div class="header-actions">
             <button
               class="btn btn-primary"
-              @click=${()=>{this._addPreselect={cabinet:"",row:null,col:null},this._showAddDialog=!0}}
+              @click=${() => {
+            this._addPreselect = { cabinet: "", row: null, col: null };
+            this._showAddDialog = true;
+        }}
             >
               + Add Wine
             </button>
@@ -1279,7 +1876,8 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
         </div>
 
         <!-- Stats bar -->
-        ${this._stats?L`
+        ${this._stats
+            ? b `
               <div class="stats-bar">
                 <div class="stat">
                   <span class="stat-value">${this._stats.total_bottles}</span>
@@ -1294,23 +1892,24 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
                   available
                 </div>
               </div>
-            `:q}
+            `
+            : A}
 
         <!-- Tab bar -->
         <div class="tab-bar">
           <button
-            class="tab ${"all"===this._activeTab?"active":""}"
-            @click=${()=>this._activeTab="all"}
+            class="tab ${this._activeTab === "all" ? "active" : ""}"
+            @click=${() => (this._activeTab = "all")}
           >
             All Sections
           </button>
-          ${this._cabinets.map(t=>L`
+          ${this._cabinets.map((cab) => b `
               <button
-                class="tab ${this._activeTab===t.id?"active":""}"
-                @click=${()=>this._activeTab=t.id}
+                class="tab ${this._activeTab === cab.id ? "active" : ""}"
+                @click=${() => (this._activeTab = cab.id)}
               >
-                ${t.name}
-                (${this._getCabinetWines(t.id).length})
+                ${cab.name}
+                (${this._getCabinetWines(cab.id).length})
               </button>
             `)}
         </div>
@@ -1319,56 +1918,82 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
         <wine-search-bar @search-change=${this._onSearch}></wine-search-bar>
 
         <!-- Cabinet grids -->
-        ${i?L`
+        ${showGrid
+            ? b `
               <div class="cabinets-row">
-                ${"all"===this._activeTab?this._cabinets.map(t=>L`
+                ${this._activeTab === "all"
+                ? this._cabinets.map((cab) => b `
                         <cabinet-grid
-                          .cabinet=${t}
-                          .wines=${this._getCabinetWines(t.id)}
+                          .cabinet=${cab}
+                          .wines=${this._getCabinetWines(cab.id)}
                           @cell-click=${this._onCellClick}
                           @zone-click=${this._onZoneClick}
                         ></cabinet-grid>
-                      `):this._cabinets.filter(t=>t.id===this._activeTab).map(t=>L`
+                      `)
+                : this._cabinets
+                    .filter((c) => c.id === this._activeTab)
+                    .map((cab) => b `
                           <cabinet-grid
-                            .cabinet=${t}
-                            .wines=${this._getCabinetWines(t.id)}
+                            .cabinet=${cab}
+                            .wines=${this._getCabinetWines(cab.id)}
                             @cell-click=${this._onCellClick}
                             @zone-click=${this._onZoneClick}
                           ></cabinet-grid>
                         `)}
               </div>
-            `:q}
+            `
+            : A}
 
         <!-- Filtered wine list (shown when searching) -->
-        ${this._searchQuery||"all"!==this._searchFilter?L`
+        ${this._searchQuery || this._searchFilter !== "all"
+            ? b `
               <div class="wine-list">
-                ${0===e.length?L`
+                ${filteredWines.length === 0
+                ? b `
                       <div class="empty-state">
                         <div>No wines match your search</div>
                       </div>
-                    `:e.map(t=>{const e=this._cabinets.find(e=>e.id===t.cabinet_id)?.name||"Unassigned";return L`
+                    `
+                : filteredWines.map((wine) => {
+                    const cabinetName = this._cabinets.find((c) => c.id === wine.cabinet_id)
+                        ?.name || "Unassigned";
+                    return b `
                         <div
                           class="wine-list-item"
-                          @click=${()=>{this._selectedWine=t,this._showDetail=!0}}
+                          @click=${() => {
+                        this._selectedWine = wine;
+                        this._showDetail = true;
+                    }}
                         >
                           <div
                             class="wine-list-dot"
-                            style="background: ${"red"===t.type?"#722F37":"white"===t.type?"#F5E6CA":"rosé"===t.type?"#E8A0BF":"sparkling"===t.type?"#D4E09B":"#DAA520"}"
+                            style="background: ${wine.type === "red"
+                        ? "#722F37"
+                        : wine.type === "white"
+                            ? "#F5E6CA"
+                            : wine.type === "rosé"
+                                ? "#E8A0BF"
+                                : wine.type === "sparkling"
+                                    ? "#D4E09B"
+                                    : "#DAA520"}"
                           ></div>
                           <div class="wine-list-info">
-                            <div class="wine-list-name">${t.name}</div>
+                            <div class="wine-list-name">${wine.name}</div>
                             <div class="wine-list-meta">
-                              ${t.winery}${t.vintage?` · ${t.vintage}`:""}
+                              ${wine.winery}${wine.vintage ? ` · ${wine.vintage}` : ""}
                             </div>
                           </div>
-                          <div class="wine-list-location">${e}</div>
+                          <div class="wine-list-location">${cabinetName}</div>
                         </div>
-                      `})}
+                      `;
+                })}
               </div>
-            `:q}
+            `
+            : A}
 
         <!-- Empty state -->
-        ${0===this._wines.length?L`
+        ${this._wines.length === 0
+            ? b `
               <div class="empty-state">
                 <div class="empty-state-icon">🍾</div>
                 <div style="font-weight: 500; margin-bottom: 4px">
@@ -1378,15 +2003,20 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
                   Tap "Add Wine" to start building your collection
                 </div>
               </div>
-            `:q}
+            `
+            : A}
 
         <!-- Wine Detail Dialog -->
         <wine-detail-dialog
           .wine=${this._selectedWine}
           .open=${this._showDetail}
-          @close=${()=>this._showDetail=!1}
+          @close=${() => (this._showDetail = false)}
           @remove-wine=${this._onRemoveWine}
-          @move-wine=${t=>{this._showDetail=!1,this._addPreselect={cabinet:"",row:null,col:null}}}
+          @move-wine=${(e) => {
+            this._showDetail = false;
+            this._addPreselect = { cabinet: "", row: null, col: null };
+            // TODO: implement move flow
+        }}
         ></wine-detail-dialog>
 
         <!-- Add Wine Dialog -->
@@ -1397,11 +2027,19 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
           .preselectedCabinet=${this._addPreselect.cabinet}
           .preselectedRow=${this._addPreselect.row}
           .preselectedCol=${this._addPreselect.col}
-          @close=${()=>this._showAddDialog=!1}
+          @close=${() => (this._showAddDialog = false)}
           @wine-added=${this._onWineAdded}
         ></add-wine-dialog>
       </ha-card>
-    `}getCardSize(){return 6}};ft.styles=[bt,o`
+    `;
+    }
+    getCardSize() {
+        return 6;
+    }
+};
+WineCellarCard.styles = [
+    sharedStyles,
+    i$3 `
       :host {
         display: block;
       }
@@ -1507,4 +2145,58 @@ const dt=t=>(e,i)=>{void 0!==i?i.addInitializer(()=>{customElements.define(t,e)}
         padding: 40px;
         color: var(--wc-text-secondary);
       }
-    `],t([ht({attribute:!1})],ft.prototype,"hass",void 0),t([ut()],ft.prototype,"_config",void 0),t([ut()],ft.prototype,"_wines",void 0),t([ut()],ft.prototype,"_cabinets",void 0),t([ut()],ft.prototype,"_stats",void 0),t([ut()],ft.prototype,"_activeTab",void 0),t([ut()],ft.prototype,"_searchQuery",void 0),t([ut()],ft.prototype,"_searchFilter",void 0),t([ut()],ft.prototype,"_selectedWine",void 0),t([ut()],ft.prototype,"_showDetail",void 0),t([ut()],ft.prototype,"_showAddDialog",void 0),t([ut()],ft.prototype,"_addPreselect",void 0),t([ut()],ft.prototype,"_loading",void 0),ft=t([dt("wine-cellar-card")],ft),window.customCards=window.customCards||[],window.customCards.push({type:"wine-cellar-card",name:"Wine Cellar",description:"Track your wine collection with visual cabinet layout",preview:!0});export{ft as WineCellarCard};
+    `,
+];
+__decorate([
+    n({ attribute: false })
+], WineCellarCard.prototype, "hass", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_config", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_wines", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_cabinets", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_stats", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_activeTab", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_searchQuery", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_searchFilter", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_selectedWine", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_showDetail", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_showAddDialog", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_addPreselect", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_loading", void 0);
+WineCellarCard = __decorate([
+    t("wine-cellar-card")
+], WineCellarCard);
+// Register the card with Home Assistant
+window.customCards = window.customCards || [];
+window.customCards.push({
+    type: "wine-cellar-card",
+    name: "Wine Cellar",
+    description: "Track your wine collection with visual cabinet layout",
+    preview: true,
+});
+
+export { WineCellarCard };
+//# sourceMappingURL=wine-cellar-card.js.map
