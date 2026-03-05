@@ -25,19 +25,19 @@ PLATFORMS = ["sensor"]
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Wine Cellar component."""
     hass.data.setdefault(DOMAIN, {})
-
-    # Register frontend resources
-    hass.http.register_static_path(
-        f"/wine_cellar/wine-cellar-card.js",
-        str(Path(__file__).parent / "frontend" / "wine-cellar-card.js"),
-        cache_headers=False,
-    )
-
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Wine Cellar from a config entry."""
+    # Register frontend static path (only once)
+    if "frontend_registered" not in hass.data.get(DOMAIN, {}):
+        hass.http.register_static_path(
+            "/wine_cellar/wine-cellar-card.js",
+            str(Path(__file__).parent / "frontend" / "wine-cellar-card.js"),
+            cache_headers=False,
+        )
+
     # Initialize storage
     storage = WineCellarStorage(hass)
     await storage.async_load()
@@ -49,6 +49,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "storage": storage,
         "vivino": vivino,
         "entry": entry,
+        "frontend_registered": True,
     }
 
     # Register WebSocket commands
