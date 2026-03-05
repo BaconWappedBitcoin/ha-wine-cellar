@@ -900,6 +900,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._tastingNotes = { aroma: "", taste: "", finish: "", overall: "" };
         this._saving = false;
         this._refreshing = false;
+        this._analyzing = false;
+        this.hasGemini = false;
     }
     updated(changedProps) {
         if (changedProps.has("wine") && this.wine) {
@@ -998,6 +1000,28 @@ let WineDetailDialog = class WineDetailDialog extends i {
         }
         this._refreshing = false;
     }
+    async _analyzeWithAI() {
+        if (!this.wine || !this.hass)
+            return;
+        this._analyzing = true;
+        try {
+            const resp = await this.hass.callWS({
+                type: "wine_cellar/analyze_single_wine",
+                wine_id: this.wine.id,
+            });
+            if (resp.error) {
+                alert(resp.error);
+            }
+            else if (resp.wine) {
+                this.wine = { ...this.wine, ...resp.wine };
+                this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+            }
+        }
+        catch (err) {
+            console.error("AI analysis failed", err);
+        }
+        this._analyzing = false;
+    }
     _hasTastingNotes() {
         const n = this._tastingNotes;
         return !!(n.aroma || n.taste || n.finish || n.overall);
@@ -1065,10 +1089,13 @@ let WineDetailDialog = class WineDetailDialog extends i {
             ? b `<div class="wine-description">${wine.description}</div>`
             : A}
 
-          <!-- Info chips (food, alcohol, etc.) -->
-          ${wine.food_pairings || wine.alcohol
+          <!-- Info chips (grape, food, alcohol, etc.) -->
+          ${wine.food_pairings || wine.alcohol || wine.grape_variety
             ? b `
                 <div class="info-chips">
+                  ${wine.grape_variety
+                ? b `<span class="info-chip"><span class="info-chip-icon">🍇</span> ${wine.grape_variety}</span>`
+                : A}
                   ${wine.alcohol
                 ? b `<span class="info-chip"><span class="info-chip-icon">%</span> ${wine.alcohol}</span>`
                 : A}
@@ -1077,6 +1104,23 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 : A}
                 </div>
               `
+            : A}
+
+          <!-- AI Ratings -->
+          ${wine.ai_ratings && Object.keys(wine.ai_ratings).length > 0
+            ? b `
+                <div class="ai-ratings">
+                  ${wine.ai_ratings.rating_ws ? b `<span class="ai-rating-chip">${wine.ai_ratings.rating_ws} <span class="source">WS</span></span>` : A}
+                  ${wine.ai_ratings.rating_rp ? b `<span class="ai-rating-chip">${wine.ai_ratings.rating_rp} <span class="source">RP</span></span>` : A}
+                  ${wine.ai_ratings.rating_jd ? b `<span class="ai-rating-chip">${wine.ai_ratings.rating_jd} <span class="source">JD</span></span>` : A}
+                  ${wine.ai_ratings.rating_ag ? b `<span class="ai-rating-chip">${wine.ai_ratings.rating_ag} <span class="source">AG</span></span>` : A}
+                </div>
+              `
+            : A}
+
+          <!-- Drink window -->
+          ${wine.drink_window
+            ? b `<div class="drink-window">Drink window: ${wine.drink_window}</div>`
             : A}
 
           <div class="details-grid">
@@ -1211,13 +1255,25 @@ let WineDetailDialog = class WineDetailDialog extends i {
 
           <div class="actions">
             <button
-              class="btn btn-outline"
-              style="color: #7b1fa2; border-color: #7b1fa2"
+              class="btn btn-primary"
+              style="background: #8e24aa; font-size: 0.85em"
               ?disabled=${this._refreshing}
               @click=${this._refreshFromVivino}
             >
-              ${this._refreshing ? "Scanning..." : "🍇 Vivino"}
+              ${this._refreshing ? "..." : "🍇 Vivino"}
             </button>
+            ${this.hasGemini
+            ? b `
+                  <button
+                    class="btn btn-primary"
+                    style="background: #1565c0; font-size: 0.85em"
+                    ?disabled=${this._analyzing}
+                    @click=${this._analyzeWithAI}
+                  >
+                    ${this._analyzing ? "..." : "🤖 AI"}
+                  </button>
+                `
+            : A}
             <button class="btn btn-outline" @click=${this._onCopy}>
               📋 Copy
             </button>
@@ -1512,6 +1568,37 @@ WineDetailDialog.styles = [
         min-height: 20px;
       }
 
+      .ai-ratings {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 0 20px 12px;
+      }
+
+      .ai-rating-chip {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 16px;
+        font-size: 0.75em;
+        background: rgba(245, 166, 35, 0.12);
+        border: 1px solid rgba(245, 166, 35, 0.3);
+        color: #f5a623;
+        font-weight: 600;
+      }
+
+      .ai-rating-chip .source {
+        font-weight: 400;
+        opacity: 0.8;
+      }
+
+      .drink-window {
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+        padding: 0 20px 8px;
+      }
+
       .divider {
         height: 1px;
         background: var(--wc-border, #e0e0e0);
@@ -1559,6 +1646,12 @@ __decorate([
 __decorate([
     r()
 ], WineDetailDialog.prototype, "_refreshing", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_analyzing", void 0);
+__decorate([
+    n({ type: Boolean })
+], WineDetailDialog.prototype, "hasGemini", void 0);
 WineDetailDialog = __decorate([
     t("wine-detail-dialog")
 ], WineDetailDialog);
@@ -3948,6 +4041,7 @@ let WineCellarCard = class WineCellarCard extends i {
         this._copiedWine = null;
         this._analyzing = false;
         this._toast = "";
+        this._hasGemini = false;
     }
     setConfig(config) {
         this._config = config;
@@ -3973,14 +4067,22 @@ let WineCellarCard = class WineCellarCard extends i {
         }
         this._loading = true;
         try {
-            const [winesResult, cabinetsResult, statsResult] = await Promise.all([
+            const [winesResult, cabinetsResult, statsResult, capResult] = await Promise.all([
                 this.hass.callWS({ type: "wine_cellar/get_wines" }),
                 this.hass.callWS({ type: "wine_cellar/get_cabinets" }),
                 this.hass.callWS({ type: "wine_cellar/get_stats" }),
+                this.hass.callWS({ type: "wine_cellar/get_capabilities" }).catch(() => ({ has_gemini: false })),
             ]);
             this._wines = winesResult.wines || [];
             this._cabinets = (cabinetsResult.cabinets || []).sort((a, b) => a.order - b.order);
             this._stats = statsResult;
+            this._hasGemini = capResult?.has_gemini || false;
+            // Refresh selected wine if detail dialog is open
+            if (this._selectedWine) {
+                const updated = this._wines.find((w) => w.id === this._selectedWine.id);
+                if (updated)
+                    this._selectedWine = updated;
+            }
         }
         catch (err) {
             console.error("Wine Cellar: Failed to load data", err);
@@ -4338,6 +4440,7 @@ let WineCellarCard = class WineCellarCard extends i {
           .wine=${this._selectedWine}
           .hass=${this.hass}
           .open=${this._showDetail}
+          .hasGemini=${this._hasGemini}
           @close=${() => (this._showDetail = false)}
           @remove-wine=${this._onRemoveWine}
           @wine-updated=${() => this._loadData()}
@@ -4632,6 +4735,9 @@ __decorate([
 __decorate([
     r()
 ], WineCellarCard.prototype, "_toast", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_hasGemini", void 0);
 WineCellarCard = __decorate([
     t("wine-cellar-card")
 ], WineCellarCard);

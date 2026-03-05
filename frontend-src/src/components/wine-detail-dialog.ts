@@ -15,6 +15,8 @@ export class WineDetailDialog extends LitElement {
   @state() private _tastingNotes: TastingNotes = { aroma: "", taste: "", finish: "", overall: "" };
   @state() private _saving = false;
   @state() private _refreshing = false;
+  @state() private _analyzing = false;
+  @property({ type: Boolean }) hasGemini = false;
 
   static styles = [
     sharedStyles,
@@ -287,6 +289,37 @@ export class WineDetailDialog extends LitElement {
         min-height: 20px;
       }
 
+      .ai-ratings {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 0 20px 12px;
+      }
+
+      .ai-rating-chip {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 16px;
+        font-size: 0.75em;
+        background: rgba(245, 166, 35, 0.12);
+        border: 1px solid rgba(245, 166, 35, 0.3);
+        color: #f5a623;
+        font-weight: 600;
+      }
+
+      .ai-rating-chip .source {
+        font-weight: 400;
+        opacity: 0.8;
+      }
+
+      .drink-window {
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+        padding: 0 20px 8px;
+      }
+
       .divider {
         height: 1px;
         background: var(--wc-border, #e0e0e0);
@@ -418,6 +451,26 @@ export class WineDetailDialog extends LitElement {
     this._refreshing = false;
   }
 
+  private async _analyzeWithAI() {
+    if (!this.wine || !this.hass) return;
+    this._analyzing = true;
+    try {
+      const resp = await this.hass.callWS({
+        type: "wine_cellar/analyze_single_wine",
+        wine_id: this.wine.id,
+      });
+      if (resp.error) {
+        alert(resp.error);
+      } else if (resp.wine) {
+        this.wine = { ...this.wine, ...resp.wine };
+        this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+      }
+    } catch (err) {
+      console.error("AI analysis failed", err);
+    }
+    this._analyzing = false;
+  }
+
   private _hasTastingNotes(): boolean {
     const n = this._tastingNotes;
     return !!(n.aroma || n.taste || n.finish || n.overall);
@@ -491,10 +544,13 @@ export class WineDetailDialog extends LitElement {
             ? html`<div class="wine-description">${wine.description}</div>`
             : nothing}
 
-          <!-- Info chips (food, alcohol, etc.) -->
-          ${wine.food_pairings || wine.alcohol
+          <!-- Info chips (grape, food, alcohol, etc.) -->
+          ${wine.food_pairings || wine.alcohol || wine.grape_variety
             ? html`
                 <div class="info-chips">
+                  ${wine.grape_variety
+                    ? html`<span class="info-chip"><span class="info-chip-icon">🍇</span> ${wine.grape_variety}</span>`
+                    : nothing}
                   ${wine.alcohol
                     ? html`<span class="info-chip"><span class="info-chip-icon">%</span> ${wine.alcohol}</span>`
                     : nothing}
@@ -505,6 +561,23 @@ export class WineDetailDialog extends LitElement {
                     : nothing}
                 </div>
               `
+            : nothing}
+
+          <!-- AI Ratings -->
+          ${wine.ai_ratings && Object.keys(wine.ai_ratings).length > 0
+            ? html`
+                <div class="ai-ratings">
+                  ${wine.ai_ratings.rating_ws ? html`<span class="ai-rating-chip">${wine.ai_ratings.rating_ws} <span class="source">WS</span></span>` : nothing}
+                  ${wine.ai_ratings.rating_rp ? html`<span class="ai-rating-chip">${wine.ai_ratings.rating_rp} <span class="source">RP</span></span>` : nothing}
+                  ${wine.ai_ratings.rating_jd ? html`<span class="ai-rating-chip">${wine.ai_ratings.rating_jd} <span class="source">JD</span></span>` : nothing}
+                  ${wine.ai_ratings.rating_ag ? html`<span class="ai-rating-chip">${wine.ai_ratings.rating_ag} <span class="source">AG</span></span>` : nothing}
+                </div>
+              `
+            : nothing}
+
+          <!-- Drink window -->
+          ${(wine as any).drink_window
+            ? html`<div class="drink-window">Drink window: ${(wine as any).drink_window}</div>`
             : nothing}
 
           <div class="details-grid">
@@ -640,13 +713,25 @@ export class WineDetailDialog extends LitElement {
 
           <div class="actions">
             <button
-              class="btn btn-outline"
-              style="color: #7b1fa2; border-color: #7b1fa2"
+              class="btn btn-primary"
+              style="background: #8e24aa; font-size: 0.85em"
               ?disabled=${this._refreshing}
               @click=${this._refreshFromVivino}
             >
-              ${this._refreshing ? "Scanning..." : "🍇 Vivino"}
+              ${this._refreshing ? "..." : "🍇 Vivino"}
             </button>
+            ${this.hasGemini
+              ? html`
+                  <button
+                    class="btn btn-primary"
+                    style="background: #1565c0; font-size: 0.85em"
+                    ?disabled=${this._analyzing}
+                    @click=${this._analyzeWithAI}
+                  >
+                    ${this._analyzing ? "..." : "🤖 AI"}
+                  </button>
+                `
+              : nothing}
             <button class="btn btn-outline" @click=${this._onCopy}>
               📋 Copy
             </button>

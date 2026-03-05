@@ -109,6 +109,18 @@
               rw.ratings_count = rw.ratings_count || 2500;
             }
             return { wine: rw, updated_fields: ["description", "food_pairings", "alcohol", "ratings_count"] };
+          case "wine_cellar/analyze_single_wine":
+            const aw = mockWines.find(w => w.id === msg.wine_id);
+            if (aw) {
+              aw.disposition = aw.disposition || "D";
+              aw.drink_by = aw.drink_by || "2030";
+              aw.drink_window = "2025-2035";
+              aw.ai_ratings = { rating_ws: 94, rating_rp: 96, rating_jd: 95, rating_ag: 93 };
+              aw.description = aw.description || "Complex and elegant with refined tannins.";
+            }
+            return { wine: aw, analysis: {} };
+          case "wine_cellar/get_capabilities":
+            return { has_gemini: true };
           default:
             return {};
         }

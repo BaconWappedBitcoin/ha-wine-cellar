@@ -196,6 +196,113 @@ class GeminiVisionClient:
             _LOGGER.error("Gemini API error: %s", err)
             return {"error": f"Unexpected error: {err}"}
 
+    async def analyze_single_wine(self, wine: dict[str, Any]) -> dict[str, Any]:
+        """Analyze a single wine with AI — disposition, drink dates, and ratings.
+
+        Returns enriched data or {"error": "..."}.
+        """
+        if not self._api_key:
+            return {"error": "Gemini API key is empty"}
+
+        current_year = 2026
+        vintage = wine.get("vintage") or "NV"
+        wine_type = wine.get("type", "red")
+        name = wine.get("name", "Unknown")
+        winery = wine.get("winery", "")
+        region = wine.get("region", "")
+        country = wine.get("country", "")
+        grape = wine.get("grape_variety", "")
+        drink_by = wine.get("drink_by", "")
+
+        prompt = f"""You are a master sommelier and wine critic. The current year is {current_year}.
+
+Analyze this wine and provide detailed assessment:
+
+Wine: {name}
+Winery: {winery}
+Vintage: {vintage}
+Type: {wine_type}
+Region: {region}
+Country: {country}
+Grape: {grape}
+Current drink_by: {drink_by}
+
+Return ONLY a JSON object with these fields:
+{{
+  "disposition": "D or H or P",
+  "drink_by": "optimal year to drink by, e.g. 2028",
+  "drink_window": "e.g. 2025-2030",
+  "description": "2-3 sentence tasting profile and character of this wine",
+  "rating_ws": null,
+  "rating_rp": null,
+  "rating_jd": null,
+  "rating_ag": null
+}}
+
+Rules:
+- "disposition": "D" = Drink Now, "H" = Hold, "P" = Past Peak
+- "drink_by": best-by year as string. Use wine knowledge of aging potential.
+- "drink_window": optimal drinking window range
+- "description": Write a professional tasting-style description of what this wine is known for. If you know the wine, describe its character. If not, describe what to expect based on grape, region, and vintage.
+- Rating fields: If you know or can reliably estimate ratings for this specific wine and vintage from major critics, provide them as numbers (e.g. 92). Use null if unknown.
+  - "rating_ws": Wine Spectator score (out of 100)
+  - "rating_rp": Robert Parker / Wine Advocate score (out of 100)
+  - "rating_jd": James Suckling / Jeb Dunnuck score (out of 100)
+  - "rating_ag": Antonio Galloni / Vinous score (out of 100)
+- Only provide ratings you are reasonably confident about. Use null for wines you cannot rate with confidence.
+- Do NOT fabricate ratings. Better to return null than guess."""
+
+        session = async_get_clientsession(self._hass)
+
+        body = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "temperature": 0.2,
+            },
+        }
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=45)
+            async with session.post(
+                GEMINI_API_URL,
+                params={"key": self._api_key},
+                json=body,
+                timeout=timeout,
+            ) as resp:
+                if resp.status == 429:
+                    return {"error": "Gemini API quota exhausted"}
+                if resp.status != 200:
+                    return {"error": f"Gemini API error (HTTP {resp.status})"}
+
+                data = json.loads(await resp.text())
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    return {"error": "Gemini returned no results"}
+
+                text = candidates[0]["content"]["parts"][0]["text"]
+                result = json.loads(text)
+
+                # Validate disposition
+                disp = result.get("disposition", "D")
+                if disp not in ("D", "H", "P"):
+                    disp = "D"
+
+                return {
+                    "disposition": disp,
+                    "drink_by": str(result.get("drink_by", "")).strip(),
+                    "drink_window": str(result.get("drink_window", "")).strip(),
+                    "description": str(result.get("description", "")).strip(),
+                    "rating_ws": result.get("rating_ws"),
+                    "rating_rp": result.get("rating_rp"),
+                    "rating_jd": result.get("rating_jd"),
+                    "rating_ag": result.get("rating_ag"),
+                }
+
+        except Exception as err:
+            _LOGGER.error("Single wine analysis error: %s", err)
+            return {"error": f"Analysis failed: {err}"}
+
     async def analyze_collection(
         self, wines: list[dict[str, Any]]
     ) -> dict[str, Any]:

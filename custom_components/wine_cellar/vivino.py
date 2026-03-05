@@ -430,7 +430,11 @@ def _parse_vivino_html(html: str) -> dict[str, Any] | None:
             r'"description":"([^"]{10,500})"', decoded
         )
         if desc_match:
-            description = desc_match.group(1).replace("\\n", " ").strip()
+            desc_text = desc_match.group(1).replace("\\n", " ").strip()
+            # Filter out Vivino error page text
+            error_keywords = ("forbidden", "underage", "try searching", "page is blocked")
+            if not any(kw in desc_text.lower() for kw in error_keywords):
+                description = desc_text
 
         # Extract food pairings
         food_pairings = ""

@@ -33,6 +33,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_capabilities)
     websocket_api.async_register_command(hass, ws_analyze_wines)
     websocket_api.async_register_command(hass, ws_refresh_wine)
+    websocket_api.async_register_command(hass, ws_analyze_single_wine)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "wine_cellar/get_wines"})
@@ -435,3 +436,66 @@ async def ws_refresh_wine(
         connection.send_result(msg["id"], {"wine": updated_wine, "updated_fields": list(updates.keys())})
     else:
         connection.send_result(msg["id"], {"wine": wine, "updated_fields": []})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "wine_cellar/analyze_single_wine",
+        vol.Required("wine_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_analyze_single_wine(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Analyze a single wine with AI for disposition, drink dates, and ratings."""
+    gemini = hass.data[DOMAIN].get("gemini")
+    if not gemini:
+        connection.send_result(
+            msg["id"],
+            {"error": "Gemini API key not configured."},
+        )
+        return
+
+    storage = hass.data[DOMAIN]["storage"]
+    wine = storage.get_wine(msg["wine_id"])
+    if not wine:
+        connection.send_result(msg["id"], {"error": "Wine not found."})
+        return
+
+    result = await gemini.analyze_single_wine(wine)
+    if "error" in result:
+        connection.send_result(msg["id"], {"error": result["error"]})
+        return
+
+    # Apply results to wine
+    updates: dict[str, Any] = {}
+    if result.get("disposition"):
+        updates["disposition"] = result["disposition"]
+    if result.get("drink_by"):
+        updates["drink_by"] = result["drink_by"]
+    if result.get("description") and not wine.get("description"):
+        updates["description"] = result["description"]
+
+    # Store AI ratings as a dict in notes or a new field
+    ai_ratings: dict[str, int] = {}
+    for key in ("rating_ws", "rating_rp", "rating_jd", "rating_ag"):
+        val = result.get(key)
+        if val and isinstance(val, (int, float)) and 50 <= val <= 100:
+            ai_ratings[key] = int(val)
+
+    if ai_ratings:
+        updates["ai_ratings"] = ai_ratings
+
+    if result.get("drink_window"):
+        updates["drink_window"] = result["drink_window"]
+
+    if updates:
+        updated_wine = storage.update_wine(msg["wine_id"], updates)
+        await storage.async_save()
+        hass.bus.async_fire(f"{DOMAIN}_updated")
+        connection.send_result(msg["id"], {"wine": updated_wine, "analysis": result})
+    else:
+        connection.send_result(msg["id"], {"wine": wine, "analysis": result})

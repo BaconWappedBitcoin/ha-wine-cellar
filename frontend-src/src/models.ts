@@ -33,6 +33,8 @@ export interface Wine {
   tasting_notes: TastingNotes | null;
   added_at: string;
   disposition: string;
+  drink_window: string;
+  ai_ratings: Record<string, number> | null;
 }
 
 export interface StorageRow {

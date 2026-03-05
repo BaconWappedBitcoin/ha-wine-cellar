@@ -34,6 +34,7 @@ export class WineCellarCard extends LitElement {
   @state() private _copiedWine: Wine | null = null;
   @state() private _analyzing = false;
   @state() private _toast = "";
+  @state() private _hasGemini = false;
 
   static styles = [
     sharedStyles,
@@ -268,10 +269,11 @@ export class WineCellarCard extends LitElement {
 
     this._loading = true;
     try {
-      const [winesResult, cabinetsResult, statsResult] = await Promise.all([
+      const [winesResult, cabinetsResult, statsResult, capResult] = await Promise.all([
         this.hass.callWS({ type: "wine_cellar/get_wines" }),
         this.hass.callWS({ type: "wine_cellar/get_cabinets" }),
         this.hass.callWS({ type: "wine_cellar/get_stats" }),
+        this.hass.callWS({ type: "wine_cellar/get_capabilities" }).catch(() => ({ has_gemini: false })),
       ]);
 
       this._wines = winesResult.wines || [];
@@ -279,6 +281,13 @@ export class WineCellarCard extends LitElement {
         (a: Cabinet, b: Cabinet) => a.order - b.order
       );
       this._stats = statsResult;
+      this._hasGemini = capResult?.has_gemini || false;
+
+      // Refresh selected wine if detail dialog is open
+      if (this._selectedWine) {
+        const updated = this._wines.find((w: Wine) => w.id === this._selectedWine!.id);
+        if (updated) this._selectedWine = updated;
+      }
     } catch (err) {
       console.error("Wine Cellar: Failed to load data", err);
     }
@@ -666,6 +675,7 @@ export class WineCellarCard extends LitElement {
           .wine=${this._selectedWine}
           .hass=${this.hass}
           .open=${this._showDetail}
+          .hasGemini=${this._hasGemini}
           @close=${() => (this._showDetail = false)}
           @remove-wine=${this._onRemoveWine}
           @wine-updated=${() => this._loadData()}
