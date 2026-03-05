@@ -609,8 +609,9 @@ CabinetGrid.styles = [
 
       .cell .disposition {
         position: absolute;
-        top: -4px;
-        right: -4px;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
         width: 20px;
         height: 20px;
         border-radius: 50%;
@@ -623,8 +624,8 @@ CabinetGrid.styles = [
         z-index: 2;
         pointer-events: none;
         line-height: 1;
-        border: 2px solid rgba(0, 0, 0, 0.3);
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+        border: 2px solid rgba(255, 255, 255, 0.5);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
       }
 
       .cell .disposition.drink {
