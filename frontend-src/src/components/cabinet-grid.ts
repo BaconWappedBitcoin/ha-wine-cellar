@@ -1,5 +1,5 @@
 import { LitElement, html, css, nothing } from "lit";
-import { customElement, property } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 import { Cabinet, Wine, StorageRow, WINE_TYPE_COLORS, WineType } from "../models";
 import { sharedStyles } from "../styles";
 
@@ -7,6 +7,8 @@ import { sharedStyles } from "../styles";
 export class CabinetGrid extends LitElement {
   @property({ attribute: false }) cabinet!: Cabinet;
   @property({ attribute: false }) wines: Wine[] = [];
+
+  @state() private _dragOverCell: string | null = null;
 
   static styles = [
     sharedStyles,
@@ -235,6 +237,37 @@ export class CabinetGrid extends LitElement {
         transform: scale(1.1);
       }
 
+      /* Drag and drop */
+      .cell.drag-source {
+        opacity: 0.35;
+        transform: scale(0.9);
+      }
+
+      .cell.drag-over {
+        box-shadow: 0 0 0 3px rgba(66, 165, 245, 0.8);
+        transform: scale(1.1);
+        background: rgba(66, 165, 245, 0.15) !important;
+        z-index: 10;
+      }
+
+      .cell[draggable="true"] {
+        cursor: grab;
+      }
+
+      .cell[draggable="true"]:active {
+        cursor: grabbing;
+      }
+
+      .zone-bottle.drag-over {
+        box-shadow: 0 0 0 2px rgba(66, 165, 245, 0.8);
+        transform: scale(1.15);
+      }
+
+      .bottom-zone.drag-over {
+        box-shadow: inset 0 0 0 2px rgba(66, 165, 245, 0.8);
+        background: rgba(66, 165, 245, 0.1);
+      }
+
       /* Phone: tighter spacing, smaller elements */
       @media (max-width: 599px) {
         .cabinet {
@@ -362,22 +395,85 @@ export class CabinetGrid extends LitElement {
     return brightMap[hex] || hex;
   }
 
+  // --- Drag and drop ---
+
+  private _onDragStart(e: DragEvent, wine: Wine, row?: number, col?: number, zone?: string) {
+    if (!e.dataTransfer) return;
+    e.dataTransfer.setData("text/plain", JSON.stringify({
+      wineId: wine.id,
+      cabinetId: this.cabinet.id,
+      row: row ?? null,
+      col: col ?? null,
+      zone: zone || "",
+    }));
+    e.dataTransfer.effectAllowed = "move";
+    (e.currentTarget as HTMLElement).classList.add("drag-source");
+  }
+
+  private _onDragEnd(e: DragEvent) {
+    (e.currentTarget as HTMLElement).classList.remove("drag-source");
+    this._dragOverCell = null;
+  }
+
+  private _onDragOver(e: DragEvent, key: string) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    this._dragOverCell = key;
+  }
+
+  private _onDragLeave(_e: DragEvent) {
+    this._dragOverCell = null;
+  }
+
+  private _onDrop(e: DragEvent, targetRow?: number, targetCol?: number, targetZone?: string) {
+    e.preventDefault();
+    this._dragOverCell = null;
+    if (!e.dataTransfer) return;
+    try {
+      const source = JSON.parse(e.dataTransfer.getData("text/plain"));
+      this.dispatchEvent(new CustomEvent("wine-drop", {
+        detail: {
+          wineId: source.wineId,
+          sourceCabinetId: source.cabinetId,
+          sourceRow: source.row,
+          sourceCol: source.col,
+          sourceZone: source.zone,
+          targetCabinetId: this.cabinet.id,
+          targetRow: targetRow ?? null,
+          targetCol: targetCol ?? null,
+          targetZone: targetZone || "",
+        },
+        bubbles: true,
+        composed: true,
+      }));
+    } catch { /* ignore bad data */ }
+  }
+
   private _renderStorageZone(row: number) {
     const zoneName = this._getStorageRowName(row);
     const zoneId = `storage-${row}`;
     const wines = this._getStorageRowWines(row);
+    const zoneKey = `zone-${zoneId}`;
+    const isDragOver = this._dragOverCell === zoneKey;
     return html`
-      <div class="bottom-zone" @click=${() => this._onZoneClick(undefined, zoneId)}>
+      <div class="bottom-zone ${isDragOver ? "drag-over" : ""}"
+        @click=${() => this._onZoneClick(undefined, zoneId)}
+        @dragover=${(e: DragEvent) => this._onDragOver(e, zoneKey)}
+        @dragleave=${(e: DragEvent) => this._onDragLeave(e)}
+        @drop=${(e: DragEvent) => this._onDrop(e, undefined, undefined, zoneId)}>
         <div class="bottom-zone-label">${zoneName}</div>
         ${wines.map(
           (wine) => html`
             <div
               class="zone-bottle"
               style="background: ${WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red}"
+              draggable="true"
               @click=${(e: Event) => {
                 e.stopPropagation();
                 this._onZoneClick(wine, zoneId);
               }}
+              @dragstart=${(e: DragEvent) => { e.stopPropagation(); this._onDragStart(e, wine, undefined, undefined, zoneId); }}
+              @dragend=${(e: DragEvent) => this._onDragEnd(e)}
               title="${wine.name}"
             >
               ${(wine.vintage || "NV").toString().slice(-2)}
@@ -399,13 +495,20 @@ export class CabinetGrid extends LitElement {
           const disp = wine?.disposition || "";
           const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
           const ratingDisplay = wine?.rating ? wine.rating.toFixed(1) : "";
-          // Brighter ring color for type visibility
           const ringColor = wine ? this._brightenColor(bgColor) : "";
+          const cellKey = `${row}-${col}`;
+          const isDragOver = this._dragOverCell === cellKey;
           return html`
             <div
-              class="cell ${wine ? "filled" : "empty"}"
+              class="cell ${wine ? "filled" : "empty"} ${isDragOver ? "drag-over" : ""}"
               style=${wine ? `background: ${bgColor}; --bottle-type-color: ${ringColor}` : ""}
+              draggable=${wine ? "true" : "false"}
               @click=${() => this._onCellClick(row, col, wine)}
+              @dragstart=${wine ? (e: DragEvent) => this._onDragStart(e, wine, row, col) : nothing}
+              @dragend=${wine ? (e: DragEvent) => this._onDragEnd(e) : nothing}
+              @dragover=${(e: DragEvent) => this._onDragOver(e, cellKey)}
+              @dragleave=${(e: DragEvent) => this._onDragLeave(e)}
+              @drop=${(e: DragEvent) => this._onDrop(e, row, col)}
               title=${wine ? `${wine.name} (${wine.vintage || "NV"})${wine.rating ? ` ★${wine.rating}` : ""}` : `Empty - Row ${row + 1}, Col ${col + 1}`}
             >
               ${wine
@@ -439,7 +542,11 @@ export class CabinetGrid extends LitElement {
         </div>
         ${this.cabinet.has_bottom_zone
           ? html`
-              <div class="bottom-zone" @click=${() => this._onZoneClick()}>
+              <div class="bottom-zone ${this._dragOverCell === "zone-bottom" ? "drag-over" : ""}"
+                @click=${() => this._onZoneClick()}
+                @dragover=${(e: DragEvent) => this._onDragOver(e, "zone-bottom")}
+                @dragleave=${(e: DragEvent) => this._onDragLeave(e)}
+                @drop=${(e: DragEvent) => this._onDrop(e, undefined, undefined, "bottom")}>
                 <div class="bottom-zone-label">
                   ${this.cabinet.bottom_zone_name}
                 </div>
@@ -448,10 +555,13 @@ export class CabinetGrid extends LitElement {
                     <div
                       class="zone-bottle"
                       style="background: ${WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red}"
+                      draggable="true"
                       @click=${(e: Event) => {
                         e.stopPropagation();
                         this._onZoneClick(wine);
                       }}
+                      @dragstart=${(e: DragEvent) => { e.stopPropagation(); this._onDragStart(e, wine, undefined, undefined, "bottom"); }}
+                      @dragend=${(e: DragEvent) => this._onDragEnd(e)}
                       title="${wine.name}"
                     >
                       ${(wine.vintage || "NV").toString().slice(-2)}

@@ -859,12 +859,8 @@ export class WineDetailDialog extends LitElement {
                   ${wine.grape_variety
                     ? html`<div class="detail-item"><span class="detail-label">Grape</span><span class="detail-value">${wine.grape_variety}</span></div>`
                     : nothing}
-                  ${wine.price
-                    ? html`<div class="detail-item"><span class="detail-label">Purchase Price</span><span class="detail-value">$${wine.price.toFixed(2)}</span></div>`
-                    : nothing}
-                  ${wine.retail_price
-                    ? html`<div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">$${wine.retail_price.toFixed(2)}</span></div>`
-                    : nothing}
+                  <div class="detail-item"><span class="detail-label">Purchase Price</span><span class="detail-value">${wine.price ? `$${wine.price.toFixed(2)}` : "—"}</span></div>
+                  <div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">${wine.retail_price ? `$${wine.retail_price.toFixed(2)}` : "—"}</span></div>
                   ${wine.purchase_date
                     ? html`<div class="detail-item"><span class="detail-label">Purchased</span><span class="detail-value">${wine.purchase_date}</span></div>`
                     : nothing}

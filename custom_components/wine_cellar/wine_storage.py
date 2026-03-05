@@ -59,11 +59,9 @@ class WineCellarStorage:
             for cab in self._data.get(CONF_CABINETS, []):
                 if "storage_rows" not in cab:
                     cab["storage_rows"] = []
-            # Migrate: clear $4.99 default prices set by old Vivino scraper bug
+            # Ensure all wines have retail_price field
             for wine in self._data.get(CONF_WINES, []):
-                if wine.get("price") and abs(wine["price"] - 4.99) < 0.01:
-                    wine["price"] = None
-                if wine.get("retail_price") and abs(wine["retail_price"] - 4.99) < 0.01:
+                if "retail_price" not in wine:
                     wine["retail_price"] = None
 
     async def async_save(self) -> None:

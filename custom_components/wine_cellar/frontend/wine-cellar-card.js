@@ -340,6 +340,7 @@ let CabinetGrid = class CabinetGrid extends i {
     constructor() {
         super(...arguments);
         this.wines = [];
+        this._dragOverCell = null;
     }
     _getWineAt(row, col) {
         return this.wines.find((w) => w.cabinet_id === this.cabinet.id && w.row === row && w.col === col);
@@ -393,21 +394,82 @@ let CabinetGrid = class CabinetGrid extends i {
         };
         return brightMap[hex] || hex;
     }
+    // --- Drag and drop ---
+    _onDragStart(e, wine, row, col, zone) {
+        if (!e.dataTransfer)
+            return;
+        e.dataTransfer.setData("text/plain", JSON.stringify({
+            wineId: wine.id,
+            cabinetId: this.cabinet.id,
+            row: row ?? null,
+            col: col ?? null,
+            zone: zone || "",
+        }));
+        e.dataTransfer.effectAllowed = "move";
+        e.currentTarget.classList.add("drag-source");
+    }
+    _onDragEnd(e) {
+        e.currentTarget.classList.remove("drag-source");
+        this._dragOverCell = null;
+    }
+    _onDragOver(e, key) {
+        e.preventDefault();
+        if (e.dataTransfer)
+            e.dataTransfer.dropEffect = "move";
+        this._dragOverCell = key;
+    }
+    _onDragLeave(_e) {
+        this._dragOverCell = null;
+    }
+    _onDrop(e, targetRow, targetCol, targetZone) {
+        e.preventDefault();
+        this._dragOverCell = null;
+        if (!e.dataTransfer)
+            return;
+        try {
+            const source = JSON.parse(e.dataTransfer.getData("text/plain"));
+            this.dispatchEvent(new CustomEvent("wine-drop", {
+                detail: {
+                    wineId: source.wineId,
+                    sourceCabinetId: source.cabinetId,
+                    sourceRow: source.row,
+                    sourceCol: source.col,
+                    sourceZone: source.zone,
+                    targetCabinetId: this.cabinet.id,
+                    targetRow: targetRow ?? null,
+                    targetCol: targetCol ?? null,
+                    targetZone: targetZone || "",
+                },
+                bubbles: true,
+                composed: true,
+            }));
+        }
+        catch { /* ignore bad data */ }
+    }
     _renderStorageZone(row) {
         const zoneName = this._getStorageRowName(row);
         const zoneId = `storage-${row}`;
         const wines = this._getStorageRowWines(row);
+        const zoneKey = `zone-${zoneId}`;
+        const isDragOver = this._dragOverCell === zoneKey;
         return b `
-      <div class="bottom-zone" @click=${() => this._onZoneClick(undefined, zoneId)}>
+      <div class="bottom-zone ${isDragOver ? "drag-over" : ""}"
+        @click=${() => this._onZoneClick(undefined, zoneId)}
+        @dragover=${(e) => this._onDragOver(e, zoneKey)}
+        @dragleave=${(e) => this._onDragLeave(e)}
+        @drop=${(e) => this._onDrop(e, undefined, undefined, zoneId)}>
         <div class="bottom-zone-label">${zoneName}</div>
         ${wines.map((wine) => b `
             <div
               class="zone-bottle"
               style="background: ${WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red}"
+              draggable="true"
               @click=${(e) => {
             e.stopPropagation();
             this._onZoneClick(wine, zoneId);
         }}
+              @dragstart=${(e) => { e.stopPropagation(); this._onDragStart(e, wine, undefined, undefined, zoneId); }}
+              @dragend=${(e) => this._onDragEnd(e)}
               title="${wine.name}"
             >
               ${(wine.vintage || "NV").toString().slice(-2)}
@@ -427,13 +489,20 @@ let CabinetGrid = class CabinetGrid extends i {
             const disp = wine?.disposition || "";
             const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
             const ratingDisplay = wine?.rating ? wine.rating.toFixed(1) : "";
-            // Brighter ring color for type visibility
             const ringColor = wine ? this._brightenColor(bgColor) : "";
+            const cellKey = `${row}-${col}`;
+            const isDragOver = this._dragOverCell === cellKey;
             return b `
             <div
-              class="cell ${wine ? "filled" : "empty"}"
+              class="cell ${wine ? "filled" : "empty"} ${isDragOver ? "drag-over" : ""}"
               style=${wine ? `background: ${bgColor}; --bottle-type-color: ${ringColor}` : ""}
+              draggable=${wine ? "true" : "false"}
               @click=${() => this._onCellClick(row, col, wine)}
+              @dragstart=${wine ? (e) => this._onDragStart(e, wine, row, col) : A}
+              @dragend=${wine ? (e) => this._onDragEnd(e) : A}
+              @dragover=${(e) => this._onDragOver(e, cellKey)}
+              @dragleave=${(e) => this._onDragLeave(e)}
+              @drop=${(e) => this._onDrop(e, row, col)}
               title=${wine ? `${wine.name} (${wine.vintage || "NV"})${wine.rating ? ` ★${wine.rating}` : ""}` : `Empty - Row ${row + 1}, Col ${col + 1}`}
             >
               ${wine
@@ -463,7 +532,11 @@ let CabinetGrid = class CabinetGrid extends i {
         </div>
         ${this.cabinet.has_bottom_zone
             ? b `
-              <div class="bottom-zone" @click=${() => this._onZoneClick()}>
+              <div class="bottom-zone ${this._dragOverCell === "zone-bottom" ? "drag-over" : ""}"
+                @click=${() => this._onZoneClick()}
+                @dragover=${(e) => this._onDragOver(e, "zone-bottom")}
+                @dragleave=${(e) => this._onDragLeave(e)}
+                @drop=${(e) => this._onDrop(e, undefined, undefined, "bottom")}>
                 <div class="bottom-zone-label">
                   ${this.cabinet.bottom_zone_name}
                 </div>
@@ -471,10 +544,13 @@ let CabinetGrid = class CabinetGrid extends i {
                     <div
                       class="zone-bottle"
                       style="background: ${WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red}"
+                      draggable="true"
                       @click=${(e) => {
                 e.stopPropagation();
                 this._onZoneClick(wine);
             }}
+                      @dragstart=${(e) => { e.stopPropagation(); this._onDragStart(e, wine, undefined, undefined, "bottom"); }}
+                      @dragend=${(e) => this._onDragEnd(e)}
                       title="${wine.name}"
                     >
                       ${(wine.vintage || "NV").toString().slice(-2)}
@@ -714,6 +790,37 @@ CabinetGrid.styles = [
         transform: scale(1.1);
       }
 
+      /* Drag and drop */
+      .cell.drag-source {
+        opacity: 0.35;
+        transform: scale(0.9);
+      }
+
+      .cell.drag-over {
+        box-shadow: 0 0 0 3px rgba(66, 165, 245, 0.8);
+        transform: scale(1.1);
+        background: rgba(66, 165, 245, 0.15) !important;
+        z-index: 10;
+      }
+
+      .cell[draggable="true"] {
+        cursor: grab;
+      }
+
+      .cell[draggable="true"]:active {
+        cursor: grabbing;
+      }
+
+      .zone-bottle.drag-over {
+        box-shadow: 0 0 0 2px rgba(66, 165, 245, 0.8);
+        transform: scale(1.15);
+      }
+
+      .bottom-zone.drag-over {
+        box-shadow: inset 0 0 0 2px rgba(66, 165, 245, 0.8);
+        background: rgba(66, 165, 245, 0.1);
+      }
+
       /* Phone: tighter spacing, smaller elements */
       @media (max-width: 599px) {
         .cabinet {
@@ -775,6 +882,9 @@ __decorate([
 __decorate([
     n({ attribute: false })
 ], CabinetGrid.prototype, "wines", void 0);
+__decorate([
+    r()
+], CabinetGrid.prototype, "_dragOverCell", void 0);
 CabinetGrid = __decorate([
     t("cabinet-grid")
 ], CabinetGrid);
@@ -1318,12 +1428,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
                   ${wine.grape_variety
                 ? b `<div class="detail-item"><span class="detail-label">Grape</span><span class="detail-value">${wine.grape_variety}</span></div>`
                 : A}
-                  ${wine.price
-                ? b `<div class="detail-item"><span class="detail-label">Purchase Price</span><span class="detail-value">$${wine.price.toFixed(2)}</span></div>`
-                : A}
-                  ${wine.retail_price
-                ? b `<div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">$${wine.retail_price.toFixed(2)}</span></div>`
-                : A}
+                  <div class="detail-item"><span class="detail-label">Purchase Price</span><span class="detail-value">${wine.price ? `$${wine.price.toFixed(2)}` : "—"}</span></div>
+                  <div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">${wine.retail_price ? `$${wine.retail_price.toFixed(2)}` : "—"}</span></div>
                   ${wine.purchase_date
                 ? b `<div class="detail-item"><span class="detail-label">Purchased</span><span class="detail-value">${wine.purchase_date}</span></div>`
                 : A}
@@ -4421,6 +4527,45 @@ let WineCellarCard = class WineCellarCard extends i {
             this._showAddDialog = true;
         }
     }
+    async _onWineDrop(e) {
+        const d = e.detail;
+        // Don't drop on same position
+        if (d.sourceCabinetId === d.targetCabinetId && d.sourceRow === d.targetRow && d.sourceCol === d.targetCol && d.sourceZone === d.targetZone)
+            return;
+        try {
+            // Check if target cell has a wine (swap)
+            let targetWine;
+            if (d.targetRow !== null && d.targetCol !== null && !d.targetZone) {
+                targetWine = this._wines.find((w) => w.cabinet_id === d.targetCabinetId && w.row === d.targetRow && w.col === d.targetCol);
+            }
+            if (targetWine) {
+                // Swap: move target wine to source position first
+                await this.hass.callWS({
+                    type: "wine_cellar/move_wine",
+                    wine_id: targetWine.id,
+                    cabinet_id: d.sourceCabinetId,
+                    row: d.sourceRow,
+                    col: d.sourceCol,
+                    zone: d.sourceZone || "",
+                });
+            }
+            // Move dragged wine to target
+            await this.hass.callWS({
+                type: "wine_cellar/move_wine",
+                wine_id: d.wineId,
+                cabinet_id: d.targetCabinetId,
+                row: d.targetRow,
+                col: d.targetCol,
+                zone: d.targetZone || "",
+            });
+            this._showToast(targetWine ? "Swapped wines" : "Wine moved");
+            await this._loadData();
+        }
+        catch (err) {
+            console.error("Failed to move wine:", err);
+            this._showToast("Failed to move wine");
+        }
+    }
     _copyWine(wine) {
         this._copiedWine = wine;
         this._showToast(`Copied "${wine.name}" — tap empty cells to paste`);
@@ -4627,6 +4772,7 @@ let WineCellarCard = class WineCellarCard extends i {
                           .wines=${this._getCabinetWines(cab.id)}
                           @cell-click=${this._onCellClick}
                           @zone-click=${this._onZoneClick}
+                          @wine-drop=${this._onWineDrop}
                         ></cabinet-grid>
                       `)
                 : this._cabinets

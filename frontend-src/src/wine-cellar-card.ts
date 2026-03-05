@@ -357,6 +357,50 @@ export class WineCellarCard extends LitElement {
     }
   }
 
+  private async _onWineDrop(e: CustomEvent) {
+    const d = e.detail;
+    // Don't drop on same position
+    if (d.sourceCabinetId === d.targetCabinetId && d.sourceRow === d.targetRow && d.sourceCol === d.targetCol && d.sourceZone === d.targetZone) return;
+
+    try {
+      // Check if target cell has a wine (swap)
+      let targetWine: Wine | undefined;
+      if (d.targetRow !== null && d.targetCol !== null && !d.targetZone) {
+        targetWine = this._wines.find(
+          (w) => w.cabinet_id === d.targetCabinetId && w.row === d.targetRow && w.col === d.targetCol
+        );
+      }
+
+      if (targetWine) {
+        // Swap: move target wine to source position first
+        await this.hass.callWS({
+          type: "wine_cellar/move_wine",
+          wine_id: targetWine.id,
+          cabinet_id: d.sourceCabinetId,
+          row: d.sourceRow,
+          col: d.sourceCol,
+          zone: d.sourceZone || "",
+        });
+      }
+
+      // Move dragged wine to target
+      await this.hass.callWS({
+        type: "wine_cellar/move_wine",
+        wine_id: d.wineId,
+        cabinet_id: d.targetCabinetId,
+        row: d.targetRow,
+        col: d.targetCol,
+        zone: d.targetZone || "",
+      });
+
+      this._showToast(targetWine ? "Swapped wines" : "Wine moved");
+      await this._loadData();
+    } catch (err) {
+      console.error("Failed to move wine:", err);
+      this._showToast("Failed to move wine");
+    }
+  }
+
   private _copyWine(wine: Wine) {
     this._copiedWine = wine;
     this._showToast(`Copied "${wine.name}" — tap empty cells to paste`);
@@ -572,6 +616,7 @@ export class WineCellarCard extends LitElement {
                           .wines=${this._getCabinetWines(cab.id)}
                           @cell-click=${this._onCellClick}
                           @zone-click=${this._onZoneClick}
+                          @wine-drop=${this._onWineDrop}
                         ></cabinet-grid>
                       `
                     )
