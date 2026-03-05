@@ -4166,6 +4166,14 @@ let WineCellarCard = class WineCellarCard extends i {
                   <span class="stat-value">${this._stats.available_slots}</span>
                   available
                 </div>
+                ${this._stats.total_value
+                ? b `
+                      <div class="stat">
+                        <span class="stat-value">$${this._stats.total_value.toLocaleString()}</span>
+                        value
+                      </div>
+                    `
+                : A}
               </div>
             `
             : A}

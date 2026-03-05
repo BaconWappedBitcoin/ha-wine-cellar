@@ -515,6 +515,14 @@ export class WineCellarCard extends LitElement {
                   <span class="stat-value">${this._stats.available_slots}</span>
                   available
                 </div>
+                ${this._stats.total_value
+                  ? html`
+                      <div class="stat">
+                        <span class="stat-value">$${this._stats.total_value.toLocaleString()}</span>
+                        value
+                      </div>
+                    `
+                  : nothing}
               </div>
             `
           : nothing}

@@ -195,16 +195,21 @@ class WineCellarStorage:
                 total_capacity += max(0, grid_rows) * c.get("cols", 0)
         by_type: dict[str, int] = {}
         by_cabinet: dict[str, int] = {}
+        total_value = 0.0
         for wine in self.wines:
             wine_type = wine.get("type", "unknown")
             by_type[wine_type] = by_type.get(wine_type, 0) + 1
             cab_id = wine.get("cabinet_id", "unassigned")
             by_cabinet[cab_id] = by_cabinet.get(cab_id, 0) + 1
+            price = wine.get("price")
+            if price and isinstance(price, (int, float)):
+                total_value += price
 
         return {
             "total_bottles": total_bottles,
             "total_capacity": total_capacity,
             "available_slots": total_capacity - total_bottles,
+            "total_value": round(total_value, 2),
             "by_type": by_type,
             "by_cabinet": by_cabinet,
         }

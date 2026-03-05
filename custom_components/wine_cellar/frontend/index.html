@@ -30,15 +30,6 @@
       max-width: 1200px;
       width: 100%;
     }
-    .preview-banner {
-      text-align: center;
-      padding: 12px;
-      background: rgba(114, 47, 55, 0.2);
-      border-bottom: 1px solid rgba(114, 47, 55, 0.3);
-      font-size: 0.85em;
-      color: #9e9e9e;
-      border-radius: 12px 12px 0 0;
-    }
   </style>
 </head>
 <body>
@@ -49,34 +40,35 @@
   <script>
     // Mock Home Assistant hass object for preview
     const mockWines = [
-      { id: "1", barcode: "3760083360017", name: "Château Margaux 2015", winery: "Château Margaux", region: "Margaux, Bordeaux", country: "France", vintage: 2015, type: "red", grape_variety: "Cabernet Sauvignon", rating: 4.6, image_url: "", price: 450, purchase_date: "2024-01-15", drink_by: "2040", notes: "Investment bottle", cabinet_id: "cabinet-1", row: 0, col: 0, zone: "", added_at: "2024-01-15T10:00:00Z" },
-      { id: "2", barcode: "", name: "Opus One 2018", winery: "Opus One", region: "Napa Valley", country: "USA", vintage: 2018, type: "red", grape_variety: "Bordeaux Blend", rating: 4.5, image_url: "", price: 380, purchase_date: "2024-02-10", drink_by: "2038", notes: "", cabinet_id: "cabinet-1", row: 0, col: 1, zone: "", added_at: "2024-02-10T10:00:00Z" },
-      { id: "3", barcode: "", name: "Cloudy Bay Sauvignon Blanc 2022", winery: "Cloudy Bay", region: "Marlborough", country: "New Zealand", vintage: 2022, type: "white", grape_variety: "Sauvignon Blanc", rating: 4.1, image_url: "", price: 25, purchase_date: "2024-03-01", drink_by: "2026", notes: "", cabinet_id: "cabinet-2", row: 0, col: 0, zone: "", added_at: "2024-03-01T10:00:00Z" },
-      { id: "4", barcode: "", name: "Whispering Angel Rosé 2023", winery: "Caves d'Esclans", region: "Provence", country: "France", vintage: 2023, type: "rosé", grape_variety: "Grenache blend", rating: 3.9, image_url: "", price: 22, purchase_date: "2024-04-15", drink_by: "2025", notes: "Summer wine", cabinet_id: "cabinet-2", row: 0, col: 1, zone: "", added_at: "2024-04-15T10:00:00Z" },
-      { id: "5", barcode: "", name: "Dom Pérignon 2012", winery: "Moët & Chandon", region: "Champagne", country: "France", vintage: 2012, type: "sparkling", grape_variety: "Chardonnay/Pinot Noir", rating: 4.7, image_url: "", price: 250, purchase_date: "2024-05-20", drink_by: "2035", notes: "Special occasions", cabinet_id: "cabinet-3", row: 0, col: 0, zone: "", added_at: "2024-05-20T10:00:00Z" },
-      { id: "6", barcode: "", name: "Château Guiraud 2017", winery: "Château Guiraud", region: "Sauternes", country: "France", vintage: 2017, type: "dessert", grape_variety: "Sémillon/Sauvignon Blanc", rating: 4.3, image_url: "", price: 45, purchase_date: "2024-06-01", drink_by: "2040", notes: "From the cellar box", cabinet_id: "cabinet-3", row: 0, col: 0, zone: "", added_at: "2024-06-01T10:00:00Z" },
-      { id: "7", barcode: "", name: "Pio Cesare Barolo 2018", winery: "Pio Cesare", region: "Barolo, Piedmont", country: "Italy", vintage: 2018, type: "red", grape_variety: "Nebbiolo", rating: 4.4, image_url: "", price: 65, purchase_date: "2024-06-15", drink_by: "2038", notes: "", cabinet_id: "cabinet-1", row: 0, col: 2, zone: "", added_at: "2024-06-15T10:00:00Z" },
-      { id: "8", barcode: "", name: "Penfolds Grange 2017", winery: "Penfolds", region: "South Australia", country: "Australia", vintage: 2017, type: "red", grape_variety: "Shiraz", rating: 4.8, image_url: "", price: 700, purchase_date: "2024-07-01", drink_by: "2045", notes: "Collector", cabinet_id: "cabinet-1", row: 0, col: 3, zone: "", added_at: "2024-07-01T10:00:00Z" },
-      { id: "9", barcode: "", name: "Sassicaia 2019", winery: "Tenuta San Guido", region: "Bolgheri, Tuscany", country: "Italy", vintage: 2019, type: "red", grape_variety: "Cabernet Sauvignon/Franc", rating: 4.6, image_url: "", price: 280, purchase_date: "2024-07-15", drink_by: "2040", notes: "", cabinet_id: "cabinet-1", row: 1, col: 0, zone: "", added_at: "2024-07-15T10:00:00Z" },
-      { id: "10", barcode: "", name: "Vega Sicilia Unico 2011", winery: "Vega Sicilia", region: "Ribera del Duero", country: "Spain", vintage: 2011, type: "red", grape_variety: "Tempranillo", rating: 4.7, image_url: "", price: 450, purchase_date: "2024-08-01", drink_by: "2045", notes: "", cabinet_id: "cabinet-1", row: 1, col: 1, zone: "", added_at: "2024-08-01T10:00:00Z" },
-      { id: "11", barcode: "", name: "Château d'Yquem 2015", winery: "Château d'Yquem", region: "Sauternes", country: "France", vintage: 2015, type: "dessert", grape_variety: "Sémillon", rating: 4.9, image_url: "", price: 400, purchase_date: "2024-08-15", drink_by: "2060", notes: "Premier Cru Supérieur", cabinet_id: "cabinet-3", row: 0, col: 1, zone: "", added_at: "2024-08-15T10:00:00Z" },
-      { id: "12", barcode: "", name: "Chablis Grand Cru 2020", winery: "William Fèvre", region: "Chablis, Burgundy", country: "France", vintage: 2020, type: "white", grape_variety: "Chardonnay", rating: 4.3, image_url: "", price: 85, purchase_date: "2024-09-01", drink_by: "2032", notes: "", cabinet_id: "cabinet-2", row: 1, col: 0, zone: "", added_at: "2024-09-01T10:00:00Z" },
-      { id: "b1", barcode: "", name: "Pio Cesare Barolo (Box)", winery: "Pio Cesare", region: "Barolo", country: "Italy", vintage: 2019, type: "red", grape_variety: "Nebbiolo", rating: 4.3, image_url: "", price: 60, purchase_date: "2024-10-01", drink_by: "2035", notes: "6-bottle case", cabinet_id: "cabinet-1", row: null, col: null, zone: "bottom", added_at: "2024-10-01T10:00:00Z" },
-      { id: "b2", barcode: "", name: "Château Guiraud (Box)", winery: "Château Guiraud", region: "Sauternes", country: "France", vintage: 2018, type: "dessert", grape_variety: "Sémillon", rating: 4.2, image_url: "", price: 40, purchase_date: "2024-10-15", drink_by: "2040", notes: "6-bottle case", cabinet_id: "cabinet-2", row: null, col: null, zone: "bottom", added_at: "2024-10-15T10:00:00Z" },
+      { id: "1", barcode: "3760083360017", name: "Château Margaux 2015", winery: "Château Margaux", region: "Margaux, Bordeaux", country: "France", vintage: 2015, type: "red", grape_variety: "Cabernet Sauvignon", rating: 4.6, ratings_count: 4832, image_url: "https://images.vivino.com/thumbs/ApnxEJsiSaCuFadP5WMFKQ_375x500.jpg", price: 450, purchase_date: "2024-01-15", drink_by: "2040", notes: "Investment bottle", description: "A powerful, complex wine with layers of dark fruit, cedar, and tobacco. Incredibly refined tannins.", food_pairings: "Beef, Lamb, Game", alcohol: "13.5%", cabinet_id: "cabinet-1", row: 0, col: 0, zone: "", disposition: "H", added_at: "2024-01-15T10:00:00Z" },
+      { id: "2", barcode: "", name: "Opus One 2018", winery: "Opus One", region: "Napa Valley", country: "USA", vintage: 2018, type: "red", grape_variety: "Bordeaux Blend", rating: 4.5, ratings_count: 3215, image_url: "https://images.vivino.com/thumbs/uPSbEkRKQJmmlsmtgBMpwQ_375x500.jpg", price: 380, purchase_date: "2024-02-10", drink_by: "2038", notes: "", description: "Rich and opulent with cassis, blackberry, and hints of violet. Silky texture.", food_pairings: "Beef, Lamb, Poultry", alcohol: "14.5%", cabinet_id: "cabinet-1", row: 0, col: 1, zone: "", disposition: "H", added_at: "2024-02-10T10:00:00Z" },
+      { id: "3", barcode: "", name: "Cloudy Bay Sauvignon Blanc 2022", winery: "Cloudy Bay", region: "Marlborough", country: "New Zealand", vintage: 2022, type: "white", grape_variety: "Sauvignon Blanc", rating: 4.1, ratings_count: 8920, image_url: "https://images.vivino.com/thumbs/nJLfB4FiTk639gJwqDJMdw_375x500.jpg", price: 25, purchase_date: "2024-03-01", drink_by: "2026", notes: "", description: "Vibrant citrus and tropical notes with a crisp, refreshing finish.", food_pairings: "Shellfish, Salad, Goat Cheese", alcohol: "13.0%", cabinet_id: "cabinet-2", row: 0, col: 0, zone: "", disposition: "D", added_at: "2024-03-01T10:00:00Z" },
+      { id: "4", barcode: "", name: "Whispering Angel Rosé 2023", winery: "Caves d'Esclans", region: "Provence", country: "France", vintage: 2023, type: "rosé", grape_variety: "Grenache blend", rating: 3.9, ratings_count: 15430, image_url: "https://images.vivino.com/thumbs/VJxAUpSKTVyjFBIplOSbXg_375x500.jpg", price: 22, purchase_date: "2024-04-15", drink_by: "2025", notes: "Summer wine", description: "Pale salmon color, delicate and fresh with notes of peach and strawberry.", food_pairings: "Salad, Shellfish, Appetizers", alcohol: "13.0%", cabinet_id: "cabinet-2", row: 0, col: 1, zone: "", disposition: "D", added_at: "2024-04-15T10:00:00Z" },
+      { id: "5", barcode: "", name: "Dom Pérignon 2012", winery: "Moët & Chandon", region: "Champagne", country: "France", vintage: 2012, type: "sparkling", grape_variety: "Chardonnay/Pinot Noir", rating: 4.7, ratings_count: 6780, image_url: "https://images.vivino.com/thumbs/gEbzMut8TSWKHAxYP2LoIw_375x500.jpg", price: 250, purchase_date: "2024-05-20", drink_by: "2035", notes: "Special occasions", description: "Exceptional vintage with great intensity, precision, and length.", food_pairings: "Shellfish, Appetizers, Poultry", alcohol: "12.5%", cabinet_id: "cabinet-3", row: 0, col: 0, zone: "", disposition: "H", added_at: "2024-05-20T10:00:00Z" },
+      { id: "6", barcode: "", name: "Château Guiraud 2017", winery: "Château Guiraud", region: "Sauternes", country: "France", vintage: 2017, type: "dessert", grape_variety: "Sémillon/Sauvignon Blanc", rating: 4.3, ratings_count: 1205, image_url: "https://images.vivino.com/thumbs/q2s9wLm_TVmgR5qPEqifOw_375x500.jpg", price: 45, purchase_date: "2024-06-01", drink_by: "2040", notes: "From the cellar box", description: "Luscious and honeyed with apricot, citrus peel, and botrytis complexity.", food_pairings: "Dessert, Blue Cheese, Foie Gras", alcohol: "14.0%", cabinet_id: "cabinet-3", row: 0, col: 1, zone: "", disposition: "H", added_at: "2024-06-01T10:00:00Z" },
+      { id: "7", barcode: "", name: "Pio Cesare Barolo 2018", winery: "Pio Cesare", region: "Barolo, Piedmont", country: "Italy", vintage: 2018, type: "red", grape_variety: "Nebbiolo", rating: 4.4, ratings_count: 2340, image_url: "https://images.vivino.com/thumbs/RYfmTMjBRTKmhJ0kNnxnog_375x500.jpg", price: 65, purchase_date: "2024-06-15", drink_by: "2038", notes: "", description: "Classic Barolo with tar, roses, and dark cherry. Firm tannins.", food_pairings: "Beef, Pasta, Game", alcohol: "14.0%", cabinet_id: "cabinet-1", row: 0, col: 2, zone: "", disposition: "H", added_at: "2024-06-15T10:00:00Z" },
+      { id: "8", barcode: "", name: "Penfolds Grange 2017", winery: "Penfolds", region: "South Australia", country: "Australia", vintage: 2017, type: "red", grape_variety: "Shiraz", rating: 4.8, ratings_count: 1890, image_url: "https://images.vivino.com/thumbs/B38BBCz2T8KJphgJa6FMYQ_375x500.jpg", price: 700, purchase_date: "2024-07-01", drink_by: "2045", notes: "Collector", description: "Australia's most iconic wine. Deep, complex, multi-layered.", food_pairings: "Beef, Lamb, Game", alcohol: "14.5%", cabinet_id: "cabinet-1", row: 0, col: 3, zone: "", disposition: "H", added_at: "2024-07-01T10:00:00Z" },
+      { id: "9", barcode: "", name: "Sassicaia 2019", winery: "Tenuta San Guido", region: "Bolgheri, Tuscany", country: "Italy", vintage: 2019, type: "red", grape_variety: "Cabernet Sauvignon/Franc", rating: 4.6, ratings_count: 4120, image_url: "https://images.vivino.com/thumbs/I64BJ-p-T2awMGz0X-nGwQ_375x500.jpg", price: 280, purchase_date: "2024-07-15", drink_by: "2040", notes: "", description: "Elegant Super Tuscan with blackcurrant, herbs, and fine tannins.", food_pairings: "Beef, Lamb, Pasta", alcohol: "14.0%", cabinet_id: "cabinet-1", row: 1, col: 0, zone: "", disposition: "D", added_at: "2024-07-15T10:00:00Z" },
+      { id: "10", barcode: "", name: "Vega Sicilia Unico 2011", winery: "Vega Sicilia", region: "Ribera del Duero", country: "Spain", vintage: 2011, type: "red", grape_variety: "Tempranillo", rating: 4.7, ratings_count: 2560, image_url: "https://images.vivino.com/thumbs/1SprQfT5TeGkfnyaYwWbpg_375x500.jpg", price: 450, purchase_date: "2024-08-01", drink_by: "2045", notes: "", description: "Spain's most prestigious wine. Exquisite complexity and aging potential.", food_pairings: "Beef, Lamb, Game", alcohol: "14.0%", cabinet_id: "cabinet-1", row: 1, col: 1, zone: "", disposition: "H", added_at: "2024-08-01T10:00:00Z" },
+      { id: "11", barcode: "", name: "Château d'Yquem 2015", winery: "Château d'Yquem", region: "Sauternes", country: "France", vintage: 2015, type: "white", grape_variety: "Sémillon", rating: 4.9, ratings_count: 3890, image_url: "https://images.vivino.com/thumbs/FUfxvPjcTVqByy8FBjuUJA_375x500.jpg", price: 400, purchase_date: "2024-08-15", drink_by: "2060", notes: "Premier Cru Supérieur", description: "The world's greatest sweet wine. Extraordinary depth and longevity.", food_pairings: "Foie Gras, Blue Cheese, Dessert", alcohol: "14.0%", cabinet_id: "cabinet-2", row: 1, col: 0, zone: "", disposition: "H", added_at: "2024-08-15T10:00:00Z" },
+      { id: "12", barcode: "", name: "Chablis Grand Cru 2020", winery: "William Fèvre", region: "Chablis, Burgundy", country: "France", vintage: 2020, type: "white", grape_variety: "Chardonnay", rating: 4.3, ratings_count: 1670, image_url: "https://images.vivino.com/thumbs/RQf52a0TX0GN3Bl7giH5-Q_375x500.jpg", price: 85, purchase_date: "2024-09-01", drink_by: "2032", notes: "", description: "Mineral-driven with citrus, flint, and subtle oak influence.", food_pairings: "Shellfish, Fish, Poultry", alcohol: "13.0%", cabinet_id: "cabinet-2", row: 2, col: 0, zone: "", disposition: "D", added_at: "2024-09-01T10:00:00Z" },
+      { id: "b1", barcode: "", name: "Pio Cesare Barolo (Box)", winery: "Pio Cesare", region: "Barolo", country: "Italy", vintage: 2019, type: "red", grape_variety: "Nebbiolo", rating: 4.3, ratings_count: 1100, image_url: "", price: 60, purchase_date: "2024-10-01", drink_by: "2035", notes: "6-bottle case", description: "", food_pairings: "", alcohol: "", cabinet_id: "cabinet-1", row: null, col: null, zone: "storage-9", disposition: "", added_at: "2024-10-01T10:00:00Z" },
+      { id: "b2", barcode: "", name: "Château Guiraud (Box)", winery: "Château Guiraud", region: "Sauternes", country: "France", vintage: 2018, type: "dessert", grape_variety: "Sémillon", rating: 4.2, ratings_count: 980, image_url: "", price: 40, purchase_date: "2024-10-15", drink_by: "2040", notes: "6-bottle case", description: "", food_pairings: "", alcohol: "", cabinet_id: "cabinet-2", row: null, col: null, zone: "storage-9", disposition: "", added_at: "2024-10-15T10:00:00Z" },
     ];
 
     const mockCabinets = [
-      { id: "cabinet-1", name: "Section 1", type: "grid", rows: 10, cols: 9, has_bottom_zone: true, bottom_zone_name: "Box Storage", order: 0 },
-      { id: "cabinet-2", name: "Section 2", type: "grid", rows: 10, cols: 9, has_bottom_zone: true, bottom_zone_name: "Box Storage", order: 1 },
-      { id: "cabinet-3", name: "Section 3", type: "grid", rows: 10, cols: 9, has_bottom_zone: true, bottom_zone_name: "Box Storage", order: 2 },
+      { id: "cabinet-1", name: "Section 1", type: "grid", rows: 10, cols: 9, has_bottom_zone: false, bottom_zone_name: "", storage_rows: [{ row: 9, name: "Box Storage" }], order: 0 },
+      { id: "cabinet-2", name: "Section 2", type: "grid", rows: 10, cols: 9, has_bottom_zone: false, bottom_zone_name: "", storage_rows: [{ row: 9, name: "Box Storage" }], order: 1 },
+      { id: "cabinet-3", name: "Section 3", type: "grid", rows: 10, cols: 9, has_bottom_zone: false, bottom_zone_name: "", storage_rows: [], order: 2 },
     ];
 
     const mockStats = {
       total_bottles: mockWines.length,
       total_capacity: 270,
       available_slots: 270 - mockWines.length,
-      by_type: { red: 7, white: 2, rosé: 1, sparkling: 1, dessert: 3 },
-      by_cabinet: { "cabinet-1": 7, "cabinet-2": 4, "cabinet-3": 3 },
+      total_value: mockWines.reduce((sum, w) => sum + (w.price || 0), 0),
+      by_type: { red: 7, white: 3, "rosé": 1, sparkling: 1, dessert: 2 },
+      by_cabinet: { "cabinet-1": 8, "cabinet-2": 5, "cabinet-3": 2 },
     };
 
     // Mock hass object
@@ -89,10 +81,12 @@
             return { cabinets: mockCabinets };
           case "wine_cellar/get_stats":
             return mockStats;
+          case "wine_cellar/get_capabilities":
+            return { has_gemini: true };
           case "wine_cellar/lookup_barcode":
-            return { result: { name: "Test Wine", winery: "Test Winery", region: "Test Region", country: "France", vintage: 2020, type: "red", grape_variety: "Merlot", rating: 4.0, image_url: "", price: 30, source: "mock" }, cached: false };
+            return { result: { name: "Test Wine", winery: "Test Winery", region: "Test Region", country: "France", vintage: 2020, type: "red", grape_variety: "Merlot", rating: 4.0, ratings_count: 500, image_url: "https://images.vivino.com/thumbs/ApnxEJsiSaCuFadP5WMFKQ_375x500.jpg", price: 30, description: "A rich, full-bodied red.", food_pairings: "Beef, Pasta", alcohol: "13.5%", source: "mock" }, cached: false };
           case "wine_cellar/search_wine":
-            return { results: [{ name: "Search Result Wine", winery: "Found Winery", region: "Found Region", country: "Italy", vintage: 2021, type: "red", grape_variety: "Sangiovese", rating: 3.8, image_url: "", price: 25, source: "mock" }] };
+            return { results: [{ name: "Search Result Wine", winery: "Found Winery", region: "Found Region", country: "Italy", vintage: 2021, type: "red", grape_variety: "Sangiovese", rating: 3.8, ratings_count: 1200, image_url: "https://images.vivino.com/thumbs/I64BJ-p-T2awMGz0X-nGwQ_375x500.jpg", price: 25, description: "Fresh and fruity with cherry notes.", food_pairings: "Pasta, Pizza, Poultry", alcohol: "13.0%", source: "mock" }] };
           case "wine_cellar/add_wine":
             mockWines.push({ ...msg.wine, id: "new-" + Date.now(), added_at: new Date().toISOString() });
             return { wine: mockWines[mockWines.length - 1] };
@@ -100,6 +94,12 @@
             const idx = mockWines.findIndex(w => w.id === msg.wine_id);
             if (idx >= 0) mockWines.splice(idx, 1);
             return { success: true };
+          case "wine_cellar/update_wine":
+            const wine = mockWines.find(w => w.id === msg.wine_id);
+            if (wine && msg.updates) Object.assign(wine, msg.updates);
+            return { wine };
+          case "wine_cellar/analyze_wines":
+            return { updated: mockWines.length, total: mockWines.length };
           default:
             return {};
         }
