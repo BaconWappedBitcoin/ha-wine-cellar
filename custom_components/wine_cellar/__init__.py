@@ -12,7 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 
-from .const import DOMAIN
+from .const import DOMAIN, FRONTEND_VERSION
 from .vivino import VivinoClient
 from .websocket import async_register_websocket_commands
 from .wine_storage import WineCellarStorage
@@ -30,8 +30,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 def _register_static_path(hass: HomeAssistant) -> None:
     """Register frontend static path, handling both old and new HA APIs."""
-    frontend_path = str(Path(__file__).parent / "frontend" / "wine-cellar-card.js")
-    url_path = "/wine_cellar/wine-cellar-card.js"
+    frontend_dir = Path(__file__).parent / "frontend"
+    frontend_path = str(frontend_dir / "wine-cellar-card.js")
+    url_path = f"/wine_cellar/wine-cellar-card-{FRONTEND_VERSION}.js"
 
     try:
         # Modern HA (2024.7+)
@@ -49,6 +50,49 @@ def _register_static_path(hass: HomeAssistant) -> None:
             _LOGGER.warning("Could not register frontend static path")
 
 
+def _register_frontend_resource(hass: HomeAssistant) -> None:
+    """Register the card JS as a Lovelace resource with cache-busted URL."""
+    url = f"/wine_cellar/wine-cellar-card-{FRONTEND_VERSION}.js"
+
+    # Use the lovelace resources collection if available
+    try:
+        from homeassistant.components.lovelace.resources import (
+            ResourceStorageCollection,
+        )
+    except ImportError:
+        _LOGGER.debug("Lovelace resources API not available, skipping auto-register")
+        return
+
+    async def _async_add_resource() -> None:
+        """Add or update Lovelace resource."""
+        try:
+            resources = hass.data.get("lovelace_resources")
+            if resources is None:
+                return
+
+            # Check existing resources
+            existing = None
+            for item in resources.async_items():
+                if "/wine_cellar/" in item.get("url", ""):
+                    existing = item
+                    break
+
+            if existing:
+                # Update URL with new version
+                if existing.get("url") != url:
+                    await resources.async_update_item(
+                        existing["id"], {"url": url}
+                    )
+                    _LOGGER.debug("Updated wine cellar frontend resource to %s", url)
+            else:
+                await resources.async_create_item({"res_type": "module", "url": url})
+                _LOGGER.debug("Registered wine cellar frontend resource: %s", url)
+        except Exception as err:
+            _LOGGER.debug("Could not auto-register frontend resource: %s", err)
+
+    hass.async_create_task(_async_add_resource())
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Wine Cellar from a config entry."""
     domain_data = hass.data.setdefault(DOMAIN, {})
@@ -56,6 +100,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register frontend static path (only once, persists across reloads)
     if not domain_data.get("frontend_registered"):
         _register_static_path(hass)
+        # Auto-register as Lovelace resource so the card loads without manual config
+        _register_frontend_resource(hass)
         domain_data["frontend_registered"] = True
 
     # Register WebSocket commands (only once, they persist globally in HA)
