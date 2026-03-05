@@ -55,24 +55,35 @@ class VivinoClient:
         results = []
 
         try:
+            # Vivino explore API requires country_code and currency_code
             params = {
                 "q": query,
                 "page": 1,
                 "page_size": 5,
+                "country_code": "US",
+                "currency_code": "USD",
+                "language": "en",
             }
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+                "Accept": "application/json",
             }
 
             async with session.get(
-                VIVINO_API_URL, params=params, headers=headers, timeout=10
+                VIVINO_API_URL, params=params, headers=headers, timeout=15
             ) as resp:
                 if resp.status != 200:
-                    _LOGGER.debug("Vivino API returned status %s", resp.status)
+                    _LOGGER.warning(
+                        "Vivino API returned status %s for query '%s'",
+                        resp.status, query,
+                    )
                     return []
 
                 data = await resp.json()
                 matches = data.get("explore_vintage", {}).get("matches", [])
+                _LOGGER.debug(
+                    "Vivino search for '%s' returned %d matches", query, len(matches)
+                )
 
                 for match in matches:
                     vintage = match.get("vintage", {})
@@ -98,7 +109,7 @@ class VivinoClient:
                     })
 
         except Exception as err:
-            _LOGGER.debug("Vivino explore API error: %s", err)
+            _LOGGER.warning("Vivino explore API error for '%s': %s", query, err)
 
         return results
 
