@@ -172,6 +172,60 @@ export class CabinetGrid extends LitElement {
       .zone-bottle:hover {
         transform: scale(1.1);
       }
+
+      /* Phone: tighter spacing, smaller elements */
+      @media (max-width: 599px) {
+        .cabinet {
+          padding: 6px;
+          border-radius: 10px;
+        }
+        .cabinet-name {
+          font-size: 0.75em;
+          padding: 3px 0;
+        }
+        .grid-inner {
+          padding: 4px;
+        }
+        .row {
+          gap: 1px;
+          margin-bottom: 1px;
+        }
+        .row::after {
+          height: 2px;
+        }
+        .cell .bottle-label {
+          font-size: 5px;
+          max-width: 30px;
+        }
+        .bottom-zone {
+          margin-top: 6px;
+          padding: 6px;
+          gap: 4px;
+          min-height: 32px;
+        }
+        .bottom-zone-label {
+          font-size: 0.6em;
+        }
+        .zone-bottle {
+          width: 22px;
+          height: 22px;
+          font-size: 7px;
+        }
+      }
+
+      /* Tablet: moderate sizing */
+      @media (min-width: 600px) and (max-width: 1023px) {
+        .cabinet {
+          padding: 6px;
+        }
+        .grid-inner {
+          padding: 5px;
+        }
+        .row {
+          gap: 2px;
+          margin-bottom: 1px;
+        }
+      }
     `,
   ];
 

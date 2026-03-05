@@ -211,4 +211,40 @@ export const sharedStyles = css`
     from { transform: translateY(20px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
   }
+
+  /* Phone: full-screen dialogs, compact forms */
+  @media (max-width: 599px) {
+    .dialog {
+      width: 100%;
+      max-width: 100%;
+      max-height: 100vh;
+      border-radius: 12px 12px 0 0;
+      margin-top: auto;
+    }
+    .dialog-overlay {
+      align-items: flex-end;
+    }
+    .dialog-header {
+      padding: 16px 16px 10px;
+      font-size: 1.1em;
+    }
+    .dialog-body {
+      padding: 12px 16px;
+    }
+    .dialog-footer {
+      padding: 10px 16px 16px;
+    }
+    .form-row {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    .tab-bar {
+      padding: 6px 12px;
+      gap: 3px;
+    }
+    .tab {
+      padding: 5px 12px;
+      font-size: 0.8em;
+    }
+  }
 `;

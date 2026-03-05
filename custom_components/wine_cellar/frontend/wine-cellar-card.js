@@ -283,6 +283,42 @@ const sharedStyles = i$3 `
     from { transform: translateY(20px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
   }
+
+  /* Phone: full-screen dialogs, compact forms */
+  @media (max-width: 599px) {
+    .dialog {
+      width: 100%;
+      max-width: 100%;
+      max-height: 100vh;
+      border-radius: 12px 12px 0 0;
+      margin-top: auto;
+    }
+    .dialog-overlay {
+      align-items: flex-end;
+    }
+    .dialog-header {
+      padding: 16px 16px 10px;
+      font-size: 1.1em;
+    }
+    .dialog-body {
+      padding: 12px 16px;
+    }
+    .dialog-footer {
+      padding: 10px 16px 16px;
+    }
+    .form-row {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    .tab-bar {
+      padding: 6px 12px;
+      gap: 3px;
+    }
+    .tab {
+      padding: 5px 12px;
+      font-size: 0.8em;
+    }
+  }
 `;
 
 const WINE_TYPE_COLORS = {
@@ -552,6 +588,60 @@ CabinetGrid.styles = [
 
       .zone-bottle:hover {
         transform: scale(1.1);
+      }
+
+      /* Phone: tighter spacing, smaller elements */
+      @media (max-width: 599px) {
+        .cabinet {
+          padding: 6px;
+          border-radius: 10px;
+        }
+        .cabinet-name {
+          font-size: 0.75em;
+          padding: 3px 0;
+        }
+        .grid-inner {
+          padding: 4px;
+        }
+        .row {
+          gap: 1px;
+          margin-bottom: 1px;
+        }
+        .row::after {
+          height: 2px;
+        }
+        .cell .bottle-label {
+          font-size: 5px;
+          max-width: 30px;
+        }
+        .bottom-zone {
+          margin-top: 6px;
+          padding: 6px;
+          gap: 4px;
+          min-height: 32px;
+        }
+        .bottom-zone-label {
+          font-size: 0.6em;
+        }
+        .zone-bottle {
+          width: 22px;
+          height: 22px;
+          font-size: 7px;
+        }
+      }
+
+      /* Tablet: moderate sizing */
+      @media (min-width: 600px) and (max-width: 1023px) {
+        .cabinet {
+          padding: 6px;
+        }
+        .grid-inner {
+          padding: 5px;
+        }
+        .row {
+          gap: 2px;
+          margin-bottom: 1px;
+        }
       }
     `,
 ];
@@ -2144,6 +2234,51 @@ WineCellarCard.styles = [
         text-align: center;
         padding: 40px;
         color: var(--wc-text-secondary);
+      }
+
+      /* Phone: stack cabinets vertically */
+      @media (max-width: 599px) {
+        .header-row {
+          padding: 12px 12px 6px;
+        }
+        .title {
+          font-size: 1.1em;
+        }
+        .stats-bar {
+          flex-wrap: wrap;
+          gap: 8px;
+          padding: 6px 12px;
+          font-size: 0.8em;
+        }
+        .cabinets-row {
+          grid-template-columns: 1fr;
+          gap: 10px;
+          padding: 8px 12px 12px;
+        }
+        .wine-list-item {
+          padding: 8px;
+          gap: 8px;
+        }
+        .btn-primary {
+          padding: 6px 12px;
+          font-size: 0.85em;
+        }
+      }
+
+      /* Tablet: 2 cabinets side by side */
+      @media (min-width: 600px) and (max-width: 1023px) {
+        .cabinets-row {
+          grid-template-columns: repeat(2, 1fr);
+          gap: 12px;
+        }
+      }
+
+      /* Desktop: all cabinets side by side */
+      @media (min-width: 1024px) {
+        .cabinets-row {
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          gap: 16px;
+        }
       }
     `,
 ];

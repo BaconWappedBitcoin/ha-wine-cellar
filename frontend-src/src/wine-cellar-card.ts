@@ -138,6 +138,51 @@ export class WineCellarCard extends LitElement {
         padding: 40px;
         color: var(--wc-text-secondary);
       }
+
+      /* Phone: stack cabinets vertically */
+      @media (max-width: 599px) {
+        .header-row {
+          padding: 12px 12px 6px;
+        }
+        .title {
+          font-size: 1.1em;
+        }
+        .stats-bar {
+          flex-wrap: wrap;
+          gap: 8px;
+          padding: 6px 12px;
+          font-size: 0.8em;
+        }
+        .cabinets-row {
+          grid-template-columns: 1fr;
+          gap: 10px;
+          padding: 8px 12px 12px;
+        }
+        .wine-list-item {
+          padding: 8px;
+          gap: 8px;
+        }
+        .btn-primary {
+          padding: 6px 12px;
+          font-size: 0.85em;
+        }
+      }
+
+      /* Tablet: 2 cabinets side by side */
+      @media (min-width: 600px) and (max-width: 1023px) {
+        .cabinets-row {
+          grid-template-columns: repeat(2, 1fr);
+          gap: 12px;
+        }
+      }
+
+      /* Desktop: all cabinets side by side */
+      @media (min-width: 1024px) {
+        .cabinets-row {
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          gap: 16px;
+        }
+      }
     `,
   ];
 
