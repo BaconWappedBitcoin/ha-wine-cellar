@@ -1563,7 +1563,7 @@ let LabelCamera = class LabelCamera extends i {
         this._error = "";
         try {
             this._stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 960 } },
+                video: { facingMode: "environment", width: { ideal: 960 }, height: { ideal: 1280 } },
                 audio: false,
             });
             await this.updateComplete;
@@ -1700,7 +1700,9 @@ LabelCamera.styles = [
       .camera-container {
         position: relative;
         width: 100%;
-        max-height: 220px;
+        max-width: 300px;
+        margin: 0 auto;
+        aspect-ratio: 3 / 4;
         border-radius: 12px;
         overflow: hidden;
         background: #000;
@@ -1711,14 +1713,16 @@ LabelCamera.styles = [
         height: 100%;
         object-fit: cover;
         display: block;
-        max-height: 220px;
       }
 
       .captured-preview {
         width: 100%;
+        max-width: 300px;
+        margin: 0 auto;
+        display: block;
         border-radius: 12px;
         object-fit: contain;
-        max-height: 180px;
+        max-height: 300px;
       }
 
       .capture-btn-area {

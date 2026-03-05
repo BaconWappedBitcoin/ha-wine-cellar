@@ -100,6 +100,16 @@ class GeminiVisionClient:
                     )
                     return {"error": f"Gemini API key is invalid (HTTP {resp.status})"}
 
+                if resp.status == 429:
+                    _LOGGER.error(
+                        "Gemini API quota exhausted: %s", resp_text[:300]
+                    )
+                    return {
+                        "error": "Gemini API free tier quota exhausted. "
+                        "Enable billing at console.cloud.google.com or "
+                        "create a new API key at aistudio.google.com/apikey"
+                    }
+
                 if resp.status != 200:
                     _LOGGER.error(
                         "Gemini API returned status %s: %s",
