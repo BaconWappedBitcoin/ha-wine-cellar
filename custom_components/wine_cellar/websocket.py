@@ -423,8 +423,8 @@ async def ws_refresh_wine(
         val = lookup.get(key)
         if val:
             updates[key] = val
-    # Store Vivino price as retail_price (separate from user's purchase price)
-    if lookup.get("price"):
+    # Store Vivino price as retail_price only if not already set
+    if lookup.get("price") and not wine.get("retail_price"):
         updates["retail_price"] = lookup["price"]
 
     # Clear bad descriptions (Vivino error page text)

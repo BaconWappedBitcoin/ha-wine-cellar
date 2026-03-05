@@ -946,6 +946,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
             country: this.wine.country || "",
             grape_variety: this.wine.grape_variety || "",
             price: this.wine.price,
+            retail_price: this.wine.retail_price,
             purchase_date: this.wine.purchase_date || "",
             drink_by: this.wine.drink_by || "",
             notes: this.wine.notes || "",
@@ -975,6 +976,10 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 updates.price = null;
             else
                 updates.price = parseFloat(updates.price) || null;
+            if (updates.retail_price === "" || updates.retail_price === null)
+                updates.retail_price = null;
+            else
+                updates.retail_price = parseFloat(updates.retail_price) || null;
             await this.hass.callWS({
                 type: "wine_cellar/update_wine",
                 wine_id: this.wine.id,
@@ -1130,7 +1135,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
             </select>
           </div>
           <div class="form-group">
-            <label>Price</label>
+            <label>Purchase Price</label>
             <input type="number" step="0.01" .value=${d.price?.toString() || ""}
               @input=${(e) => this._updateEditField("price", e.target.value)} />
           </div>
@@ -1138,18 +1143,23 @@ let WineDetailDialog = class WineDetailDialog extends i {
 
         <div class="form-row">
           <div class="form-group">
+            <label>Current Value</label>
+            <input type="number" step="0.01" .value=${d.retail_price?.toString() || ""}
+              @input=${(e) => this._updateEditField("retail_price", e.target.value)} />
+          </div>
+          <div class="form-group">
             <label>Region</label>
             <input type="text" .value=${d.region}
               @input=${(e) => this._updateEditField("region", e.target.value)} />
           </div>
+        </div>
+
+        <div class="form-row">
           <div class="form-group">
             <label>Country</label>
             <input type="text" .value=${d.country}
               @input=${(e) => this._updateEditField("country", e.target.value)} />
           </div>
-        </div>
-
-        <div class="form-row">
           <div class="form-group">
             <label>Grape Variety</label>
             <input type="text" .value=${d.grape_variety}
@@ -1312,7 +1322,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 ? b `<div class="detail-item"><span class="detail-label">Purchase Price</span><span class="detail-value">$${wine.price.toFixed(2)}</span></div>`
                 : A}
                   ${wine.retail_price
-                ? b `<div class="detail-item"><span class="detail-label">Retail Price</span><span class="detail-value">$${wine.retail_price.toFixed(2)}</span></div>`
+                ? b `<div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">$${wine.retail_price.toFixed(2)}</span></div>`
                 : A}
                   ${wine.purchase_date
                 ? b `<div class="detail-item"><span class="detail-label">Purchased</span><span class="detail-value">${wine.purchase_date}</span></div>`
@@ -2511,6 +2521,7 @@ let AddWineDialog = class AddWineDialog extends i {
                     country: "",
                     grape_variety: "",
                     price: null,
+                    retail_price: null,
                     notes: "",
                     user_rating: null,
                     tasting_notes: null,
@@ -2886,7 +2897,7 @@ let AddWineDialog = class AddWineDialog extends i {
             </select>
           </div>
           <div class="form-group">
-            <label>Price</label>
+            <label>Purchase Price</label>
             <input
               type="number"
               step="0.01"
@@ -2898,6 +2909,15 @@ let AddWineDialog = class AddWineDialog extends i {
 
         <div class="form-row">
           <div class="form-group">
+            <label>Current Value</label>
+            <input
+              type="number"
+              step="0.01"
+              .value=${this._wineData.retail_price?.toString() || ""}
+              @input=${(e) => this._updateField("retail_price", parseFloat(e.target.value) || null)}
+            />
+          </div>
+          <div class="form-group">
             <label>Region</label>
             <input
               type="text"
@@ -2905,6 +2925,9 @@ let AddWineDialog = class AddWineDialog extends i {
               @input=${(e) => this._updateField("region", e.target.value)}
             />
           </div>
+        </div>
+
+        <div class="form-row">
           <div class="form-group">
             <label>Country</label>
             <input

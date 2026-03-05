@@ -360,6 +360,7 @@ export class AddWineDialog extends LitElement {
           country: "",
           grape_variety: "",
           price: null,
+          retail_price: null,
           notes: "",
           user_rating: null,
           tasting_notes: null,
@@ -764,7 +765,7 @@ export class AddWineDialog extends LitElement {
             </select>
           </div>
           <div class="form-group">
-            <label>Price</label>
+            <label>Purchase Price</label>
             <input
               type="number"
               step="0.01"
@@ -777,6 +778,16 @@ export class AddWineDialog extends LitElement {
 
         <div class="form-row">
           <div class="form-group">
+            <label>Current Value</label>
+            <input
+              type="number"
+              step="0.01"
+              .value=${this._wineData.retail_price?.toString() || ""}
+              @input=${(e: InputEvent) =>
+                this._updateField("retail_price", parseFloat((e.target as HTMLInputElement).value) || null)}
+            />
+          </div>
+          <div class="form-group">
             <label>Region</label>
             <input
               type="text"
@@ -785,6 +796,9 @@ export class AddWineDialog extends LitElement {
                 this._updateField("region", (e.target as HTMLInputElement).value)}
             />
           </div>
+        </div>
+
+        <div class="form-row">
           <div class="form-group">
             <label>Country</label>
             <input

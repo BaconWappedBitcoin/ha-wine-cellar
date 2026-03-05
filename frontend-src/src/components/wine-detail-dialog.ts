@@ -473,6 +473,7 @@ export class WineDetailDialog extends LitElement {
       country: this.wine.country || "",
       grape_variety: this.wine.grape_variety || "",
       price: this.wine.price,
+      retail_price: this.wine.retail_price,
       purchase_date: this.wine.purchase_date || "",
       drink_by: this.wine.drink_by || "",
       notes: this.wine.notes || "",
@@ -500,6 +501,8 @@ export class WineDetailDialog extends LitElement {
       else updates.vintage = parseInt(updates.vintage) || null;
       if (updates.price === "" || updates.price === null) updates.price = null;
       else updates.price = parseFloat(updates.price) || null;
+      if (updates.retail_price === "" || updates.retail_price === null) updates.retail_price = null;
+      else updates.retail_price = parseFloat(updates.retail_price) || null;
 
       await this.hass.callWS({
         type: "wine_cellar/update_wine",
@@ -665,7 +668,7 @@ export class WineDetailDialog extends LitElement {
             </select>
           </div>
           <div class="form-group">
-            <label>Price</label>
+            <label>Purchase Price</label>
             <input type="number" step="0.01" .value=${d.price?.toString() || ""}
               @input=${(e: Event) => this._updateEditField("price", (e.target as HTMLInputElement).value)} />
           </div>
@@ -673,18 +676,23 @@ export class WineDetailDialog extends LitElement {
 
         <div class="form-row">
           <div class="form-group">
+            <label>Current Value</label>
+            <input type="number" step="0.01" .value=${d.retail_price?.toString() || ""}
+              @input=${(e: Event) => this._updateEditField("retail_price", (e.target as HTMLInputElement).value)} />
+          </div>
+          <div class="form-group">
             <label>Region</label>
             <input type="text" .value=${d.region}
               @input=${(e: Event) => this._updateEditField("region", (e.target as HTMLInputElement).value)} />
           </div>
+        </div>
+
+        <div class="form-row">
           <div class="form-group">
             <label>Country</label>
             <input type="text" .value=${d.country}
               @input=${(e: Event) => this._updateEditField("country", (e.target as HTMLInputElement).value)} />
           </div>
-        </div>
-
-        <div class="form-row">
           <div class="form-group">
             <label>Grape Variety</label>
             <input type="text" .value=${d.grape_variety}
@@ -855,7 +863,7 @@ export class WineDetailDialog extends LitElement {
                     ? html`<div class="detail-item"><span class="detail-label">Purchase Price</span><span class="detail-value">$${wine.price.toFixed(2)}</span></div>`
                     : nothing}
                   ${wine.retail_price
-                    ? html`<div class="detail-item"><span class="detail-label">Retail Price</span><span class="detail-value">$${wine.retail_price.toFixed(2)}</span></div>`
+                    ? html`<div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">$${wine.retail_price.toFixed(2)}</span></div>`
                     : nothing}
                   ${wine.purchase_date
                     ? html`<div class="detail-item"><span class="detail-label">Purchased</span><span class="detail-value">${wine.purchase_date}</span></div>`

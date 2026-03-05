@@ -59,6 +59,12 @@ class WineCellarStorage:
             for cab in self._data.get(CONF_CABINETS, []):
                 if "storage_rows" not in cab:
                     cab["storage_rows"] = []
+            # Migrate: clear $4.99 default prices set by old Vivino scraper bug
+            for wine in self._data.get(CONF_WINES, []):
+                if wine.get("price") and abs(wine["price"] - 4.99) < 0.01:
+                    wine["price"] = None
+                if wine.get("retail_price") and abs(wine["retail_price"] - 4.99) < 0.01:
+                    wine["retail_price"] = None
 
     async def async_save(self) -> None:
         """Save data to storage."""
@@ -204,7 +210,8 @@ class WineCellarStorage:
             by_type[wine_type] = by_type.get(wine_type, 0) + 1
             cab_id = wine.get("cabinet_id", "unassigned")
             by_cabinet[cab_id] = by_cabinet.get(cab_id, 0) + 1
-            price = wine.get("price")
+            # Use retail price (current value) if available, else purchase price
+            price = wine.get("retail_price") or wine.get("price")
             if price and isinstance(price, (int, float)):
                 total_value += price
 
