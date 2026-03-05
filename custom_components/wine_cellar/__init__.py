@@ -70,6 +70,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Initialize Vivino client
     vivino = VivinoClient(hass)
 
+    # Initialize Gemini client if API key is configured
+    gemini_api_key = entry.options.get("gemini_api_key", "")
+    if gemini_api_key:
+        from .gemini import GeminiVisionClient
+        domain_data["gemini"] = GeminiVisionClient(hass, gemini_api_key)
+    else:
+        domain_data.pop("gemini", None)
+
     # Store entry-specific data
     domain_data["storage"] = storage
     domain_data["vivino"] = vivino
@@ -78,10 +86,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register services
     await _async_register_services(hass, storage, vivino)
 
+    # Listen for options changes
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
+
     # Forward to sensor platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle options update."""
+    domain_data = hass.data.get(DOMAIN, {})
+    gemini_api_key = entry.options.get("gemini_api_key", "")
+    if gemini_api_key:
+        from .gemini import GeminiVisionClient
+        domain_data["gemini"] = GeminiVisionClient(hass, gemini_api_key)
+    else:
+        domain_data.pop("gemini", None)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

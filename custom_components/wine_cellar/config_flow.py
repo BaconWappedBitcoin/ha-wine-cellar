@@ -63,6 +63,12 @@ class WineCellarOptionsFlow(OptionsFlow):
                             "default_wine_type", "red"
                         ),
                     ): vol.In(["red", "white", "rosé", "sparkling", "dessert"]),
+                    vol.Optional(
+                        "gemini_api_key",
+                        default=self.config_entry.options.get(
+                            "gemini_api_key", ""
+                        ),
+                    ): str,
                 }
             ),
         )

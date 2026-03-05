@@ -9,7 +9,12 @@ import {
 } from "../models";
 import { sharedStyles } from "../styles";
 
+import "./barcode-scanner";
+import "./label-camera";
+import "./star-rating";
+
 type Step = "scan" | "details" | "location" | "confirm";
+type ScanMode = "idle" | "barcode" | "label";
 
 @customElement("add-wine-dialog")
 export class AddWineDialog extends LitElement {
@@ -21,11 +26,14 @@ export class AddWineDialog extends LitElement {
   @property({ attribute: false }) preselectedCol: number | null = null;
 
   @state() private _step: Step = "scan";
+  @state() private _scanMode: ScanMode = "idle";
   @state() private _barcode = "";
   @state() private _loading = false;
   @state() private _lookupResult: BarcodeLookupResult | null = null;
   @state() private _wineData: Partial<Wine> = {};
   @state() private _error = "";
+  @state() private _hasGemini = false;
+  @state() private _labelLoading = false;
 
   static styles = [
     sharedStyles,
@@ -56,14 +64,65 @@ export class AddWineDialog extends LitElement {
       }
 
       .scan-section {
-        text-align: center;
-        padding: 20px;
+        padding: 16px 20px;
+      }
+
+      .scan-options {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+
+      .scan-option {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px;
+        border: 2px solid var(--wc-border);
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.2s;
+        background: transparent;
+        color: var(--wc-text);
+        text-align: left;
+        font-size: 0.95em;
+        width: 100%;
+      }
+
+      .scan-option:hover {
+        border-color: var(--wc-primary);
+        background: rgba(114, 47, 55, 0.05);
+      }
+
+      .scan-option-icon {
+        font-size: 1.5em;
+        flex-shrink: 0;
+      }
+
+      .scan-option-text {
+        flex: 1;
+      }
+
+      .scan-option-title {
+        font-weight: 600;
+        margin-bottom: 2px;
+      }
+
+      .scan-option-desc {
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+      }
+
+      .scan-option.disabled {
+        opacity: 0.5;
+        cursor: default;
       }
 
       .barcode-input-row {
         display: flex;
         gap: 8px;
-        margin-top: 16px;
+        margin-top: 12px;
       }
 
       .barcode-input-row input {
@@ -74,6 +133,9 @@ export class AddWineDialog extends LitElement {
         font-size: 1em;
         text-align: center;
         letter-spacing: 2px;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        box-sizing: border-box;
       }
 
       .barcode-input-row input:focus {
@@ -85,7 +147,7 @@ export class AddWineDialog extends LitElement {
         display: flex;
         align-items: center;
         gap: 12px;
-        margin: 16px 0;
+        margin: 14px 0;
         color: var(--wc-text-secondary);
         font-size: 0.85em;
       }
@@ -105,6 +167,8 @@ export class AddWineDialog extends LitElement {
         border-radius: 10px;
         font-size: 1em;
         box-sizing: border-box;
+        background: var(--wc-bg);
+        color: var(--wc-text);
       }
 
       .search-input:focus {
@@ -219,36 +283,89 @@ export class AddWineDialog extends LitElement {
       .confirm-summary .summary-value {
         font-weight: 500;
       }
+
+      .label-loading {
+        text-align: center;
+        padding: 20px;
+      }
+
+      .label-loading .loading-spinner {
+        width: 32px;
+        height: 32px;
+        border-width: 3px;
+      }
+
+      .camera-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        padding: 8px 0;
+      }
+
+      .rating-section {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--wc-border);
+      }
+
+      .rating-label {
+        font-size: 0.85em;
+        font-weight: 500;
+        color: var(--wc-text-secondary);
+        margin-bottom: 6px;
+      }
     `,
   ];
 
   private _steps: Step[] = ["scan", "details", "location", "confirm"];
 
   updated(changedProps: Map<string, unknown>) {
-    if (changedProps.has("open") && this.open) {
-      this._step = "scan";
-      this._barcode = "";
-      this._lookupResult = null;
-      this._error = "";
-      this._loading = false;
-      this._wineData = {
-        name: "",
-        winery: "",
-        type: "red",
-        vintage: null,
-        region: "",
-        country: "",
-        grape_variety: "",
-        price: null,
-        notes: "",
-        cabinet_id: this.preselectedCabinet || "",
-        row: this.preselectedRow,
-        col: this.preselectedCol,
-      };
+    if (changedProps.has("open")) {
+      if (this.open) {
+        this._step = "scan";
+        this._scanMode = "idle";
+        this._barcode = "";
+        this._lookupResult = null;
+        this._error = "";
+        this._loading = false;
+        this._labelLoading = false;
+        this._wineData = {
+          name: "",
+          winery: "",
+          type: "red",
+          vintage: null,
+          region: "",
+          country: "",
+          grape_variety: "",
+          price: null,
+          notes: "",
+          user_rating: null,
+          tasting_notes: null,
+          cabinet_id: this.preselectedCabinet || "",
+          row: this.preselectedRow,
+          col: this.preselectedCol,
+        };
+        this._checkCapabilities();
+      } else {
+        // Ensure cameras stop when dialog closes
+        this._scanMode = "idle";
+      }
+    }
+  }
+
+  private async _checkCapabilities() {
+    try {
+      const result = await this.hass.callWS({
+        type: "wine_cellar/get_capabilities",
+      });
+      this._hasGemini = result?.has_gemini || false;
+    } catch {
+      this._hasGemini = false;
     }
   }
 
   private _close() {
+    this._scanMode = "idle";
     this.open = false;
     this.dispatchEvent(new CustomEvent("close"));
   }
@@ -332,6 +449,49 @@ export class AddWineDialog extends LitElement {
     this._loading = false;
   }
 
+  private _onBarcodeDetected(e: CustomEvent) {
+    this._barcode = e.detail.barcode;
+    this._scanMode = "idle";
+    this._lookupBarcode();
+  }
+
+  private async _onPhotoCaptured(e: CustomEvent) {
+    this._labelLoading = true;
+    this._error = "";
+
+    try {
+      const result = await this.hass.callWS({
+        type: "wine_cellar/recognize_label",
+        image: e.detail.image,
+      });
+
+      if (result.result) {
+        this._wineData = {
+          ...this._wineData,
+          name: result.result.name || "",
+          winery: result.result.winery || "",
+          type: result.result.type || "red",
+          vintage: result.result.vintage,
+          region: result.result.region || "",
+          country: result.result.country || "",
+          grape_variety: result.result.grape_variety || "",
+        };
+        this._scanMode = "idle";
+        this._step = "details";
+      } else {
+        this._error = "Could not recognize the label. Try again or enter manually.";
+      }
+    } catch (err: any) {
+      if (err?.message?.includes("gemini_not_configured")) {
+        this._error = "Gemini API key not configured. Go to integration settings.";
+      } else {
+        this._error = "Label recognition failed. Try again or enter manually.";
+      }
+    }
+
+    this._labelLoading = false;
+  }
+
   private _goToStep(step: Step) {
     this._step = step;
   }
@@ -373,13 +533,87 @@ export class AddWineDialog extends LitElement {
   }
 
   private _renderScanStep() {
+    // Barcode camera mode
+    if (this._scanMode === "barcode") {
+      return html`
+        <div class="scan-section">
+          <barcode-scanner
+            .active=${true}
+            @barcode-detected=${this._onBarcodeDetected}
+            @scanner-error=${(e: CustomEvent) => { this._error = e.detail.error; this._scanMode = "idle"; }}
+          ></barcode-scanner>
+          ${this._loading
+            ? html`<div class="label-loading"><span class="loading-spinner"></span><div style="margin-top: 8px">Looking up barcode...</div></div>`
+            : nothing}
+          ${this._error ? html`<div class="error-msg">${this._error}</div>` : nothing}
+          <div class="camera-actions">
+            <button class="btn btn-outline" @click=${() => { this._scanMode = "idle"; this._error = ""; }}>Cancel Scan</button>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="btn btn-outline" @click=${this._close}>Cancel</button>
+        </div>
+      `;
+    }
+
+    // Label camera mode
+    if (this._scanMode === "label") {
+      return html`
+        <div class="scan-section">
+          ${this._labelLoading
+            ? html`
+                <div class="label-loading">
+                  <span class="loading-spinner"></span>
+                  <div style="margin-top: 8px">Analyzing label with AI...</div>
+                </div>
+              `
+            : html`
+                <label-camera
+                  .active=${true}
+                  @photo-captured=${this._onPhotoCaptured}
+                ></label-camera>
+              `}
+          ${this._error ? html`<div class="error-msg">${this._error}</div>` : nothing}
+          <div class="camera-actions">
+            <button class="btn btn-outline" @click=${() => { this._scanMode = "idle"; this._error = ""; this._labelLoading = false; }}>Cancel</button>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="btn btn-outline" @click=${this._close}>Cancel</button>
+        </div>
+      `;
+    }
+
+    // Idle mode - show options
     return html`
       <div class="scan-section">
-        <div style="font-size: 2.5em; margin-bottom: 8px">📷</div>
-        <div style="font-weight: 500; margin-bottom: 4px">Scan or Enter Barcode</div>
-        <div style="font-size: 0.85em; color: var(--wc-text-secondary)">
-          Enter a barcode number to look up wine details
+        <div class="scan-options">
+          <button class="scan-option" @click=${() => { this._scanMode = "barcode"; this._error = ""; }}>
+            <span class="scan-option-icon">📷</span>
+            <div class="scan-option-text">
+              <div class="scan-option-title">Scan Barcode</div>
+              <div class="scan-option-desc">Point camera at wine bottle barcode</div>
+            </div>
+          </button>
+
+          <button
+            class="scan-option ${this._hasGemini ? "" : "disabled"}"
+            @click=${() => this._hasGemini && (() => { this._scanMode = "label"; this._error = ""; })()}
+            title=${this._hasGemini ? "" : "Configure Gemini API key in integration settings"}
+          >
+            <span class="scan-option-icon">🤖</span>
+            <div class="scan-option-text">
+              <div class="scan-option-title">Recognize Label</div>
+              <div class="scan-option-desc">
+                ${this._hasGemini
+                  ? "Take a photo of the wine label"
+                  : "Requires Gemini API key in settings"}
+              </div>
+            </div>
+          </button>
         </div>
+
+        <div class="or-divider">or enter manually</div>
 
         <div class="barcode-input-row">
           <input
@@ -464,10 +698,7 @@ export class AddWineDialog extends LitElement {
               type="text"
               .value=${this._wineData.winery || ""}
               @input=${(e: InputEvent) =>
-                this._updateField(
-                  "winery",
-                  (e.target as HTMLInputElement).value
-                )}
+                this._updateField("winery", (e.target as HTMLInputElement).value)}
             />
           </div>
           <div class="form-group">
@@ -476,10 +707,7 @@ export class AddWineDialog extends LitElement {
               type="number"
               .value=${this._wineData.vintage?.toString() || ""}
               @input=${(e: InputEvent) =>
-                this._updateField(
-                  "vintage",
-                  parseInt((e.target as HTMLInputElement).value) || null
-                )}
+                this._updateField("vintage", parseInt((e.target as HTMLInputElement).value) || null)}
             />
           </div>
         </div>
@@ -490,10 +718,7 @@ export class AddWineDialog extends LitElement {
             <select
               .value=${this._wineData.type || "red"}
               @change=${(e: Event) =>
-                this._updateField(
-                  "type",
-                  (e.target as HTMLSelectElement).value
-                )}
+                this._updateField("type", (e.target as HTMLSelectElement).value)}
             >
               ${(Object.entries(WINE_TYPE_LABELS) as [WineType, string][]).map(
                 ([value, label]) =>
@@ -508,10 +733,7 @@ export class AddWineDialog extends LitElement {
               step="0.01"
               .value=${this._wineData.price?.toString() || ""}
               @input=${(e: InputEvent) =>
-                this._updateField(
-                  "price",
-                  parseFloat((e.target as HTMLInputElement).value) || null
-                )}
+                this._updateField("price", parseFloat((e.target as HTMLInputElement).value) || null)}
             />
           </div>
         </div>
@@ -523,10 +745,7 @@ export class AddWineDialog extends LitElement {
               type="text"
               .value=${this._wineData.region || ""}
               @input=${(e: InputEvent) =>
-                this._updateField(
-                  "region",
-                  (e.target as HTMLInputElement).value
-                )}
+                this._updateField("region", (e.target as HTMLInputElement).value)}
             />
           </div>
           <div class="form-group">
@@ -535,10 +754,7 @@ export class AddWineDialog extends LitElement {
               type="text"
               .value=${this._wineData.country || ""}
               @input=${(e: InputEvent) =>
-                this._updateField(
-                  "country",
-                  (e.target as HTMLInputElement).value
-                )}
+                this._updateField("country", (e.target as HTMLInputElement).value)}
             />
           </div>
         </div>
@@ -549,10 +765,7 @@ export class AddWineDialog extends LitElement {
             type="text"
             .value=${this._wineData.grape_variety || ""}
             @input=${(e: InputEvent) =>
-              this._updateField(
-                "grape_variety",
-                (e.target as HTMLInputElement).value
-              )}
+              this._updateField("grape_variety", (e.target as HTMLInputElement).value)}
           />
         </div>
 
@@ -563,10 +776,7 @@ export class AddWineDialog extends LitElement {
               type="date"
               .value=${this._wineData.purchase_date || ""}
               @input=${(e: InputEvent) =>
-                this._updateField(
-                  "purchase_date",
-                  (e.target as HTMLInputElement).value
-                )}
+                this._updateField("purchase_date", (e.target as HTMLInputElement).value)}
             />
           </div>
           <div class="form-group">
@@ -576,10 +786,7 @@ export class AddWineDialog extends LitElement {
               placeholder="e.g. 2030"
               .value=${this._wineData.drink_by || ""}
               @input=${(e: InputEvent) =>
-                this._updateField(
-                  "drink_by",
-                  (e.target as HTMLInputElement).value
-                )}
+                this._updateField("drink_by", (e.target as HTMLInputElement).value)}
             />
           </div>
         </div>
@@ -589,11 +796,17 @@ export class AddWineDialog extends LitElement {
           <textarea
             .value=${this._wineData.notes || ""}
             @input=${(e: InputEvent) =>
-              this._updateField(
-                "notes",
-                (e.target as HTMLTextAreaElement).value
-              )}
+              this._updateField("notes", (e.target as HTMLTextAreaElement).value)}
           ></textarea>
+        </div>
+
+        <div class="rating-section">
+          <div class="rating-label">My Rating</div>
+          <star-rating
+            .value=${this._wineData.user_rating || 0}
+            @rating-change=${(e: CustomEvent) =>
+              this._updateField("user_rating", e.detail.value || null)}
+          ></star-rating>
         </div>
       </div>
 
@@ -616,9 +829,7 @@ export class AddWineDialog extends LitElement {
     return html`
       <div class="dialog-body">
         <div style="font-weight: 500; margin-bottom: 8px">Choose Location</div>
-        <div
-          style="font-size: 0.85em; color: var(--wc-text-secondary); margin-bottom: 12px"
-        >
+        <div style="font-size: 0.85em; color: var(--wc-text-secondary); margin-bottom: 12px">
           Select a cabinet and position for this bottle
         </div>
 
@@ -646,10 +857,7 @@ export class AddWineDialog extends LitElement {
                     min="1"
                     .value=${this._wineData.row != null ? (this._wineData.row + 1).toString() : ""}
                     @input=${(e: InputEvent) =>
-                      this._updateField(
-                        "row",
-                        parseInt((e.target as HTMLInputElement).value) - 1
-                      )}
+                      this._updateField("row", parseInt((e.target as HTMLInputElement).value) - 1)}
                   />
                 </div>
                 <div class="form-group">
@@ -659,10 +867,7 @@ export class AddWineDialog extends LitElement {
                     min="1"
                     .value=${this._wineData.col != null ? (this._wineData.col + 1).toString() : ""}
                     @input=${(e: InputEvent) =>
-                      this._updateField(
-                        "col",
-                        parseInt((e.target as HTMLInputElement).value) - 1
-                      )}
+                      this._updateField("col", parseInt((e.target as HTMLInputElement).value) - 1)}
                   />
                 </div>
               </div>
@@ -671,16 +876,10 @@ export class AddWineDialog extends LitElement {
       </div>
 
       <div class="dialog-footer">
-        <button
-          class="btn btn-outline"
-          @click=${() => this._goToStep("details")}
-        >
+        <button class="btn btn-outline" @click=${() => this._goToStep("details")}>
           ← Back
         </button>
-        <button
-          class="btn btn-primary"
-          @click=${() => this._goToStep("confirm")}
-        >
+        <button class="btn btn-primary" @click=${() => this._goToStep("confirm")}>
           Next →
         </button>
       </div>
@@ -735,6 +934,14 @@ export class AddWineDialog extends LitElement {
             <span class="summary-label">Position</span>
             <span class="summary-value">${posLabel}</span>
           </div>
+          ${this._wineData.user_rating
+            ? html`
+                <div class="summary-row">
+                  <span class="summary-label">My Rating</span>
+                  <span class="summary-value">${this._wineData.user_rating}/5</span>
+                </div>
+              `
+            : nothing}
         </div>
 
         ${this._error
@@ -743,10 +950,7 @@ export class AddWineDialog extends LitElement {
       </div>
 
       <div class="dialog-footer">
-        <button
-          class="btn btn-outline"
-          @click=${() => this._goToStep("location")}
-        >
+        <button class="btn btn-outline" @click=${() => this._goToStep("location")}>
           ← Back
         </button>
         <button class="btn btn-primary" @click=${this._addWine}>

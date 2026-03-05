@@ -18,6 +18,7 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
+    "html5-qrcode": "^2.3.8",
     "lit": "^3.1.2"
   }
 }

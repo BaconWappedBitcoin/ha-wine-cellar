@@ -1,3 +1,10 @@
+export interface TastingNotes {
+  aroma: string;
+  taste: string;
+  finish: string;
+  overall: string;
+}
+
 export interface Wine {
   id: string;
   barcode: string;
@@ -18,6 +25,8 @@ export interface Wine {
   row: number | null;
   col: number | null;
   zone: string;
+  user_rating: number | null;
+  tasting_notes: TastingNotes | null;
   added_at: string;
 }
 

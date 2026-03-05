@@ -82,6 +82,8 @@ class WineCellarStorage:
             "row": wine_data.get("row"),
             "col": wine_data.get("col"),
             "zone": wine_data.get("zone", ""),
+            "user_rating": wine_data.get("user_rating"),
+            "tasting_notes": wine_data.get("tasting_notes"),
             "added_at": datetime.now(timezone.utc).isoformat(),
         }
         self._data[CONF_WINES].append(wine)

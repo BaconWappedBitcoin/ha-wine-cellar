@@ -1,12 +1,19 @@
 import { LitElement, html, css, nothing } from "lit";
-import { customElement, property } from "lit/decorators.js";
-import { Wine, WINE_TYPE_LABELS, WINE_TYPE_COLORS, WineType } from "../models";
+import { customElement, property, state } from "lit/decorators.js";
+import { Wine, TastingNotes, WINE_TYPE_LABELS, WINE_TYPE_COLORS, WineType } from "../models";
 import { sharedStyles } from "../styles";
+import "./star-rating";
 
 @customElement("wine-detail-dialog")
 export class WineDetailDialog extends LitElement {
   @property({ attribute: false }) wine: Wine | null = null;
+  @property({ attribute: false }) hass: any;
   @property({ type: Boolean }) open = false;
+
+  @state() private _editing = false;
+  @state() private _userRating: number = 0;
+  @state() private _tastingNotes: TastingNotes = { aroma: "", taste: "", finish: "", overall: "" };
+  @state() private _saving = false;
 
   static styles = [
     sharedStyles,
@@ -119,17 +126,147 @@ export class WineDetailDialog extends LitElement {
         border-radius: 8px;
       }
 
+      /* Rating & Tasting Notes section */
+      .section {
+        padding: 0 20px 16px;
+      }
+
+      .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+      }
+
+      .section-title {
+        font-size: 0.85em;
+        font-weight: 600;
+        color: var(--wc-text);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .edit-toggle {
+        background: none;
+        border: none;
+        color: var(--wc-primary, #6d4c41);
+        cursor: pointer;
+        font-size: 0.85em;
+        font-weight: 500;
+        padding: 4px 8px;
+        border-radius: 6px;
+        transition: background 0.2s;
+      }
+
+      .edit-toggle:hover {
+        background: rgba(109, 76, 65, 0.1);
+      }
+
+      .rating-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+
+      .rating-label {
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+        min-width: 70px;
+      }
+
+      .no-rating {
+        font-size: 0.85em;
+        color: var(--wc-text-secondary);
+        font-style: italic;
+      }
+
+      .tasting-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .tasting-field {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .tasting-field.full-width {
+        grid-column: 1 / -1;
+      }
+
+      .tasting-field label {
+        font-size: 0.75em;
+        color: var(--wc-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+      }
+
+      .tasting-field textarea {
+        font-family: inherit;
+        font-size: 0.85em;
+        padding: 8px;
+        border: 1px solid var(--wc-border, #e0e0e0);
+        border-radius: 8px;
+        resize: vertical;
+        min-height: 50px;
+        background: var(--wc-surface, #fff);
+        color: var(--wc-text, #212121);
+      }
+
+      .tasting-field textarea:focus {
+        outline: none;
+        border-color: var(--wc-primary, #6d4c41);
+      }
+
+      .tasting-value {
+        font-size: 0.85em;
+        color: var(--wc-text);
+        background: rgba(0, 0, 0, 0.03);
+        padding: 8px;
+        border-radius: 8px;
+        min-height: 20px;
+      }
+
+      .divider {
+        height: 1px;
+        background: var(--wc-border, #e0e0e0);
+        margin: 0 20px 16px;
+      }
+
       .actions {
         display: flex;
         gap: 8px;
         padding: 12px 20px 20px;
         border-top: 1px solid var(--wc-border);
       }
+
+      @media (max-width: 599px) {
+        .tasting-grid {
+          grid-template-columns: 1fr;
+        }
+        .tasting-field.full-width {
+          grid-column: 1;
+        }
+      }
     `,
   ];
 
+  updated(changedProps: Map<string, unknown>) {
+    if (changedProps.has("wine") && this.wine) {
+      this._userRating = this.wine.user_rating ?? 0;
+      this._tastingNotes = this.wine.tasting_notes
+        ? { ...this.wine.tasting_notes }
+        : { aroma: "", taste: "", finish: "", overall: "" };
+      this._editing = false;
+    }
+  }
+
   private _close() {
     this.open = false;
+    this._editing = false;
     this.dispatchEvent(new CustomEvent("close"));
   }
 
@@ -159,14 +296,49 @@ export class WineDetailDialog extends LitElement {
     }
   }
 
+  private _onRatingChange(e: CustomEvent) {
+    this._userRating = e.detail.value;
+  }
+
+  private _onTastingChange(field: keyof TastingNotes, e: Event) {
+    const value = (e.target as HTMLTextAreaElement).value;
+    this._tastingNotes = { ...this._tastingNotes, [field]: value };
+  }
+
+  private async _save() {
+    if (!this.wine || !this.hass) return;
+    this._saving = true;
+    try {
+      const updates: Record<string, any> = {
+        user_rating: this._userRating || null,
+        tasting_notes: this._hasTastingNotes() ? this._tastingNotes : null,
+      };
+      await this.hass.callWS({
+        type: "wine_cellar/update_wine",
+        wine_id: this.wine.id,
+        updates,
+      });
+      // Update local wine object
+      this.wine = { ...this.wine, ...updates };
+      this._editing = false;
+      this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+    } catch (err) {
+      console.error("Failed to save rating/notes", err);
+    }
+    this._saving = false;
+  }
+
+  private _hasTastingNotes(): boolean {
+    const n = this._tastingNotes;
+    return !!(n.aroma || n.taste || n.finish || n.overall);
+  }
+
   render() {
     if (!this.open || !this.wine) return nothing;
 
     const wine = this.wine;
-    const typeColor =
-      WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red;
-    const typeLabel =
-      WINE_TYPE_LABELS[wine.type as WineType] || wine.type;
+    const typeColor = WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red;
+    const typeLabel = WINE_TYPE_LABELS[wine.type as WineType] || wine.type;
 
     return html`
       <div class="dialog-overlay" @click=${this._close}>
@@ -175,20 +347,14 @@ export class WineDetailDialog extends LitElement {
             ${wine.image_url
               ? html`<img class="wine-image" src="${wine.image_url}" alt="${wine.name}" />`
               : html`
-                  <div
-                    class="wine-image-placeholder"
-                    style="background: ${typeColor}"
-                  >
+                  <div class="wine-image-placeholder" style="background: ${typeColor}">
                     🍷
                   </div>
                 `}
             <div class="wine-title">
               <div class="wine-name">${wine.name}</div>
               <div class="wine-winery">${wine.winery}</div>
-              <span
-                class="wine-type-badge"
-                style="background: ${typeColor}"
-              >
+              <span class="wine-type-badge" style="background: ${typeColor}">
                 ${typeLabel}
               </span>
               ${wine.rating
@@ -196,6 +362,7 @@ export class WineDetailDialog extends LitElement {
                     <div class="wine-rating">
                       <span class="rating-star">★</span>
                       ${wine.rating.toFixed(1)}
+                      <span style="font-size:0.8em;color:var(--wc-text-secondary)">(Vivino)</span>
                     </div>
                   `
                 : nothing}
@@ -204,81 +371,134 @@ export class WineDetailDialog extends LitElement {
 
           <div class="details-grid">
             ${wine.vintage
-              ? html`
-                  <div class="detail-item">
-                    <span class="detail-label">Vintage</span>
-                    <span class="detail-value">${wine.vintage}</span>
-                  </div>
-                `
+              ? html`<div class="detail-item"><span class="detail-label">Vintage</span><span class="detail-value">${wine.vintage}</span></div>`
               : nothing}
             ${wine.region
-              ? html`
-                  <div class="detail-item">
-                    <span class="detail-label">Region</span>
-                    <span class="detail-value">${wine.region}</span>
-                  </div>
-                `
+              ? html`<div class="detail-item"><span class="detail-label">Region</span><span class="detail-value">${wine.region}</span></div>`
               : nothing}
             ${wine.country
-              ? html`
-                  <div class="detail-item">
-                    <span class="detail-label">Country</span>
-                    <span class="detail-value">${wine.country}</span>
-                  </div>
-                `
+              ? html`<div class="detail-item"><span class="detail-label">Country</span><span class="detail-value">${wine.country}</span></div>`
               : nothing}
             ${wine.grape_variety
-              ? html`
-                  <div class="detail-item">
-                    <span class="detail-label">Grape</span>
-                    <span class="detail-value">${wine.grape_variety}</span>
-                  </div>
-                `
+              ? html`<div class="detail-item"><span class="detail-label">Grape</span><span class="detail-value">${wine.grape_variety}</span></div>`
               : nothing}
             ${wine.price
-              ? html`
-                  <div class="detail-item">
-                    <span class="detail-label">Price</span>
-                    <span class="detail-value">$${wine.price.toFixed(2)}</span>
-                  </div>
-                `
+              ? html`<div class="detail-item"><span class="detail-label">Price</span><span class="detail-value">$${wine.price.toFixed(2)}</span></div>`
               : nothing}
             ${wine.purchase_date
-              ? html`
-                  <div class="detail-item">
-                    <span class="detail-label">Purchased</span>
-                    <span class="detail-value">${wine.purchase_date}</span>
-                  </div>
-                `
+              ? html`<div class="detail-item"><span class="detail-label">Purchased</span><span class="detail-value">${wine.purchase_date}</span></div>`
               : nothing}
             ${wine.drink_by
-              ? html`
-                  <div class="detail-item">
-                    <span class="detail-label">Drink By</span>
-                    <span class="detail-value">${wine.drink_by}</span>
-                  </div>
-                `
+              ? html`<div class="detail-item"><span class="detail-label">Drink By</span><span class="detail-value">${wine.drink_by}</span></div>`
               : nothing}
             ${wine.barcode
-              ? html`
-                  <div class="detail-item">
-                    <span class="detail-label">Barcode</span>
-                    <span class="detail-value">${wine.barcode}</span>
-                  </div>
-                `
+              ? html`<div class="detail-item"><span class="detail-label">Barcode</span><span class="detail-value">${wine.barcode}</span></div>`
               : nothing}
           </div>
 
           ${wine.notes
             ? html`
                 <div class="wine-notes">
-                  <div class="detail-label" style="margin-bottom: 4px">
-                    Notes
-                  </div>
+                  <div class="detail-label" style="margin-bottom: 4px">Notes</div>
                   <div class="wine-notes-text">${wine.notes}</div>
                 </div>
               `
             : nothing}
+
+          <div class="divider"></div>
+
+          <!-- My Rating section -->
+          <div class="section">
+            <div class="section-header">
+              <span class="section-title">My Rating</span>
+              <button class="edit-toggle" @click=${() => (this._editing = !this._editing)}>
+                ${this._editing ? "Cancel" : "Edit"}
+              </button>
+            </div>
+            <div class="rating-row">
+              <star-rating
+                .value=${this._userRating}
+                .readonly=${!this._editing}
+                .size=${28}
+                @rating-change=${this._onRatingChange}
+              ></star-rating>
+              ${!this._editing && this._userRating === 0
+                ? html`<span class="no-rating">Not rated</span>`
+                : nothing}
+            </div>
+          </div>
+
+          <!-- Tasting Notes section -->
+          <div class="section">
+            <div class="section-header">
+              <span class="section-title">Tasting Notes</span>
+            </div>
+            ${this._editing
+              ? html`
+                  <div class="tasting-grid">
+                    <div class="tasting-field">
+                      <label>Aroma</label>
+                      <textarea
+                        .value=${this._tastingNotes.aroma}
+                        placeholder="Berries, oak, vanilla..."
+                        @input=${(e: Event) => this._onTastingChange("aroma", e)}
+                      ></textarea>
+                    </div>
+                    <div class="tasting-field">
+                      <label>Taste</label>
+                      <textarea
+                        .value=${this._tastingNotes.taste}
+                        placeholder="Full-bodied, tannic..."
+                        @input=${(e: Event) => this._onTastingChange("taste", e)}
+                      ></textarea>
+                    </div>
+                    <div class="tasting-field">
+                      <label>Finish</label>
+                      <textarea
+                        .value=${this._tastingNotes.finish}
+                        placeholder="Long, smooth..."
+                        @input=${(e: Event) => this._onTastingChange("finish", e)}
+                      ></textarea>
+                    </div>
+                    <div class="tasting-field">
+                      <label>Overall</label>
+                      <textarea
+                        .value=${this._tastingNotes.overall}
+                        placeholder="Overall impression..."
+                        @input=${(e: Event) => this._onTastingChange("overall", e)}
+                      ></textarea>
+                    </div>
+                  </div>
+                  <div style="margin-top: 12px; text-align: right">
+                    <button
+                      class="btn btn-primary"
+                      ?disabled=${this._saving}
+                      @click=${this._save}
+                    >
+                      ${this._saving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                `
+              : this._hasTastingNotes()
+                ? html`
+                    <div class="tasting-grid">
+                      ${this._tastingNotes.aroma
+                        ? html`<div class="tasting-field"><label>Aroma</label><div class="tasting-value">${this._tastingNotes.aroma}</div></div>`
+                        : nothing}
+                      ${this._tastingNotes.taste
+                        ? html`<div class="tasting-field"><label>Taste</label><div class="tasting-value">${this._tastingNotes.taste}</div></div>`
+                        : nothing}
+                      ${this._tastingNotes.finish
+                        ? html`<div class="tasting-field"><label>Finish</label><div class="tasting-value">${this._tastingNotes.finish}</div></div>`
+                        : nothing}
+                      ${this._tastingNotes.overall
+                        ? html`<div class="tasting-field full-width"><label>Overall</label><div class="tasting-value">${this._tastingNotes.overall}</div></div>`
+                        : nothing}
+                    </div>
+                  `
+                : html`<div class="no-rating">No tasting notes yet. Tap Edit to add your thoughts.</div>`
+            }
+          </div>
 
           <div class="actions">
             <button class="btn btn-outline" @click=${this._onMove}>

@@ -486,9 +486,11 @@ export class WineCellarCard extends LitElement {
         <!-- Wine Detail Dialog -->
         <wine-detail-dialog
           .wine=${this._selectedWine}
+          .hass=${this.hass}
           .open=${this._showDetail}
           @close=${() => (this._showDetail = false)}
           @remove-wine=${this._onRemoveWine}
+          @wine-updated=${() => this._loadData()}
           @move-wine=${(e: CustomEvent) => {
             this._showDetail = false;
             this._addPreselect = { cabinet: "", row: null, col: null };

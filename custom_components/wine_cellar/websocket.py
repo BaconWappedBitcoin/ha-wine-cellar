@@ -29,6 +29,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_update_cabinet)
     websocket_api.async_register_command(hass, ws_add_cabinet)
     websocket_api.async_register_command(hass, ws_remove_cabinet)
+    websocket_api.async_register_command(hass, ws_recognize_label)
+    websocket_api.async_register_command(hass, ws_get_capabilities)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "wine_cellar/get_wines"})
@@ -269,3 +271,45 @@ async def ws_remove_cabinet(
         await storage.async_save()
         hass.bus.async_fire(f"{DOMAIN}_updated")
     connection.send_result(msg["id"], {"success": success})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "wine_cellar/recognize_label",
+        vol.Required("image"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_recognize_label(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Recognize wine from label photo using Gemini Vision."""
+    gemini = hass.data[DOMAIN].get("gemini")
+    if not gemini:
+        connection.send_error(
+            msg["id"],
+            "gemini_not_configured",
+            "Gemini API key not configured. Go to Settings > Integrations > Wine Cellar > Configure.",
+        )
+        return
+
+    result = await gemini.recognize_label(msg["image"])
+    connection.send_result(msg["id"], {"result": result})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "wine_cellar/get_capabilities"}
+)
+@callback
+def ws_get_capabilities(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return integration capabilities."""
+    connection.send_result(
+        msg["id"],
+        {"has_gemini": "gemini" in hass.data.get(DOMAIN, {})},
+    )

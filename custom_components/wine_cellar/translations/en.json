@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Wine Cellar Tracker",
-        "description": "Set up Wine Cellar Tracker. This will create a wine inventory with 4 default cabinet sections. You can customize the layout after setup.",
+        "description": "Set up Wine Cellar Tracker. This will create a wine inventory with default cabinet sections. You can customize the layout after setup.",
         "data": {}
       }
     },
@@ -16,7 +16,8 @@
       "init": {
         "title": "Wine Cellar Options",
         "data": {
-          "default_wine_type": "Default wine type for new entries"
+          "default_wine_type": "Default wine type for new entries",
+          "gemini_api_key": "Google Gemini API key (for AI label recognition)"
         }
       }
     }
