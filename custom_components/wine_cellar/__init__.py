@@ -28,20 +28,25 @@ def _register_static_path(hass: HomeAssistant) -> None:
     """Register frontend static path, handling both old and new HA APIs."""
     frontend_dir = Path(__file__).parent / "frontend"
     frontend_path = str(frontend_dir / "wine-cellar-card.js")
-    url_path = f"/wine_cellar/wine-cellar-card-{FRONTEND_VERSION}.js"
+    versioned_url = f"/wine_cellar/wine-cellar-card-{FRONTEND_VERSION}.js"
+    legacy_url = "/wine_cellar/wine-cellar-card.js"
 
     try:
         # Modern HA (2024.7+)
         from homeassistant.components.http import StaticPathConfig
         hass.async_create_task(
             hass.http.async_register_static_paths(
-                [StaticPathConfig(url_path, frontend_path, False)]
+                [
+                    StaticPathConfig(versioned_url, frontend_path, False),
+                    StaticPathConfig(legacy_url, frontend_path, False),
+                ]
             )
         )
     except (ImportError, AttributeError, TypeError):
         try:
             # Legacy HA
-            hass.http.register_static_path(url_path, frontend_path, cache_headers=False)
+            hass.http.register_static_path(versioned_url, frontend_path, cache_headers=False)
+            hass.http.register_static_path(legacy_url, frontend_path, cache_headers=False)
         except Exception:
             _LOGGER.warning("Could not register frontend static path")
 
