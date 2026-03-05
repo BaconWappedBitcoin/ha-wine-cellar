@@ -36,7 +36,7 @@ Rules:
 - "name" should include the wine name AND style/designation (Brut, Demi-Sec, Reserve, Grand Cru, etc.) but NOT the winery name
 - "vintage" must be a 4-digit year as an integer, or null if not visible (NV wines = null)
 - "type" must be exactly one of: "red", "white", "rosé", "sparkling", "dessert"
-- "drink_by" should be a year string like "2028" based on wine aging potential. Use general guidelines: everyday wines 3-5 years from vintage, quality reds 10-20 years, whites 2-5 years, sparkling 3-5 years. Use "" if unknown.
+- "drink_by" should be a year string like "2028" based on wine aging potential. Be conservative: everyday wines 1-3 years from vintage, quality reds 3-7 years, premium reds 10-15 years, whites 1-3 years, rosé 1-2 years, sparkling 2-3 years. Use "" if unknown.
 - "notes" should be a short description (1-2 sentences) about the wine based on what you see on the label (appellation, classification, style).
 - If you cannot determine a field, use an empty string "" (or null for vintage)
 - Do not guess or fabricate information not visible on the label
@@ -241,8 +241,20 @@ Return ONLY a JSON object with these fields:
 
 Rules:
 - "disposition": "D" = Drink Now, "H" = Hold, "P" = Past Peak
-- "drink_by": best-by year as string. Use wine knowledge of aging potential.
-- "drink_window": optimal drinking window range
+- "drink_by": the LAST year of the drinking window — when the wine should be consumed by. Be conservative and realistic.
+- "drink_window": optimal drinking window as "YYYY-YYYY" range. This is what will be shown to the user.
+- IMPORTANT aging guidelines — be conservative, most wines don't age long:
+  - Most everyday reds and whites (under $20): drink within 1-3 years of vintage. These are "Drink Now."
+  - Quality reds (good Cabernet, Merlot, Syrah, $20-50): 3-7 years from vintage
+  - Premium Bordeaux, Barolo, Napa Cab ($50+): can age 10-15 years, rarely more than 20
+  - Rosé: drink within 1-2 years of vintage — always "Drink Now"
+  - Most whites (Sauvignon Blanc, Pinot Grigio): 1-3 years from vintage
+  - Quality Chardonnay/Riesling: 3-5 years from vintage
+  - Sparkling/Champagne NV: drink within 2-3 years. Vintage Champagne: 5-10 years.
+  - Dessert wines (Sauternes, Port): can age 10-20+ years
+  - NV (non-vintage) wines: assume current, "Drink Now" with drink_window "{current_year}-{current_year + 1}"
+  - If the wine is already past its typical aging window, mark as "Past Peak" or "Drink Now" (not "Hold")
+  - When in doubt, err on the side of drinking sooner rather than later
 - "description": Write a professional tasting-style description of what this wine is known for. If you know the wine, describe its character. If not, describe what to expect based on grape, region, and vintage.
 - Rating fields: If you know or can reliably estimate ratings for this specific wine and vintage from major critics, provide them as numbers (e.g. 92). Use null if unknown.
   - "rating_ws": Wine Spectator score (out of 100)

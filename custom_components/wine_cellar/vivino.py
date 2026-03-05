@@ -453,17 +453,20 @@ def _parse_vivino_html(html: str) -> dict[str, Any] | None:
             alcohol = f"{alc_match.group(1)}%"
 
         # Extract price from Vivino
+        # Use stricter patterns — only match wine price contexts, skip
+        # default/trial values like 4.99 which appear in Vivino HTML boilerplate
         price = None
         for price_pattern in [
             r'"price":\{"amount":([\d.]+)',
             r'"median":\{"amount":([\d.]+)',
-            r'"amount":([\d.]+),"currency"',
         ]:
             price_match = re.search(price_pattern, decoded)
             if price_match:
                 try:
                     val = float(price_match.group(1))
-                    if 1.0 <= val <= 50000.0:
+                    # Filter out unrealistic prices: min $6 (no real wine < $6)
+                    # and skip common default values like 4.99
+                    if 6.0 <= val <= 50000.0:
                         price = round(val, 2)
                         break
                 except ValueError:

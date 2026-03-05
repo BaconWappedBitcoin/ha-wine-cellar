@@ -1199,6 +1199,10 @@ let WineDetailDialog = class WineDetailDialog extends i {
         return b `
       <div class="dialog-overlay" @click=${this._close}>
         <div class="dialog" @click=${(e) => e.stopPropagation()}>
+          <div class="dialog-top-bar">
+            <button class="icon-btn" title="Edit" @click=${this._startEditingFields}>✏️</button>
+            <button class="icon-btn close-btn" title="Close" @click=${this._close}>✕</button>
+          </div>
           <div class="wine-header">
             ${wine.image_url
             ? b `<img class="wine-image" src="${wine.image_url}" alt="${wine.name}" />`
@@ -1240,19 +1244,17 @@ let WineDetailDialog = class WineDetailDialog extends i {
             ? this._renderEditForm()
             : b `
                 <!-- Drink by banner for disposition wines -->
-                ${wine.disposition && wine.drink_by
+                ${wine.disposition
                 ? b `
                       <div class="drink-by-banner ${wine.disposition === 'D' ? 'drink' : wine.disposition === 'H' ? 'hold' : wine.disposition === 'P' ? 'past' : ''}">
-                        ${wine.disposition === "D" ? `Drink now \u2022 best by ${wine.drink_by}` : wine.disposition === "H" ? `Hold until ${wine.drink_by}` : `Past peak since ${wine.drink_by}`}
+                        ${wine.disposition === "D"
+                    ? (wine.drink_window ? `Drink now \u2022 ${wine.drink_window}` : "Drink now")
+                    : wine.disposition === "H"
+                        ? (wine.drink_window ? `Hold \u2022 drink ${wine.drink_window}` : wine.drink_by ? `Hold until ${wine.drink_by}` : "Hold")
+                        : (wine.drink_window ? `Past peak \u2022 was ${wine.drink_window}` : "Past peak")}
                       </div>
                     `
-                : wine.disposition === "D" && !wine.drink_by
-                    ? b `<div class="drink-by-banner drink">Drink now</div>`
-                    : wine.disposition === "H" && !wine.drink_by
-                        ? b `<div class="drink-by-banner hold">Hold — no drink date set</div>`
-                        : wine.disposition === "P" && !wine.drink_by
-                            ? b `<div class="drink-by-banner past">Past peak</div>`
-                            : A}
+                : A}
 
                 <!-- Description -->
                 ${wine.description
@@ -1288,8 +1290,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
                     `
                 : A}
 
-                <!-- Drink window -->
-                ${wine.drink_window
+                <!-- Drink window (shown when no disposition banner) -->
+                ${!(wine.disposition) && wine.drink_window
                 ? b `<div class="drink-window">Drink window: ${wine.drink_window}</div>`
                 : A}
 
@@ -1427,46 +1429,20 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 </div>
 
                 <div class="actions">
-                  <button
-                    class="btn btn-primary"
-                    style="background: #8e24aa; font-size: 0.85em"
-                    ?disabled=${this._refreshing}
-                    @click=${this._refreshFromVivino}
-                  >
+                  <button class="btn btn-primary" style="background:#8e24aa"
+                    ?disabled=${this._refreshing} @click=${this._refreshFromVivino}>
                     ${this._refreshing ? "..." : "🍇 Vivino"}
                   </button>
                   ${this.hasGemini
-                ? b `
-                        <button
-                          class="btn btn-primary"
-                          style="background: #1565c0; font-size: 0.85em"
-                          ?disabled=${this._analyzing}
-                          @click=${this._analyzeWithAI}
-                        >
-                          ${this._analyzing ? "..." : "🤖 AI"}
-                        </button>
-                      `
+                ? b `<button class="btn btn-primary" style="background:#1565c0"
+                        ?disabled=${this._analyzing} @click=${this._analyzeWithAI}>
+                        ${this._analyzing ? "..." : "🤖 AI"}
+                      </button>`
                 : A}
-                  <button class="btn btn-outline" @click=${this._startEditingFields}>
-                    ✏️ Edit
-                  </button>
-                  <button class="btn btn-outline" @click=${this._onCopy}>
-                    📋 Copy
-                  </button>
-                  <button class="btn btn-outline" @click=${this._onMove}>
-                    ↔ Move
-                  </button>
-                  <button
-                    class="btn btn-outline"
-                    style="color: #c62828; border-color: #c62828"
-                    @click=${this._onRemove}
-                  >
-                    ✕ Remove
-                  </button>
-                  <span style="flex:1"></span>
-                  <button class="btn btn-primary" @click=${this._close}>
-                    Close
-                  </button>
+                  <button class="btn btn-outline" @click=${this._onCopy}>📋 Copy</button>
+                  <button class="btn btn-outline" @click=${this._onMove}>↔ Move</button>
+                  <button class="btn btn-outline" style="color:#c62828;border-color:#c62828"
+                    @click=${this._onRemove}>✕ Remove</button>
                 </div>
               `}
         </div>
@@ -1477,10 +1453,39 @@ let WineDetailDialog = class WineDetailDialog extends i {
 WineDetailDialog.styles = [
     sharedStyles,
     i$3 `
+      .dialog-top-bar {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 4px;
+        padding: 8px 12px 0;
+      }
+
+      .icon-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1.1em;
+        padding: 6px 8px;
+        border-radius: 6px;
+        color: var(--wc-text-secondary);
+        transition: background 0.2s;
+        line-height: 1;
+      }
+
+      .icon-btn:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      .icon-btn.close-btn {
+        font-size: 1.3em;
+        font-weight: 600;
+      }
+
       .wine-header {
         display: flex;
         gap: 16px;
-        padding: 20px;
+        padding: 4px 20px 20px;
       }
 
       .wine-image {
@@ -1784,10 +1789,16 @@ WineDetailDialog.styles = [
 
       .actions {
         display: flex;
-        gap: 8px;
-        padding: 12px 20px 20px;
+        gap: 6px;
+        padding: 10px 16px 16px;
         border-top: 1px solid var(--wc-border);
-        flex-wrap: wrap;
+        justify-content: center;
+      }
+
+      .actions .btn {
+        font-size: 0.8em;
+        padding: 6px 10px;
+        white-space: nowrap;
       }
 
       /* Edit form styles */
