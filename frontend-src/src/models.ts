@@ -19,6 +19,7 @@ export interface Wine {
   ratings_count: number | null;
   image_url: string;
   price: number | null;
+  retail_price: number | null;
   purchase_date: string;
   drink_by: string;
   notes: string;

@@ -419,10 +419,13 @@ async def ws_refresh_wine(
     updates: dict[str, Any] = {}
     # Always update enrichment fields from Vivino
     for key in ("rating", "ratings_count", "image_url", "description",
-                "food_pairings", "alcohol", "grape_variety", "price"):
+                "food_pairings", "alcohol", "grape_variety"):
         val = lookup.get(key)
         if val:
             updates[key] = val
+    # Store Vivino price as retail_price (separate from user's purchase price)
+    if lookup.get("price"):
+        updates["retail_price"] = lookup["price"]
 
     # Clear bad descriptions (Vivino error page text)
     cur_desc = wine.get("description", "")

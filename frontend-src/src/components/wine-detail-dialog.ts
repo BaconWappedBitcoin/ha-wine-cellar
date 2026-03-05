@@ -11,6 +11,8 @@ export class WineDetailDialog extends LitElement {
   @property({ type: Boolean }) open = false;
 
   @state() private _editing = false;
+  @state() private _editingFields = false;
+  @state() private _editData: Record<string, any> = {};
   @state() private _userRating: number = 0;
   @state() private _tastingNotes: TastingNotes = { aroma: "", taste: "", finish: "", overall: "" };
   @state() private _saving = false;
@@ -331,6 +333,66 @@ export class WineDetailDialog extends LitElement {
         gap: 8px;
         padding: 12px 20px 20px;
         border-top: 1px solid var(--wc-border);
+        flex-wrap: wrap;
+      }
+
+      /* Edit form styles */
+      .edit-form {
+        padding: 0 20px 16px;
+      }
+
+      .edit-form .form-group {
+        margin-bottom: 12px;
+      }
+
+      .edit-form .form-group label {
+        display: block;
+        font-size: 0.75em;
+        font-weight: 500;
+        color: var(--wc-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+      }
+
+      .edit-form .form-group input,
+      .edit-form .form-group select,
+      .edit-form .form-group textarea {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        font-size: 0.9em;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        box-sizing: border-box;
+        font-family: inherit;
+      }
+
+      .edit-form .form-group textarea {
+        min-height: 60px;
+        resize: vertical;
+      }
+
+      .edit-form .form-group input:focus,
+      .edit-form .form-group select:focus,
+      .edit-form .form-group textarea:focus {
+        outline: none;
+        border-color: var(--wc-primary);
+      }
+
+      .edit-form .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .edit-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        padding: 12px 20px 20px;
+        border-top: 1px solid var(--wc-border);
       }
 
       @media (max-width: 599px) {
@@ -339,6 +401,9 @@ export class WineDetailDialog extends LitElement {
         }
         .tasting-field.full-width {
           grid-column: 1;
+        }
+        .edit-form .form-row {
+          grid-template-columns: 1fr;
         }
       }
     `,
@@ -351,13 +416,69 @@ export class WineDetailDialog extends LitElement {
         ? { ...this.wine.tasting_notes }
         : { aroma: "", taste: "", finish: "", overall: "" };
       this._editing = false;
+      this._editingFields = false;
     }
   }
 
   private _close() {
     this.open = false;
     this._editing = false;
+    this._editingFields = false;
     this.dispatchEvent(new CustomEvent("close"));
+  }
+
+  private _startEditingFields() {
+    if (!this.wine) return;
+    this._editData = {
+      name: this.wine.name || "",
+      winery: this.wine.winery || "",
+      vintage: this.wine.vintage,
+      type: this.wine.type || "red",
+      region: this.wine.region || "",
+      country: this.wine.country || "",
+      grape_variety: this.wine.grape_variety || "",
+      price: this.wine.price,
+      purchase_date: this.wine.purchase_date || "",
+      drink_by: this.wine.drink_by || "",
+      notes: this.wine.notes || "",
+      alcohol: this.wine.alcohol || "",
+    };
+    this._editingFields = true;
+  }
+
+  private _cancelEditingFields() {
+    this._editingFields = false;
+    this._editData = {};
+  }
+
+  private _updateEditField(field: string, value: any) {
+    this._editData = { ...this._editData, [field]: value };
+  }
+
+  private async _saveFields() {
+    if (!this.wine || !this.hass) return;
+    this._saving = true;
+    try {
+      const updates: Record<string, any> = { ...this._editData };
+      // Convert empty strings to null for numeric fields
+      if (updates.vintage === "" || updates.vintage === null) updates.vintage = null;
+      else updates.vintage = parseInt(updates.vintage) || null;
+      if (updates.price === "" || updates.price === null) updates.price = null;
+      else updates.price = parseFloat(updates.price) || null;
+
+      await this.hass.callWS({
+        type: "wine_cellar/update_wine",
+        wine_id: this.wine.id,
+        updates,
+      });
+      this.wine = { ...this.wine, ...updates };
+      this._editingFields = false;
+      this._editData = {};
+      this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+    } catch (err) {
+      console.error("Failed to save wine fields", err);
+    }
+    this._saving = false;
   }
 
   private _onRemove() {
@@ -408,7 +529,7 @@ export class WineDetailDialog extends LitElement {
     this._tastingNotes = { ...this._tastingNotes, [field]: value };
   }
 
-  private async _save() {
+  private async _saveRating() {
     if (!this.wine || !this.hass) return;
     this._saving = true;
     try {
@@ -421,7 +542,6 @@ export class WineDetailDialog extends LitElement {
         wine_id: this.wine.id,
         updates,
       });
-      // Update local wine object
       this.wine = { ...this.wine, ...updates };
       this._editing = false;
       this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
@@ -476,6 +596,101 @@ export class WineDetailDialog extends LitElement {
     return !!(n.aroma || n.taste || n.finish || n.overall);
   }
 
+  private _renderEditForm() {
+    const d = this._editData;
+    return html`
+      <div class="edit-form">
+        <div class="form-group">
+          <label>Wine Name</label>
+          <input type="text" .value=${d.name}
+            @input=${(e: Event) => this._updateEditField("name", (e.target as HTMLInputElement).value)} />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Winery</label>
+            <input type="text" .value=${d.winery}
+              @input=${(e: Event) => this._updateEditField("winery", (e.target as HTMLInputElement).value)} />
+          </div>
+          <div class="form-group">
+            <label>Vintage</label>
+            <input type="number" .value=${d.vintage?.toString() || ""}
+              @input=${(e: Event) => this._updateEditField("vintage", (e.target as HTMLInputElement).value)} />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Type</label>
+            <select .value=${d.type}
+              @change=${(e: Event) => this._updateEditField("type", (e.target as HTMLSelectElement).value)}>
+              ${(Object.entries(WINE_TYPE_LABELS) as [WineType, string][]).map(
+                ([value, label]) => html`<option value=${value} ?selected=${d.type === value}>${label}</option>`
+              )}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Price</label>
+            <input type="number" step="0.01" .value=${d.price?.toString() || ""}
+              @input=${(e: Event) => this._updateEditField("price", (e.target as HTMLInputElement).value)} />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Region</label>
+            <input type="text" .value=${d.region}
+              @input=${(e: Event) => this._updateEditField("region", (e.target as HTMLInputElement).value)} />
+          </div>
+          <div class="form-group">
+            <label>Country</label>
+            <input type="text" .value=${d.country}
+              @input=${(e: Event) => this._updateEditField("country", (e.target as HTMLInputElement).value)} />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Grape Variety</label>
+            <input type="text" .value=${d.grape_variety}
+              @input=${(e: Event) => this._updateEditField("grape_variety", (e.target as HTMLInputElement).value)} />
+          </div>
+          <div class="form-group">
+            <label>Alcohol</label>
+            <input type="text" .value=${d.alcohol} placeholder="e.g. 13.5%"
+              @input=${(e: Event) => this._updateEditField("alcohol", (e.target as HTMLInputElement).value)} />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Purchase Date</label>
+            <input type="date" .value=${d.purchase_date}
+              @input=${(e: Event) => this._updateEditField("purchase_date", (e.target as HTMLInputElement).value)} />
+          </div>
+          <div class="form-group">
+            <label>Drink By</label>
+            <input type="text" placeholder="e.g. 2030" .value=${d.drink_by}
+              @input=${(e: Event) => this._updateEditField("drink_by", (e.target as HTMLInputElement).value)} />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Notes</label>
+          <textarea .value=${d.notes}
+            @input=${(e: Event) => this._updateEditField("notes", (e.target as HTMLTextAreaElement).value)}></textarea>
+        </div>
+      </div>
+
+      <div class="edit-actions">
+        <button class="btn btn-outline" @click=${this._cancelEditingFields}>Cancel</button>
+        <button class="btn btn-primary" ?disabled=${this._saving} @click=${this._saveFields}>
+          ${this._saving ? "Saving..." : "Save"}
+        </button>
+      </div>
+    `;
+  }
+
   render() {
     if (!this.open || !this.wine) return nothing;
 
@@ -527,232 +742,242 @@ export class WineDetailDialog extends LitElement {
             </div>
           </div>
 
-          <!-- Drink by banner for disposition wines -->
-          ${wine.disposition && wine.drink_by
-            ? html`
-                <div class="drink-by-banner ${wine.disposition === 'D' ? 'drink' : wine.disposition === 'H' ? 'hold' : wine.disposition === 'P' ? 'past' : ''}">
-                  ${wine.disposition === "D" ? `Drink now \u2022 best by ${wine.drink_by}` : wine.disposition === "H" ? `Hold until ${wine.drink_by}` : `Past peak since ${wine.drink_by}`}
-                </div>
-              `
-            : wine.disposition === "D" && !wine.drink_by
-              ? html`<div class="drink-by-banner drink">Drink now</div>`
-              : wine.disposition === "H" && !wine.drink_by
-                ? html`<div class="drink-by-banner hold">Hold — no drink date set</div>`
-                : wine.disposition === "P" && !wine.drink_by
-                  ? html`<div class="drink-by-banner past">Past peak</div>`
+          ${this._editingFields
+            ? this._renderEditForm()
+            : html`
+                <!-- Drink by banner for disposition wines -->
+                ${wine.disposition && wine.drink_by
+                  ? html`
+                      <div class="drink-by-banner ${wine.disposition === 'D' ? 'drink' : wine.disposition === 'H' ? 'hold' : wine.disposition === 'P' ? 'past' : ''}">
+                        ${wine.disposition === "D" ? `Drink now \u2022 best by ${wine.drink_by}` : wine.disposition === "H" ? `Hold until ${wine.drink_by}` : `Past peak since ${wine.drink_by}`}
+                      </div>
+                    `
+                  : wine.disposition === "D" && !wine.drink_by
+                    ? html`<div class="drink-by-banner drink">Drink now</div>`
+                    : wine.disposition === "H" && !wine.drink_by
+                      ? html`<div class="drink-by-banner hold">Hold — no drink date set</div>`
+                      : wine.disposition === "P" && !wine.drink_by
+                        ? html`<div class="drink-by-banner past">Past peak</div>`
+                        : nothing}
+
+                <!-- Description -->
+                ${wine.description
+                  ? html`<div class="wine-description">${wine.description}</div>`
                   : nothing}
 
-          <!-- Description -->
-          ${wine.description
-            ? html`<div class="wine-description">${wine.description}</div>`
-            : nothing}
+                <!-- Info chips (grape, food, alcohol, etc.) -->
+                ${wine.food_pairings || wine.alcohol || wine.grape_variety
+                  ? html`
+                      <div class="info-chips">
+                        ${wine.grape_variety
+                          ? html`<span class="info-chip"><span class="info-chip-icon">🍇</span> ${wine.grape_variety}</span>`
+                          : nothing}
+                        ${wine.alcohol
+                          ? html`<span class="info-chip"><span class="info-chip-icon">%</span> ${wine.alcohol}</span>`
+                          : nothing}
+                        ${wine.food_pairings
+                          ? wine.food_pairings.split(", ").map(
+                              (food: string) => html`<span class="info-chip">${food}</span>`
+                            )
+                          : nothing}
+                      </div>
+                    `
+                  : nothing}
 
-          <!-- Info chips (grape, food, alcohol, etc.) -->
-          ${wine.food_pairings || wine.alcohol || wine.grape_variety
-            ? html`
-                <div class="info-chips">
+                <!-- AI Ratings -->
+                ${wine.ai_ratings && Object.keys(wine.ai_ratings).length > 0
+                  ? html`
+                      <div class="ai-ratings">
+                        ${wine.ai_ratings.rating_ws ? html`<span class="ai-rating-chip">${wine.ai_ratings.rating_ws} <span class="source">WS</span></span>` : nothing}
+                        ${wine.ai_ratings.rating_rp ? html`<span class="ai-rating-chip">${wine.ai_ratings.rating_rp} <span class="source">RP</span></span>` : nothing}
+                        ${wine.ai_ratings.rating_jd ? html`<span class="ai-rating-chip">${wine.ai_ratings.rating_jd} <span class="source">JD</span></span>` : nothing}
+                        ${wine.ai_ratings.rating_ag ? html`<span class="ai-rating-chip">${wine.ai_ratings.rating_ag} <span class="source">AG</span></span>` : nothing}
+                      </div>
+                    `
+                  : nothing}
+
+                <!-- Drink window -->
+                ${(wine as any).drink_window
+                  ? html`<div class="drink-window">Drink window: ${(wine as any).drink_window}</div>`
+                  : nothing}
+
+                <div class="details-grid">
+                  ${wine.vintage
+                    ? html`<div class="detail-item"><span class="detail-label">Vintage</span><span class="detail-value">${wine.vintage}</span></div>`
+                    : nothing}
+                  ${wine.region
+                    ? html`<div class="detail-item"><span class="detail-label">Region</span><span class="detail-value">${wine.region}</span></div>`
+                    : nothing}
+                  ${wine.country
+                    ? html`<div class="detail-item"><span class="detail-label">Country</span><span class="detail-value">${wine.country}</span></div>`
+                    : nothing}
                   ${wine.grape_variety
-                    ? html`<span class="info-chip"><span class="info-chip-icon">🍇</span> ${wine.grape_variety}</span>`
+                    ? html`<div class="detail-item"><span class="detail-label">Grape</span><span class="detail-value">${wine.grape_variety}</span></div>`
                     : nothing}
-                  ${wine.alcohol
-                    ? html`<span class="info-chip"><span class="info-chip-icon">%</span> ${wine.alcohol}</span>`
+                  ${wine.price
+                    ? html`<div class="detail-item"><span class="detail-label">Purchase Price</span><span class="detail-value">$${wine.price.toFixed(2)}</span></div>`
                     : nothing}
-                  ${wine.food_pairings
-                    ? wine.food_pairings.split(", ").map(
-                        (food: string) => html`<span class="info-chip">${food}</span>`
-                      )
+                  ${wine.retail_price
+                    ? html`<div class="detail-item"><span class="detail-label">Retail Price</span><span class="detail-value">$${wine.retail_price.toFixed(2)}</span></div>`
+                    : nothing}
+                  ${wine.purchase_date
+                    ? html`<div class="detail-item"><span class="detail-label">Purchased</span><span class="detail-value">${wine.purchase_date}</span></div>`
+                    : nothing}
+                  ${wine.drink_by
+                    ? html`<div class="detail-item"><span class="detail-label">Drink By</span><span class="detail-value">${wine.drink_by}</span></div>`
+                    : nothing}
+                  ${wine.barcode
+                    ? html`<div class="detail-item"><span class="detail-label">Barcode</span><span class="detail-value">${wine.barcode}</span></div>`
                     : nothing}
                 </div>
-              `
-            : nothing}
 
-          <!-- AI Ratings -->
-          ${wine.ai_ratings && Object.keys(wine.ai_ratings).length > 0
-            ? html`
-                <div class="ai-ratings">
-                  ${wine.ai_ratings.rating_ws ? html`<span class="ai-rating-chip">${wine.ai_ratings.rating_ws} <span class="source">WS</span></span>` : nothing}
-                  ${wine.ai_ratings.rating_rp ? html`<span class="ai-rating-chip">${wine.ai_ratings.rating_rp} <span class="source">RP</span></span>` : nothing}
-                  ${wine.ai_ratings.rating_jd ? html`<span class="ai-rating-chip">${wine.ai_ratings.rating_jd} <span class="source">JD</span></span>` : nothing}
-                  ${wine.ai_ratings.rating_ag ? html`<span class="ai-rating-chip">${wine.ai_ratings.rating_ag} <span class="source">AG</span></span>` : nothing}
-                </div>
-              `
-            : nothing}
+                ${wine.notes
+                  ? html`
+                      <div class="wine-notes">
+                        <div class="detail-label" style="margin-bottom: 4px">Notes</div>
+                        <div class="wine-notes-text">${wine.notes}</div>
+                      </div>
+                    `
+                  : nothing}
 
-          <!-- Drink window -->
-          ${(wine as any).drink_window
-            ? html`<div class="drink-window">Drink window: ${(wine as any).drink_window}</div>`
-            : nothing}
+                <div class="divider"></div>
 
-          <div class="details-grid">
-            ${wine.vintage
-              ? html`<div class="detail-item"><span class="detail-label">Vintage</span><span class="detail-value">${wine.vintage}</span></div>`
-              : nothing}
-            ${wine.region
-              ? html`<div class="detail-item"><span class="detail-label">Region</span><span class="detail-value">${wine.region}</span></div>`
-              : nothing}
-            ${wine.country
-              ? html`<div class="detail-item"><span class="detail-label">Country</span><span class="detail-value">${wine.country}</span></div>`
-              : nothing}
-            ${wine.grape_variety
-              ? html`<div class="detail-item"><span class="detail-label">Grape</span><span class="detail-value">${wine.grape_variety}</span></div>`
-              : nothing}
-            ${wine.price
-              ? html`<div class="detail-item"><span class="detail-label">Price</span><span class="detail-value">$${wine.price.toFixed(2)}</span></div>`
-              : nothing}
-            ${wine.purchase_date
-              ? html`<div class="detail-item"><span class="detail-label">Purchased</span><span class="detail-value">${wine.purchase_date}</span></div>`
-              : nothing}
-            ${wine.drink_by
-              ? html`<div class="detail-item"><span class="detail-label">Drink By</span><span class="detail-value">${wine.drink_by}</span></div>`
-              : nothing}
-            ${wine.barcode
-              ? html`<div class="detail-item"><span class="detail-label">Barcode</span><span class="detail-value">${wine.barcode}</span></div>`
-              : nothing}
-          </div>
-
-          ${wine.notes
-            ? html`
-                <div class="wine-notes">
-                  <div class="detail-label" style="margin-bottom: 4px">Notes</div>
-                  <div class="wine-notes-text">${wine.notes}</div>
-                </div>
-              `
-            : nothing}
-
-          <div class="divider"></div>
-
-          <!-- My Rating section -->
-          <div class="section">
-            <div class="section-header">
-              <span class="section-title">My Rating</span>
-              <button class="edit-toggle" @click=${() => (this._editing = !this._editing)}>
-                ${this._editing ? "Cancel" : "Edit"}
-              </button>
-            </div>
-            <div class="rating-row">
-              <star-rating
-                .value=${this._userRating}
-                .readonly=${!this._editing}
-                .size=${28}
-                @rating-change=${this._onRatingChange}
-              ></star-rating>
-              ${!this._editing && this._userRating === 0
-                ? html`<span class="no-rating">Not rated</span>`
-                : nothing}
-            </div>
-          </div>
-
-          <!-- Tasting Notes section -->
-          <div class="section">
-            <div class="section-header">
-              <span class="section-title">Tasting Notes</span>
-            </div>
-            ${this._editing
-              ? html`
-                  <div class="tasting-grid">
-                    <div class="tasting-field">
-                      <label>Aroma</label>
-                      <textarea
-                        .value=${this._tastingNotes.aroma}
-                        placeholder="Berries, oak, vanilla..."
-                        @input=${(e: Event) => this._onTastingChange("aroma", e)}
-                      ></textarea>
-                    </div>
-                    <div class="tasting-field">
-                      <label>Taste</label>
-                      <textarea
-                        .value=${this._tastingNotes.taste}
-                        placeholder="Full-bodied, tannic..."
-                        @input=${(e: Event) => this._onTastingChange("taste", e)}
-                      ></textarea>
-                    </div>
-                    <div class="tasting-field">
-                      <label>Finish</label>
-                      <textarea
-                        .value=${this._tastingNotes.finish}
-                        placeholder="Long, smooth..."
-                        @input=${(e: Event) => this._onTastingChange("finish", e)}
-                      ></textarea>
-                    </div>
-                    <div class="tasting-field">
-                      <label>Overall</label>
-                      <textarea
-                        .value=${this._tastingNotes.overall}
-                        placeholder="Overall impression..."
-                        @input=${(e: Event) => this._onTastingChange("overall", e)}
-                      ></textarea>
-                    </div>
-                  </div>
-                  <div style="margin-top: 12px; text-align: right">
-                    <button
-                      class="btn btn-primary"
-                      ?disabled=${this._saving}
-                      @click=${this._save}
-                    >
-                      ${this._saving ? "Saving..." : "Save"}
+                <!-- My Rating section -->
+                <div class="section">
+                  <div class="section-header">
+                    <span class="section-title">My Rating</span>
+                    <button class="edit-toggle" @click=${() => (this._editing = !this._editing)}>
+                      ${this._editing ? "Cancel" : "Edit"}
                     </button>
                   </div>
-                `
-              : this._hasTastingNotes()
-                ? html`
-                    <div class="tasting-grid">
-                      ${this._tastingNotes.aroma
-                        ? html`<div class="tasting-field"><label>Aroma</label><div class="tasting-value">${this._tastingNotes.aroma}</div></div>`
-                        : nothing}
-                      ${this._tastingNotes.taste
-                        ? html`<div class="tasting-field"><label>Taste</label><div class="tasting-value">${this._tastingNotes.taste}</div></div>`
-                        : nothing}
-                      ${this._tastingNotes.finish
-                        ? html`<div class="tasting-field"><label>Finish</label><div class="tasting-value">${this._tastingNotes.finish}</div></div>`
-                        : nothing}
-                      ${this._tastingNotes.overall
-                        ? html`<div class="tasting-field full-width"><label>Overall</label><div class="tasting-value">${this._tastingNotes.overall}</div></div>`
-                        : nothing}
-                    </div>
-                  `
-                : html`<div class="no-rating">No tasting notes yet. Tap Edit to add your thoughts.</div>`
-            }
-          </div>
+                  <div class="rating-row">
+                    <star-rating
+                      .value=${this._userRating}
+                      .readonly=${!this._editing}
+                      .size=${28}
+                      @rating-change=${this._onRatingChange}
+                    ></star-rating>
+                    ${!this._editing && this._userRating === 0
+                      ? html`<span class="no-rating">Not rated</span>`
+                      : nothing}
+                  </div>
+                </div>
 
-          <div class="actions">
-            <button
-              class="btn btn-primary"
-              style="background: #8e24aa; font-size: 0.85em"
-              ?disabled=${this._refreshing}
-              @click=${this._refreshFromVivino}
-            >
-              ${this._refreshing ? "..." : "🍇 Vivino"}
-            </button>
-            ${this.hasGemini
-              ? html`
+                <!-- Tasting Notes section -->
+                <div class="section">
+                  <div class="section-header">
+                    <span class="section-title">Tasting Notes</span>
+                  </div>
+                  ${this._editing
+                    ? html`
+                        <div class="tasting-grid">
+                          <div class="tasting-field">
+                            <label>Aroma</label>
+                            <textarea
+                              .value=${this._tastingNotes.aroma}
+                              placeholder="Berries, oak, vanilla..."
+                              @input=${(e: Event) => this._onTastingChange("aroma", e)}
+                            ></textarea>
+                          </div>
+                          <div class="tasting-field">
+                            <label>Taste</label>
+                            <textarea
+                              .value=${this._tastingNotes.taste}
+                              placeholder="Full-bodied, tannic..."
+                              @input=${(e: Event) => this._onTastingChange("taste", e)}
+                            ></textarea>
+                          </div>
+                          <div class="tasting-field">
+                            <label>Finish</label>
+                            <textarea
+                              .value=${this._tastingNotes.finish}
+                              placeholder="Long, smooth..."
+                              @input=${(e: Event) => this._onTastingChange("finish", e)}
+                            ></textarea>
+                          </div>
+                          <div class="tasting-field">
+                            <label>Overall</label>
+                            <textarea
+                              .value=${this._tastingNotes.overall}
+                              placeholder="Overall impression..."
+                              @input=${(e: Event) => this._onTastingChange("overall", e)}
+                            ></textarea>
+                          </div>
+                        </div>
+                        <div style="margin-top: 12px; text-align: right">
+                          <button
+                            class="btn btn-primary"
+                            ?disabled=${this._saving}
+                            @click=${this._saveRating}
+                          >
+                            ${this._saving ? "Saving..." : "Save"}
+                          </button>
+                        </div>
+                      `
+                    : this._hasTastingNotes()
+                      ? html`
+                          <div class="tasting-grid">
+                            ${this._tastingNotes.aroma
+                              ? html`<div class="tasting-field"><label>Aroma</label><div class="tasting-value">${this._tastingNotes.aroma}</div></div>`
+                              : nothing}
+                            ${this._tastingNotes.taste
+                              ? html`<div class="tasting-field"><label>Taste</label><div class="tasting-value">${this._tastingNotes.taste}</div></div>`
+                              : nothing}
+                            ${this._tastingNotes.finish
+                              ? html`<div class="tasting-field"><label>Finish</label><div class="tasting-value">${this._tastingNotes.finish}</div></div>`
+                              : nothing}
+                            ${this._tastingNotes.overall
+                              ? html`<div class="tasting-field full-width"><label>Overall</label><div class="tasting-value">${this._tastingNotes.overall}</div></div>`
+                              : nothing}
+                          </div>
+                        `
+                      : html`<div class="no-rating">No tasting notes yet. Tap Edit to add your thoughts.</div>`
+                  }
+                </div>
+
+                <div class="actions">
                   <button
                     class="btn btn-primary"
-                    style="background: #1565c0; font-size: 0.85em"
-                    ?disabled=${this._analyzing}
-                    @click=${this._analyzeWithAI}
+                    style="background: #8e24aa; font-size: 0.85em"
+                    ?disabled=${this._refreshing}
+                    @click=${this._refreshFromVivino}
                   >
-                    ${this._analyzing ? "..." : "🤖 AI"}
+                    ${this._refreshing ? "..." : "🍇 Vivino"}
                   </button>
-                `
-              : nothing}
-            <button class="btn btn-outline" @click=${this._onCopy}>
-              📋 Copy
-            </button>
-            <button class="btn btn-outline" @click=${this._onMove}>
-              ↔ Move
-            </button>
-            <button
-              class="btn btn-outline"
-              style="color: #c62828; border-color: #c62828"
-              @click=${this._onRemove}
-            >
-              ✕ Remove
-            </button>
-            <span style="flex:1"></span>
-            <button class="btn btn-primary" @click=${this._close}>
-              Close
-            </button>
-          </div>
+                  ${this.hasGemini
+                    ? html`
+                        <button
+                          class="btn btn-primary"
+                          style="background: #1565c0; font-size: 0.85em"
+                          ?disabled=${this._analyzing}
+                          @click=${this._analyzeWithAI}
+                        >
+                          ${this._analyzing ? "..." : "🤖 AI"}
+                        </button>
+                      `
+                    : nothing}
+                  <button class="btn btn-outline" @click=${this._startEditingFields}>
+                    ✏️ Edit
+                  </button>
+                  <button class="btn btn-outline" @click=${this._onCopy}>
+                    📋 Copy
+                  </button>
+                  <button class="btn btn-outline" @click=${this._onMove}>
+                    ↔ Move
+                  </button>
+                  <button
+                    class="btn btn-outline"
+                    style="color: #c62828; border-color: #c62828"
+                    @click=${this._onRemove}
+                  >
+                    ✕ Remove
+                  </button>
+                  <span style="flex:1"></span>
+                  <button class="btn btn-primary" @click=${this._close}>
+                    Close
+                  </button>
+                </div>
+              `}
         </div>
       </div>
     `;
