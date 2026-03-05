@@ -28,15 +28,40 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
+def _register_static_path(hass: HomeAssistant) -> None:
+    """Register frontend static path, handling both old and new HA APIs."""
+    frontend_path = str(Path(__file__).parent / "frontend" / "wine-cellar-card.js")
+    url_path = "/wine_cellar/wine-cellar-card.js"
+
+    try:
+        # Modern HA (2024.7+)
+        from homeassistant.components.http import StaticPathConfig
+        hass.async_create_task(
+            hass.http.async_register_static_paths(
+                [StaticPathConfig(url_path, frontend_path, False)]
+            )
+        )
+    except (ImportError, AttributeError, TypeError):
+        try:
+            # Legacy HA
+            hass.http.register_static_path(url_path, frontend_path, cache_headers=False)
+        except Exception:
+            _LOGGER.warning("Could not register frontend static path")
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Wine Cellar from a config entry."""
-    # Register frontend static path (only once)
-    if "frontend_registered" not in hass.data.get(DOMAIN, {}):
-        hass.http.register_static_path(
-            "/wine_cellar/wine-cellar-card.js",
-            str(Path(__file__).parent / "frontend" / "wine-cellar-card.js"),
-            cache_headers=False,
-        )
+    domain_data = hass.data.setdefault(DOMAIN, {})
+
+    # Register frontend static path (only once, persists across reloads)
+    if not domain_data.get("frontend_registered"):
+        _register_static_path(hass)
+        domain_data["frontend_registered"] = True
+
+    # Register WebSocket commands (only once, they persist globally in HA)
+    if not domain_data.get("websocket_registered"):
+        async_register_websocket_commands(hass)
+        domain_data["websocket_registered"] = True
 
     # Initialize storage
     storage = WineCellarStorage(hass)
@@ -45,15 +70,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Initialize Vivino client
     vivino = VivinoClient(hass)
 
-    hass.data[DOMAIN] = {
-        "storage": storage,
-        "vivino": vivino,
-        "entry": entry,
-        "frontend_registered": True,
-    }
-
-    # Register WebSocket commands
-    async_register_websocket_commands(hass)
+    # Store entry-specific data
+    domain_data["storage"] = storage
+    domain_data["vivino"] = vivino
+    domain_data["entry"] = entry
 
     # Register services
     await _async_register_services(hass, storage, vivino)
@@ -68,7 +88,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data.pop(DOMAIN, None)
+        domain_data = hass.data.get(DOMAIN, {})
+        # Remove entry-specific data but keep registration flags
+        domain_data.pop("storage", None)
+        domain_data.pop("vivino", None)
+        domain_data.pop("entry", None)
     return unload_ok
 
 
