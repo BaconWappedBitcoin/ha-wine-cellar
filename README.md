@@ -4,6 +4,10 @@ A custom Home Assistant integration for managing your wine collection. Track bot
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 
+![Wine Cellar Rack View](docs/screenshot-rack-view.png)
+
+![Wine Detail Dialog](docs/screenshot-wine-detail.png)
+
 ## Features
 
 ### Visual Cellar Management
