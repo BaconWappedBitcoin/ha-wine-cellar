@@ -1,24 +1,45 @@
 # Wine Cellar Tracker for Home Assistant
 
-A custom Home Assistant integration for managing your wine collection. Track bottles by location, scan barcodes with your camera, recognize wine labels with AI, rate wines, and visualize your cellar layout with an interactive Lovelace card.
+A custom Home Assistant integration for managing your wine collection. Track bottles by location, scan labels with AI, get Vivino ratings and pricing, drag-and-drop bottles between slots, and visualize your cellar with an interactive Lovelace card.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 
 ## Features
 
-- **Visual Cabinet Layout** — Interactive grid view of your wine cabinets with color-coded bottles by type (red, white, rose, sparkling, dessert), thumbnail images from Vivino, and disposition badges (Drink/Hold/Past Peak)
-- **Camera Barcode Scanning** — Point your phone or tablet camera at a wine bottle barcode to auto-lookup details from Vivino and Open Food Facts
-- **AI Label Recognition** — Snap a photo of a wine label and let Google Gemini Vision identify the wine automatically (name, winery, vintage, type, region, country, grape variety, drink-by date, notes)
-- **AI Drink/Hold Analysis** — One-click AI scan analyzes your entire cellar and assigns Drink Now, Hold, or Past Peak dispositions with optimal drink dates
-- **Rich Wine Details** — Vivino ratings with review counts, wine descriptions, food pairings, alcohol content, grape variety, and more
-- **Ratings & Tasting Notes** — Rate wines with an interactive half-star widget (0.5-5.0) and record structured tasting notes (aroma, taste, finish, overall impression)
-- **Wine Search** — Search Vivino by name to find and add wines without a barcode, complete with images and metadata
-- **Copy & Paste** — Quickly duplicate wines across your cellar for multi-bottle purchases
-- **Flexible Storage Zones** — Any row in a rack can be converted to a named storage zone (e.g., "Box Storage", "Pending") via the rack settings editor
-- **Search & Filter** — Filter your collection by wine type or search by name/winery/region/grape
-- **Statistics Dashboard** — Total bottles, capacity, available slots, and total cellar value
-- **Home Assistant Sensors** — Entities for total bottles, capacity, and per-cabinet counts for use in automations
+### Visual Cellar Management
+- **Interactive Cabinet Grid** — Color-coded bottles by type (red, white, rosé, sparkling, dessert) with thumbnail images, disposition badges (Drink/Hold/Past Peak), and Vivino ratings
+- **Drag & Drop** — Rearrange bottles by dragging on desktop; long-press to move on mobile
+- **Move & Swap** — Move button in wine detail or long-press on mobile; bottles swap automatically if the target cell is occupied
+- **Copy & Paste** — Duplicate wines across your cellar for multi-bottle purchases
+- **Flexible Storage Zones** — Convert any rack row into a named storage zone (e.g., "Box Storage", "Pending") via rack settings
+- **Search & Filter** — Filter by wine type or search by name, winery, region, or grape variety
+- **Statistics Dashboard** — Total bottles, capacity, available slots, and total cellar value at a glance
 - **Responsive Design** — Optimized layouts for phone, tablet, and desktop with dark mode support
+
+### AI-Powered Wine Intelligence
+- **One-Scan Label Recognition** — Snap a photo of a wine label and Google Gemini identifies the wine and provides a full sommelier assessment in one call: name, winery, vintage, type, region, grape variety, disposition, drink window, tasting description, estimated price, and critic rating estimates (Wine Spectator, Robert Parker, James Dunnuck, Antonio Galloni)
+- **AI Batch Scan** — One-click full AI analysis on your entire cellar: disposition, drink windows, descriptions, pricing, and ratings for every bottle
+- **Auto-Enrich on Add** — When you add a wine, Vivino data (rating, price, description, food pairings) is automatically fetched in the background
+
+### Vivino Integration
+- **Vivino Batch Scan** — Refresh all wines from Vivino in one click: ratings, review counts, market pricing, descriptions, food pairings, alcohol content, and grape variety
+- **Individual Vivino Refresh** — Update any single wine's Vivino data from the detail dialog
+- **Wine Search** — Search Vivino by name to find and add wines without a barcode
+
+### Scanning & Input
+- **Camera Barcode Scanning** — Point your phone or tablet camera at a barcode to auto-lookup details from Vivino and Open Food Facts
+- **AI Label Scanning** — Photo-based label recognition with full wine analysis
+- **Manual Entry** — Add wines by hand with a comprehensive form
+
+### Ratings & Notes
+- **Interactive Half-Star Rating** — Rate wines from 0.5 to 5.0 stars
+- **Structured Tasting Notes** — Record aroma, taste, finish, and overall impression
+- **AI Critic Estimates** — Gemini provides estimated scores from Wine Spectator, Robert Parker, James Dunnuck, and Antonio Galloni
+- **Vivino Community Ratings** — Real ratings and review counts from Vivino's user base
+
+### Home Assistant Integration
+- **HA Sensors** — Entities for total bottles, capacity percentage, and per-cabinet counts for use in automations and dashboards
+- **Services** — Automate adding, removing, and moving wines via HA services
 
 ## Installation
 
@@ -46,15 +67,17 @@ type: custom:wine-cellar-card
 title: Wine Cellar
 ```
 
-### AI Label Recognition (Optional)
+### AI Features (Optional)
 
-To enable the "Recognize Label" feature and AI Scan analysis:
+To enable label recognition, AI analysis, and batch AI scanning:
 
 1. Get a free API key from [Google AI Studio](https://aistudio.google.com/apikey)
 2. Go to **Settings > Devices & Services > Wine Cellar > Configure**
 3. Enter your Gemini API key
-4. The "Recognize Label" button will appear in the Add Wine dialog
-5. The "AI Scan" button in the header will analyze all wines for drink/hold/past peak disposition
+4. Features unlocked:
+   - **Recognize Label** button in the Add Wine dialog (camera → full analysis in one scan)
+   - **AI** button on individual wines (full analysis with disposition, ratings, pricing)
+   - **AI Batch** button in the card header (analyze all wines at once)
 
 ## Default Cabinet Layout
 
@@ -64,10 +87,10 @@ The integration ships with 3 cabinet sections, each with 10 rows and 9 columns (
 
 | Source | Data Provided |
 |---|---|
-| **Vivino** | Wine name, winery, region, country, type, vintage, rating, ratings count, image, grape variety, description, food pairings, alcohol % |
+| **Vivino** | Wine name, winery, region, country, type, vintage, rating, ratings count, image, grape variety, description, food pairings, alcohol %, market price |
 | **Open Food Facts** | Wine name, brand, origin, country, image |
 | **UPC Item DB** | Wine name, brand (barcode lookup) |
-| **Google Gemini** | Label recognition (name, winery, vintage, type, region, country, grape, drink-by, notes), drink/hold analysis |
+| **Google Gemini** | Label recognition, full wine analysis (disposition, drink window, description, estimated price, critic rating estimates) |
 
 ## Services
 
