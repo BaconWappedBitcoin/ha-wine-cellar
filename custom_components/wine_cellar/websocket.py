@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -85,6 +86,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_analyze_wines)
     websocket_api.async_register_command(hass, ws_refresh_wine)
     websocket_api.async_register_command(hass, ws_analyze_single_wine)
+    websocket_api.async_register_command(hass, ws_batch_analyze_wines)
+    websocket_api.async_register_command(hass, ws_batch_refresh_vivino)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "wine_cellar/get_wines"})
@@ -576,3 +579,193 @@ async def ws_analyze_single_wine(
         connection.send_result(msg["id"], {"wine": updated_wine, "analysis": result})
     else:
         connection.send_result(msg["id"], {"wine": wine, "analysis": result})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "wine_cellar/batch_analyze_wines"}
+)
+@websocket_api.async_response
+async def ws_batch_analyze_wines(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Batch AI analysis: run full analyze_single_wine on every wine."""
+    gemini = hass.data[DOMAIN].get("gemini")
+    if not gemini:
+        connection.send_result(
+            msg["id"],
+            {"error": "Gemini API key not configured."},
+        )
+        return
+
+    storage = hass.data[DOMAIN]["storage"]
+    wines = storage.wines
+    if not wines:
+        connection.send_result(msg["id"], {"error": "No wines to analyze."})
+        return
+
+    updated = 0
+    errors = 0
+    total = len(wines)
+
+    for wine in wines:
+        try:
+            result = await gemini.analyze_single_wine(wine)
+            if "error" in result:
+                _LOGGER.warning(
+                    "Batch AI: error for wine %s: %s",
+                    wine.get("id"), result["error"],
+                )
+                errors += 1
+                continue
+
+            updates: dict[str, Any] = {}
+            if result.get("disposition"):
+                updates["disposition"] = result["disposition"]
+            if result.get("drink_by"):
+                updates["drink_by"] = result["drink_by"]
+
+            # Set AI description if wine has no description or has error text
+            cur_desc = wine.get("description", "")
+            bad_kw = ("forbidden", "underage", "try searching", "page is blocked")
+            has_bad_desc = cur_desc and any(kw in cur_desc.lower() for kw in bad_kw)
+            if result.get("description") and (not cur_desc or has_bad_desc):
+                updates["description"] = result["description"]
+
+            # AI ratings
+            ai_ratings: dict[str, int] = {}
+            for key in ("rating_ws", "rating_rp", "rating_jd", "rating_ag"):
+                val = result.get(key)
+                if val and isinstance(val, (int, float)) and 50 <= val <= 100:
+                    ai_ratings[key] = int(val)
+            if ai_ratings:
+                updates["ai_ratings"] = ai_ratings
+
+            if result.get("drink_window"):
+                updates["drink_window"] = result["drink_window"]
+
+            # Estimated price as retail_price if not already set
+            est_price = result.get("estimated_price")
+            if est_price and isinstance(est_price, (int, float)) and est_price > 0:
+                if not wine.get("retail_price"):
+                    updates["retail_price"] = round(float(est_price), 2)
+
+            if updates:
+                storage.update_wine(wine["id"], updates)
+                updated += 1
+
+            # Small delay between API calls to avoid rate limits
+            await asyncio.sleep(0.5)
+
+        except Exception as err:
+            _LOGGER.warning(
+                "Batch AI: exception for wine %s: %s", wine.get("id"), err
+            )
+            errors += 1
+
+    if updated:
+        await storage.async_save()
+        hass.bus.async_fire(f"{DOMAIN}_updated")
+
+    connection.send_result(
+        msg["id"],
+        {"updated": updated, "total": total, "errors": errors},
+    )
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "wine_cellar/batch_refresh_vivino"}
+)
+@websocket_api.async_response
+async def ws_batch_refresh_vivino(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Batch Vivino refresh: look up every wine on Vivino and update data."""
+    vivino = hass.data[DOMAIN].get("vivino")
+    if not vivino:
+        connection.send_result(
+            msg["id"],
+            {"error": "Vivino client not available."},
+        )
+        return
+
+    storage = hass.data[DOMAIN]["storage"]
+    wines = storage.wines
+    if not wines:
+        connection.send_result(msg["id"], {"error": "No wines to refresh."})
+        return
+
+    updated = 0
+    errors = 0
+    total = len(wines)
+
+    for wine in wines:
+        try:
+            # Build search query
+            parts = []
+            if wine.get("winery"):
+                parts.append(wine["winery"])
+            if wine.get("name"):
+                parts.append(wine["name"])
+            if wine.get("vintage"):
+                parts.append(str(wine["vintage"]))
+            query = " ".join(parts) if parts else ""
+
+            if not query:
+                continue
+
+            result = await vivino.search_wine(query)
+            if not result:
+                continue
+
+            lookup = result[0]
+            updates: dict[str, Any] = {}
+
+            # Always update enrichment fields from Vivino
+            for key in ("rating", "ratings_count", "image_url", "description",
+                        "food_pairings", "alcohol", "grape_variety"):
+                val = lookup.get(key)
+                if val:
+                    updates[key] = val
+
+            # Vivino price as retail_price
+            if lookup.get("price"):
+                updates["retail_price"] = lookup["price"]
+
+            # Clear bad descriptions
+            cur_desc = wine.get("description", "")
+            bad_keywords = ("forbidden", "underage", "try searching", "page is blocked")
+            if cur_desc and any(kw in cur_desc.lower() for kw in bad_keywords):
+                if "description" not in updates:
+                    updates["description"] = ""
+
+            # Only fill in fields that are currently empty
+            for key in ("region", "country", "type"):
+                val = lookup.get(key)
+                if val and not wine.get(key):
+                    updates[key] = val
+
+            if updates:
+                storage.update_wine(wine["id"], updates)
+                updated += 1
+
+            # Small delay to avoid rate limits
+            await asyncio.sleep(1.0)
+
+        except Exception as err:
+            _LOGGER.warning(
+                "Batch Vivino: exception for wine %s: %s", wine.get("id"), err
+            )
+            errors += 1
+
+    if updated:
+        await storage.async_save()
+        hass.bus.async_fire(f"{DOMAIN}_updated")
+
+    connection.send_result(
+        msg["id"],
+        {"updated": updated, "total": total, "errors": errors},
+    )

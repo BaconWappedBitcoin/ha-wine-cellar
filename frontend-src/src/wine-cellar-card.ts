@@ -34,6 +34,7 @@ export class WineCellarCard extends LitElement {
   @state() private _copiedWine: Wine | null = null;
   @state() private _movingWine: Wine | null = null;
   @state() private _analyzing = false;
+  @state() private _batchVivino = false;
   @state() private _toast = "";
   @state() private _hasGemini = false;
 
@@ -72,6 +73,8 @@ export class WineCellarCard extends LitElement {
         display: flex;
         gap: 4px;
         align-items: center;
+        flex-wrap: wrap;
+        justify-content: flex-end;
       }
 
       .cabinets-row {
@@ -479,26 +482,48 @@ export class WineCellarCard extends LitElement {
     }
   }
 
-  // --- AI Analysis ---
-  private async _analyzeWines() {
+  // --- Batch AI Analysis ---
+  private async _batchAnalyzeWines() {
     this._analyzing = true;
-    this._showToast("Analyzing wines with AI...");
+    this._showToast("Running full AI analysis on all wines...");
     try {
       const result = await this.hass.callWS({
-        type: "wine_cellar/analyze_wines",
+        type: "wine_cellar/batch_analyze_wines",
       });
       if (result.error) {
-        this._showToast(`Analysis failed: ${result.error}`);
+        this._showToast(`AI Batch failed: ${result.error}`);
       } else {
-        this._showToast(
-          `Analysis complete! ${result.updated}/${result.total} wines updated.`
-        );
+        const parts = [`AI Batch complete! ${result.updated}/${result.total} updated`];
+        if (result.errors > 0) parts.push(`(${result.errors} errors)`);
+        this._showToast(parts.join(" "));
         await this._loadData();
       }
     } catch (err: any) {
-      this._showToast("Analysis failed.");
+      this._showToast("AI Batch analysis failed.");
     }
     this._analyzing = false;
+  }
+
+  // --- Batch Vivino Refresh ---
+  private async _batchRefreshVivino() {
+    this._batchVivino = true;
+    this._showToast("Refreshing all wines from Vivino...");
+    try {
+      const result = await this.hass.callWS({
+        type: "wine_cellar/batch_refresh_vivino",
+      });
+      if (result.error) {
+        this._showToast(`Vivino Batch failed: ${result.error}`);
+      } else {
+        const parts = [`Vivino Batch complete! ${result.updated}/${result.total} updated`];
+        if (result.errors > 0) parts.push(`(${result.errors} errors)`);
+        this._showToast(parts.join(" "));
+        await this._loadData();
+      }
+    } catch (err: any) {
+      this._showToast("Vivino Batch refresh failed.");
+    }
+    this._batchVivino = false;
   }
 
   private async _onRemoveWine(e: CustomEvent) {
@@ -548,14 +573,25 @@ export class WineCellarCard extends LitElement {
             ${title}
           </div>
           <div class="header-actions">
+            ${this._hasGemini ? html`
+              <button
+                class="btn btn-primary"
+                style="font-size: 0.8em; padding: 5px 10px; background: #1565c0;"
+                @click=${this._batchAnalyzeWines}
+                title="Full AI analysis on all wines (disposition, ratings, price, description)"
+                ?disabled=${this._analyzing || this._batchVivino}
+              >
+                ${this._analyzing ? "AI Scanning..." : "🤖 AI Batch"}
+              </button>
+            ` : nothing}
             <button
               class="btn btn-primary"
-              style="font-size: 0.85em; padding: 6px 14px; background: #1565c0;"
-              @click=${this._analyzeWines}
-              title="AI Drink/Hold Analysis"
-              ?disabled=${this._analyzing}
+              style="font-size: 0.8em; padding: 5px 10px; background: #8e24aa;"
+              @click=${this._batchRefreshVivino}
+              title="Refresh all wines from Vivino (ratings, price, description)"
+              ?disabled=${this._batchVivino || this._analyzing}
             >
-              ${this._analyzing ? "Analyzing..." : "AI Scan"}
+              ${this._batchVivino ? "Vivino Scanning..." : "🍇 Vivino Batch"}
             </button>
             <button
               class="btn btn-icon"

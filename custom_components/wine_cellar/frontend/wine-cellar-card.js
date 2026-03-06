@@ -4460,6 +4460,7 @@ let WineCellarCard = class WineCellarCard extends i {
         this._copiedWine = null;
         this._movingWine = null;
         this._analyzing = false;
+        this._batchVivino = false;
         this._toast = "";
         this._hasGemini = false;
     }
@@ -4675,26 +4676,53 @@ let WineCellarCard = class WineCellarCard extends i {
             this._showToast("Failed to paste wine.");
         }
     }
-    // --- AI Analysis ---
-    async _analyzeWines() {
+    // --- Batch AI Analysis ---
+    async _batchAnalyzeWines() {
         this._analyzing = true;
-        this._showToast("Analyzing wines with AI...");
+        this._showToast("Running full AI analysis on all wines...");
         try {
             const result = await this.hass.callWS({
-                type: "wine_cellar/analyze_wines",
+                type: "wine_cellar/batch_analyze_wines",
             });
             if (result.error) {
-                this._showToast(`Analysis failed: ${result.error}`);
+                this._showToast(`AI Batch failed: ${result.error}`);
             }
             else {
-                this._showToast(`Analysis complete! ${result.updated}/${result.total} wines updated.`);
+                const parts = [`AI Batch complete! ${result.updated}/${result.total} updated`];
+                if (result.errors > 0)
+                    parts.push(`(${result.errors} errors)`);
+                this._showToast(parts.join(" "));
                 await this._loadData();
             }
         }
         catch (err) {
-            this._showToast("Analysis failed.");
+            this._showToast("AI Batch analysis failed.");
         }
         this._analyzing = false;
+    }
+    // --- Batch Vivino Refresh ---
+    async _batchRefreshVivino() {
+        this._batchVivino = true;
+        this._showToast("Refreshing all wines from Vivino...");
+        try {
+            const result = await this.hass.callWS({
+                type: "wine_cellar/batch_refresh_vivino",
+            });
+            if (result.error) {
+                this._showToast(`Vivino Batch failed: ${result.error}`);
+            }
+            else {
+                const parts = [`Vivino Batch complete! ${result.updated}/${result.total} updated`];
+                if (result.errors > 0)
+                    parts.push(`(${result.errors} errors)`);
+                this._showToast(parts.join(" "));
+                await this._loadData();
+            }
+        }
+        catch (err) {
+            this._showToast("Vivino Batch refresh failed.");
+        }
+        this._batchVivino = false;
     }
     async _onRemoveWine(e) {
         try {
@@ -4738,14 +4766,25 @@ let WineCellarCard = class WineCellarCard extends i {
             ${title}
           </div>
           <div class="header-actions">
+            ${this._hasGemini ? b `
+              <button
+                class="btn btn-primary"
+                style="font-size: 0.8em; padding: 5px 10px; background: #1565c0;"
+                @click=${this._batchAnalyzeWines}
+                title="Full AI analysis on all wines (disposition, ratings, price, description)"
+                ?disabled=${this._analyzing || this._batchVivino}
+              >
+                ${this._analyzing ? "AI Scanning..." : "🤖 AI Batch"}
+              </button>
+            ` : A}
             <button
               class="btn btn-primary"
-              style="font-size: 0.85em; padding: 6px 14px; background: #1565c0;"
-              @click=${this._analyzeWines}
-              title="AI Drink/Hold Analysis"
-              ?disabled=${this._analyzing}
+              style="font-size: 0.8em; padding: 5px 10px; background: #8e24aa;"
+              @click=${this._batchRefreshVivino}
+              title="Refresh all wines from Vivino (ratings, price, description)"
+              ?disabled=${this._batchVivino || this._analyzing}
             >
-              ${this._analyzing ? "Analyzing..." : "AI Scan"}
+              ${this._batchVivino ? "Vivino Scanning..." : "🍇 Vivino Batch"}
             </button>
             <button
               class="btn btn-icon"
@@ -5024,6 +5063,8 @@ WineCellarCard.styles = [
         display: flex;
         gap: 4px;
         align-items: center;
+        flex-wrap: wrap;
+        justify-content: flex-end;
       }
 
       .cabinets-row {
@@ -5240,6 +5281,9 @@ __decorate([
 __decorate([
     r()
 ], WineCellarCard.prototype, "_analyzing", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_batchVivino", void 0);
 __decorate([
     r()
 ], WineCellarCard.prototype, "_toast", void 0);
