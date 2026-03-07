@@ -76,11 +76,14 @@ const sharedStyles = i$3 `
   :host {
     --wc-primary: #722f37;
     --wc-primary-light: #9a4a54;
+    --wc-primary-text: #c48b91;
     --wc-bg: var(--ha-card-background, var(--card-background-color, #fff));
+    --wc-surface: var(--ha-card-background, var(--card-background-color, #fff));
     --wc-text: var(--primary-text-color, #212121);
     --wc-text-secondary: var(--secondary-text-color, #727272);
     --wc-border: var(--divider-color, #e0e0e0);
     --wc-shadow: var(--ha-card-box-shadow, 0 2px 6px rgba(0, 0, 0, 0.1));
+    --wc-hover: rgba(128, 128, 128, 0.12);
     font-family: var(--paper-font-body1_-_font-family, "Roboto", sans-serif);
   }
 
@@ -138,13 +141,26 @@ const sharedStyles = i$3 `
   }
 
   .tab:hover {
-    background: rgba(114, 47, 55, 0.08);
+    background: var(--wc-hover);
   }
 
   .tab.active {
     background: var(--wc-primary);
     color: #fff;
     border-color: var(--wc-primary);
+  }
+
+  .manage-racks-btn {
+    margin-left: auto;
+    border-color: transparent;
+    color: var(--wc-primary-text);
+    font-weight: 500;
+    font-size: 0.8em;
+    padding: 6px 12px;
+  }
+
+  .manage-racks-btn:hover {
+    background: var(--wc-hover);
   }
 
   .btn {
@@ -192,7 +208,7 @@ const sharedStyles = i$3 `
   }
 
   .btn-icon:hover {
-    background: rgba(0, 0, 0, 0.06);
+    background: var(--wc-hover);
   }
 
   .dialog-overlay {
@@ -318,6 +334,180 @@ const sharedStyles = i$3 `
       padding: 5px 12px;
       font-size: 0.8em;
     }
+    .depth-panel {
+      width: 100% !important;
+      border-radius: 0 !important;
+    }
+  }
+
+  /* --- Depth Side Panel --- */
+  .depth-panel-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 99;
+    animation: fadeIn 0.2s ease;
+  }
+
+  .depth-panel {
+    position: fixed;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 300px;
+    background: var(--wc-bg);
+    z-index: 100;
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow-y: auto;
+  }
+
+  .depth-panel.open {
+    transform: translateX(0);
+  }
+
+  .depth-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    border-bottom: 1px solid var(--wc-border, #e0e0e0);
+    flex-shrink: 0;
+  }
+
+  .depth-panel-title {
+    font-weight: 600;
+    font-size: 1em;
+    color: var(--wc-text, #333);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .depth-panel-subtitle {
+    font-size: 0.8em;
+    font-weight: 400;
+    color: var(--wc-text-secondary, #888);
+  }
+
+  .depth-panel-close {
+    background: none;
+    border: none;
+    font-size: 1.2em;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    color: var(--wc-text-secondary, #888);
+  }
+
+  .depth-panel-close:hover {
+    background: var(--wc-hover);
+  }
+
+  .depth-panel-slots {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .depth-slot {
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s, box-shadow 0.15s;
+  }
+
+  .depth-slot:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+
+  .depth-slot-label {
+    font-size: 0.7em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--wc-text-secondary, #888);
+    padding: 0 4px 4px;
+  }
+
+  .depth-slot-wine {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--wc-bg);
+    border: 1px solid var(--wc-border);
+    border-radius: 10px;
+  }
+
+  .depth-slot-thumb {
+    width: 32px;
+    height: 44px;
+    border-radius: 4px;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+
+  .depth-slot-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .depth-slot-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .depth-slot-name {
+    font-weight: 600;
+    font-size: 0.88em;
+    color: var(--wc-text, #333);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .depth-slot-meta {
+    font-size: 0.78em;
+    color: var(--wc-text-secondary, #888);
+    margin-top: 2px;
+  }
+
+  .depth-slot-empty {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 12px;
+    border: 2px dashed var(--wc-border, #ddd);
+    border-radius: 10px;
+    color: var(--wc-text-secondary, #aaa);
+    font-size: 0.85em;
+  }
+
+  .depth-slot.empty:hover .depth-slot-empty {
+    border-color: var(--wc-primary-text);
+    color: var(--wc-primary-text);
+  }
+
+  .depth-slot-plus {
+    font-size: 1.3em;
+    font-weight: 300;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--wc-hover);
+  }
+
+  .depth-slot.empty:hover .depth-slot-plus {
+    background: rgba(196, 139, 145, 0.2);
   }
 `;
 
@@ -362,13 +552,14 @@ let CabinetGrid = class CabinetGrid extends i {
     _getStorageRowWines(row) {
         return this.wines.filter((w) => w.cabinet_id === this.cabinet.id && w.zone === `storage-${row}`);
     }
-    _onCellClick(row, col, wine, wineCount = 0, cabinetDepth = 1) {
+    _onCellClick(row, col, wine, wineCount = 0, cabinetDepth = 1, wines = []) {
         this.dispatchEvent(new CustomEvent("cell-click", {
             detail: {
                 cabinet: this.cabinet,
                 row,
                 col,
                 wine,
+                wines,
                 wineCount,
                 cabinetDepth,
             },
@@ -528,7 +719,7 @@ let CabinetGrid = class CabinetGrid extends i {
               class="cell ${frontWine ? "filled" : "empty"} ${isDragOver ? "drag-over" : ""}"
               style=${frontWine ? `background: ${bgColor}; --bottle-type-color: ${ringColor}` : ""}
               draggable=${frontWine ? "true" : "false"}
-              @click=${() => this._onCellClick(row, col, frontWine, wineCount, cabinetDepth)}
+              @click=${() => this._onCellClick(row, col, frontWine, wineCount, cabinetDepth, wines)}
               @touchstart=${frontWine ? () => this._onTouchStart(frontWine) : A}
               @touchend=${frontWine ? () => this._onTouchEnd() : A}
               @touchmove=${frontWine ? () => this._onTouchMove() : A}
@@ -1075,6 +1266,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
         super(...arguments);
         this.wine = null;
         this.open = false;
+        this.mode = "cellar";
         this._editing = false;
         this._editingFields = false;
         this._editData = {};
@@ -1147,15 +1339,28 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 updates.retail_price = null;
             else
                 updates.retail_price = parseFloat(updates.retail_price) || null;
-            await this.hass.callWS({
-                type: "wine_cellar/update_wine",
-                wine_id: this.wine.id,
-                updates,
-            });
-            this.wine = { ...this.wine, ...updates };
-            this._editingFields = false;
-            this._editData = {};
-            this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+            if (this.mode === "buylist") {
+                await this.hass.callWS({
+                    type: "wine_cellar/update_buy_list_item",
+                    item_id: this.wine.id,
+                    updates,
+                });
+                this.wine = { ...this.wine, ...updates };
+                this._editingFields = false;
+                this._editData = {};
+                this.dispatchEvent(new CustomEvent("buy-list-updated", { bubbles: true, composed: true }));
+            }
+            else {
+                await this.hass.callWS({
+                    type: "wine_cellar/update_wine",
+                    wine_id: this.wine.id,
+                    updates,
+                });
+                this.wine = { ...this.wine, ...updates };
+                this._editingFields = false;
+                this._editData = {};
+                this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+            }
         }
         catch (err) {
             console.error("Failed to save wine fields", err);
@@ -1164,11 +1369,20 @@ let WineDetailDialog = class WineDetailDialog extends i {
     }
     _onRemove() {
         if (this.wine) {
-            this.dispatchEvent(new CustomEvent("remove-wine", {
-                detail: { wine_id: this.wine.id },
-                bubbles: true,
-                composed: true,
-            }));
+            if (this.mode === "buylist") {
+                this.dispatchEvent(new CustomEvent("remove-buy-list-item", {
+                    detail: { item_id: this.wine.id },
+                    bubbles: true,
+                    composed: true,
+                }));
+            }
+            else {
+                this.dispatchEvent(new CustomEvent("remove-wine", {
+                    detail: { wine_id: this.wine.id },
+                    bubbles: true,
+                    composed: true,
+                }));
+            }
             this._close();
         }
     }
@@ -1208,14 +1422,23 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 user_rating: this._userRating || null,
                 tasting_notes: this._hasTastingNotes() ? this._tastingNotes : null,
             };
-            await this.hass.callWS({
-                type: "wine_cellar/update_wine",
-                wine_id: this.wine.id,
-                updates,
-            });
+            if (this.mode === "buylist") {
+                await this.hass.callWS({
+                    type: "wine_cellar/update_buy_list_item",
+                    item_id: this.wine.id,
+                    updates,
+                });
+            }
+            else {
+                await this.hass.callWS({
+                    type: "wine_cellar/update_wine",
+                    wine_id: this.wine.id,
+                    updates,
+                });
+            }
             this.wine = { ...this.wine, ...updates };
             this._editing = false;
-            this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+            this.dispatchEvent(new CustomEvent(this.mode === "buylist" ? "buy-list-updated" : "wine-updated", { bubbles: true, composed: true }));
         }
         catch (err) {
             console.error("Failed to save rating/notes", err);
@@ -1399,7 +1622,9 @@ let WineDetailDialog = class WineDetailDialog extends i {
       <div class="dialog-overlay" @click=${this._close}>
         <div class="dialog" @click=${(e) => e.stopPropagation()}>
           <div class="dialog-top-bar">
-            <button class="icon-btn" title="Edit" @click=${this._startEditingFields}>✏️</button>
+            ${this.mode !== "winelist"
+            ? b `<button class="icon-btn" title="Edit" @click=${this._startEditingFields}>✏️</button>`
+            : A}
             <button class="icon-btn close-btn" title="Close" @click=${this._close}>✕</button>
           </div>
           <div class="wine-header">
@@ -1436,21 +1661,25 @@ let WineDetailDialog = class WineDetailDialog extends i {
                     </div>
                   `
             : A}
-              <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:0.9em">
-                <span style="font-size:0.8em;color:var(--wc-text-secondary)">My Rating</span>
-                <star-rating
-                  .value=${this._userRating}
-                  .readonly=${!this._editing}
-                  .size=${20}
-                  @rating-change=${this._onRatingChange}
-                ></star-rating>
-                ${!this._editing && this._userRating === 0
-            ? b `<span class="no-rating" style="font-size:0.8em">Not rated</span>`
+              ${this.mode !== "winelist"
+            ? b `
+                    <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:0.9em">
+                      <span style="font-size:0.8em;color:var(--wc-text-secondary)">My Rating</span>
+                      <star-rating
+                        .value=${this._userRating}
+                        .readonly=${!this._editing}
+                        .size=${20}
+                        @rating-change=${this._onRatingChange}
+                      ></star-rating>
+                      ${!this._editing && this._userRating === 0
+                ? b `<span class="no-rating" style="font-size:0.8em">Not rated</span>`
+                : A}
+                      <button class="edit-toggle" style="font-size:0.75em;padding:2px 6px" @click=${() => (this._editing = !this._editing)}>
+                        ${this._editing ? "Cancel" : "Edit"}
+                      </button>
+                    </div>
+                  `
             : A}
-                <button class="edit-toggle" style="font-size:0.75em;padding:2px 6px" @click=${() => (this._editing = !this._editing)}>
-                  ${this._editing ? "Cancel" : "Edit"}
-                </button>
-              </div>
             </div>
           </div>
 
@@ -1522,15 +1751,19 @@ let WineDetailDialog = class WineDetailDialog extends i {
                   ${wine.grape_variety
                 ? b `<div class="detail-item"><span class="detail-label">Grape</span><span class="detail-value">${wine.grape_variety}</span></div>`
                 : A}
-                  <div class="detail-item"><span class="detail-label">Purchase Price</span><span class="detail-value">${wine.price ? `$${wine.price.toFixed(2)}` : "—"}</span></div>
-                  <div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">${wine.retail_price ? `$${wine.retail_price.toFixed(2)}` : "—"}</span></div>
-                  ${wine.purchase_date
+                  ${wine.price
+                ? b `<div class="detail-item"><span class="detail-label">${this.mode === "winelist" ? "Price" : "Purchase Price"}</span><span class="detail-value">$${wine.price.toFixed(2)}</span></div>`
+                : A}
+                  ${wine.retail_price
+                ? b `<div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">$${wine.retail_price.toFixed(2)}</span></div>`
+                : A}
+                  ${wine.purchase_date && this.mode === "cellar"
                 ? b `<div class="detail-item"><span class="detail-label">Purchased</span><span class="detail-value">${wine.purchase_date}</span></div>`
                 : A}
                   ${wine.drink_by
                 ? b `<div class="detail-item"><span class="detail-label">Drink By</span><span class="detail-value">${wine.drink_by}</span></div>`
                 : A}
-                  ${wine.barcode
+                  ${wine.barcode && this.mode === "cellar"
                 ? b `<div class="detail-item"><span class="detail-label">Barcode</span><span class="detail-value">${wine.barcode}</span></div>`
                 : A}
                 </div>
@@ -1544,6 +1777,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
                     `
                 : A}
 
+                ${this.mode !== "winelist" ? b `
                 <div class="divider"></div>
 
                 <!-- Tasting Notes section -->
@@ -1616,7 +1850,9 @@ let WineDetailDialog = class WineDetailDialog extends i {
                         `
                     : b `<div class="no-rating">No tasting notes yet. Tap Edit to add your thoughts.</div>`}
                 </div>
+                ` : A}
 
+                ${this.mode === "cellar" ? b `
                 <div class="actions">
                   <button class="btn btn-primary" style="background:#8e24aa"
                     ?disabled=${this._refreshing} @click=${this._refreshFromVivino}>
@@ -1633,6 +1869,24 @@ let WineDetailDialog = class WineDetailDialog extends i {
                   <button class="btn btn-primary" style="background:#c62828"
                     @click=${this._onRemove}>✕ Remove</button>
                 </div>
+                ` : A}
+
+                ${this.mode === "buylist" ? b `
+                <div class="actions">
+                  <button class="btn btn-primary" style="background:#8e24aa"
+                    ?disabled=${this._refreshing} @click=${this._refreshFromVivino}>
+                    ${this._refreshing ? "..." : "🍇 Vivino"}
+                  </button>
+                  ${this.hasGemini
+                ? b `<button class="btn btn-primary" style="background:#1565c0"
+                        ?disabled=${this._analyzing} @click=${this._analyzeWithAI}>
+                        ${this._analyzing ? "..." : "🤖 AI Scan"}
+                      </button>`
+                : A}
+                  <button class="btn btn-primary" style="background:#c62828"
+                    @click=${this._onRemove}>✕ Remove</button>
+                </div>
+                ` : A}
               `}
         </div>
       </div>
@@ -1830,7 +2084,7 @@ WineDetailDialog.styles = [
         font-size: 0.9em;
         color: var(--wc-text-secondary);
         font-style: italic;
-        background: rgba(0, 0, 0, 0.03);
+        background: rgba(128, 128, 128, 0.08);
         padding: 10px;
         border-radius: 8px;
       }
@@ -1858,7 +2112,7 @@ WineDetailDialog.styles = [
       .edit-toggle {
         background: none;
         border: none;
-        color: var(--wc-primary, #6d4c41);
+        color: var(--wc-primary-text);
         cursor: pointer;
         font-size: 0.85em;
         font-weight: 500;
@@ -1927,13 +2181,13 @@ WineDetailDialog.styles = [
 
       .tasting-field textarea:focus {
         outline: none;
-        border-color: var(--wc-primary, #6d4c41);
+        border-color: var(--wc-primary-text);
       }
 
       .tasting-value {
         font-size: 0.85em;
         color: var(--wc-text);
-        background: rgba(0, 0, 0, 0.03);
+        background: rgba(128, 128, 128, 0.08);
         padding: 8px;
         border-radius: 8px;
         min-height: 20px;
@@ -2071,6 +2325,9 @@ __decorate([
 __decorate([
     n({ type: Boolean })
 ], WineDetailDialog.prototype, "open", void 0);
+__decorate([
+    n({ type: String })
+], WineDetailDialog.prototype, "mode", void 0);
 __decorate([
     r()
 ], WineDetailDialog.prototype, "_editing", void 0);
@@ -3607,7 +3864,7 @@ AddWineDialog.styles = [
       }
 
       .confirm-summary {
-        background: rgba(0, 0, 0, 0.03);
+        background: rgba(128, 128, 128, 0.08);
         border-radius: 10px;
         padding: 16px;
       }
@@ -3899,7 +4156,7 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
         this._error = "";
         this._editCabinet = {
             name: "",
-            rows: 8,
+            rows: 1,
             cols: 8,
             depth: 1,
             has_bottom_zone: false,
@@ -3934,6 +4191,45 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
     _isStorageRow(row) {
         return this._editStorageRows.some((sr) => sr.row === row);
     }
+    _addRow() {
+        const current = this._editCabinet.rows || 1;
+        if (current >= 20)
+            return;
+        this._editCabinet = { ...this._editCabinet, rows: current + 1 };
+    }
+    _removeRow() {
+        const current = this._editCabinet.rows || 1;
+        if (current <= 1)
+            return;
+        const newRows = current - 1;
+        // Remove storage row if last row was storage
+        this._editStorageRows = this._editStorageRows.filter((sr) => sr.row < newRows);
+        this._editCabinet = { ...this._editCabinet, rows: newRows };
+    }
+    _addCol() {
+        const current = this._editCabinet.cols || 1;
+        if (current >= 20)
+            return;
+        this._editCabinet = { ...this._editCabinet, cols: current + 1 };
+    }
+    _removeCol() {
+        const current = this._editCabinet.cols || 1;
+        if (current <= 1)
+            return;
+        this._editCabinet = { ...this._editCabinet, cols: current - 1 };
+    }
+    _addDepth() {
+        const current = this._editCabinet.depth || 1;
+        if (current >= 6)
+            return;
+        this._editCabinet = { ...this._editCabinet, depth: current + 1 };
+    }
+    _removeDepth() {
+        const current = this._editCabinet.depth || 1;
+        if (current <= 1)
+            return;
+        this._editCabinet = { ...this._editCabinet, depth: current - 1 };
+    }
     async _saveAdd() {
         this._loading = true;
         this._error = "";
@@ -3942,7 +4238,7 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
                 type: "wine_cellar/add_cabinet",
                 cabinet: {
                     name: this._editCabinet.name || "New Rack",
-                    rows: this._editCabinet.rows || 8,
+                    rows: this._editCabinet.rows || 1,
                     cols: this._editCabinet.cols || 8,
                     depth: this._editCabinet.depth || 1,
                     has_bottom_zone: false,
@@ -3964,7 +4260,7 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
         this._error = "";
         try {
             const cabinetId = this._editCabinet.id;
-            const newRows = this._editCabinet.rows || 8;
+            const newRows = this._editCabinet.rows || 1;
             const newCols = this._editCabinet.cols || 8;
             // Filter out storage rows beyond the new row count
             const validStorageRows = this._editStorageRows.filter((sr) => sr.row < newRows);
@@ -4117,7 +4413,9 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
     }
     _renderForm() {
         const isEdit = this._mode === "edit";
-        const numRows = this._editCabinet.rows || 8;
+        const numRows = this._editCabinet.rows || 1;
+        const numCols = this._editCabinet.cols || 8;
+        const numDepth = this._editCabinet.depth || 1;
         // Calculate out-of-bounds warning for edits
         let oobCount = 0;
         if (isEdit && this._editCabinet.id) {
@@ -4144,57 +4442,50 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
           />
         </div>
 
-        <div class="form-row">
-          <div class="form-group">
-            <label>Rows</label>
-            <input
-              type="number"
-              min="1"
-              max="20"
-              .value=${(this._editCabinet.rows || 8).toString()}
-              @input=${(e) => {
-            const newRows = parseInt(e.target.value) || 1;
-            this._editCabinet = { ...this._editCabinet, rows: newRows };
-            // Remove storage rows that are beyond the new row count
-            this._editStorageRows = this._editStorageRows.filter((sr) => sr.row < newRows);
-        }}
-            />
-          </div>
-          <div class="form-group">
-            <label>Columns</label>
-            <input
-              type="number"
-              min="1"
-              max="20"
-              .value=${(this._editCabinet.cols || 8).toString()}
-              @input=${(e) => (this._editCabinet = {
-            ...this._editCabinet,
-            cols: parseInt(e.target.value) || 1,
-        })}
-            />
-          </div>
-          <div class="form-group">
-            <label>Depth</label>
-            <select
-              .value=${(this._editCabinet.depth || 1).toString()}
-              @change=${(e) => (this._editCabinet = {
-            ...this._editCabinet,
-            depth: parseInt(e.target.value) || 1,
-        })}
-              style="padding: 8px; border: 1px solid var(--wc-border); border-radius: 8px; background: var(--wc-bg); color: var(--wc-text); font-size: 1em;"
-            >
-              <option value="1">1 deep</option>
-              <option value="2">2 deep</option>
-              <option value="3">3 deep</option>
-            </select>
-          </div>
-        </div>
+        <!-- Grid Editor -->
+        <div class="grid-editor">
+          <div class="grid-editor-title">Grid Layout</div>
 
-        <!-- Row layout editor -->
-        <div class="row-layout">
-          <div class="row-layout-title">Row Layout</div>
-          <div class="row-layout-hint">Tap a row to toggle between bottle slots and storage zone</div>
-          <div class="row-layout-list">
+          <!-- Stepper controls -->
+          <div class="stepper-row">
+            <div class="stepper-wrap">
+              <div class="stepper-label">Columns</div>
+              <div class="stepper">
+                <button class="stepper-btn" @click=${this._removeCol} ?disabled=${numCols <= 1}>−</button>
+                <span class="stepper-value">${numCols}</span>
+                <button class="stepper-btn" @click=${this._addCol} ?disabled=${numCols >= 20}>+</button>
+              </div>
+            </div>
+            <div class="stepper-wrap">
+              <div class="stepper-label">Depth</div>
+              <div class="stepper">
+                <button class="stepper-btn" @click=${this._removeDepth} ?disabled=${numDepth <= 1}>−</button>
+                <span class="stepper-value">${numDepth}</span>
+                <button class="stepper-btn" @click=${this._addDepth} ?disabled=${numDepth >= 6}>+</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Visual grid preview -->
+          <div class="grid-preview">
+            ${Array.from({ length: numRows }, (_, row) => {
+            const isStorage = this._isStorageRow(row);
+            return b `
+                <div class="grid-preview-row ${isStorage ? "storage" : ""}">
+                  <span class="grid-preview-label">R${row + 1}</span>
+                  ${isStorage
+                ? b `<div class="grid-preview-cell"></div><span class="grid-preview-storage-label">${this._editStorageRows.find(s => s.row === row)?.name || "Storage"}</span>`
+                : Array.from({ length: Math.min(numCols, 15) }, () => b `<div class="grid-preview-cell"></div>`)}
+                  ${!isStorage && numCols > 15
+                ? b `<span style="font-size:0.65em;color:var(--wc-text-secondary)">+${numCols - 15}</span>`
+                : A}
+                </div>
+              `;
+        })}
+          </div>
+
+          <!-- Row list with storage toggles -->
+          <div class="row-list">
             ${Array.from({ length: numRows }, (_, row) => {
             const isStorage = this._isStorageRow(row);
             const sr = this._editStorageRows.find((s) => s.row === row);
@@ -4202,7 +4493,7 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
                 <div class="row-entry ${isStorage ? "storage" : ""}">
                   <span class="row-num">R${row + 1}</span>
                   <span class="row-type ${isStorage ? "is-storage" : ""}">
-                    ${isStorage ? "Storage" : `${this._editCabinet.cols || 8} slots`}
+                    ${isStorage ? "Storage" : `${numCols} slots${numDepth > 1 ? ` × ${numDepth} deep` : ""}`}
                   </span>
                   ${isStorage
                 ? b `
@@ -4225,6 +4516,20 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
               `;
         })}
           </div>
+          <div class="row-controls">
+            <button
+              class="row-ctrl-btn danger"
+              @click=${this._removeRow}
+              ?disabled=${numRows <= 1}
+              title="Remove last row"
+            >− Remove Row</button>
+            <button
+              class="row-ctrl-btn"
+              @click=${this._addRow}
+              ?disabled=${numRows >= 20}
+              title="Add a row"
+            >+ Add Row</button>
+          </div>
         </div>
 
         ${oobCount > 0
@@ -4236,7 +4541,7 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
             : A}
 
         ${this._error
-            ? b `<div class="error-msg" style="color:#c62828;margin-top:8px">${this._error}</div>`
+            ? b `<div class="error-msg" style="color:#ef5350;margin-top:8px">${this._error}</div>`
             : A}
       </div>
 
@@ -4270,7 +4575,7 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
             : A}
         </div>
         ${this._error
-            ? b `<div style="color:#c62828;font-size:0.85em">${this._error}</div>`
+            ? b `<div style="color:#ef5350;font-size:0.85em">${this._error}</div>`
             : A}
       </div>
       <div class="dialog-footer">
@@ -4333,7 +4638,7 @@ RackSettingsDialog.styles = [
       }
 
       .rack-item:hover {
-        background: rgba(0, 0, 0, 0.03);
+        background: var(--wc-hover);
       }
 
       .rack-info {
@@ -4371,7 +4676,7 @@ RackSettingsDialog.styles = [
       }
 
       .small-btn:hover {
-        background: rgba(0, 0, 0, 0.06);
+        background: var(--wc-hover);
       }
 
       .small-btn:disabled {
@@ -4431,25 +4736,145 @@ RackSettingsDialog.styles = [
         background: rgba(114, 47, 55, 0.05);
       }
 
-      /* Row layout editor */
-      .row-layout {
+      /* Grid editor */
+      .grid-editor {
         margin-top: 12px;
       }
 
-      .row-layout-title {
+      .grid-editor-title {
         font-size: 0.85em;
         font-weight: 600;
         color: var(--wc-text);
-        margin-bottom: 8px;
+        margin-bottom: 12px;
       }
 
-      .row-layout-hint {
+      /* Stepper controls for cols/depth */
+      .stepper-row {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .stepper {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 0;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .stepper-label {
         font-size: 0.75em;
         color: var(--wc-text-secondary);
-        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+        font-weight: 500;
       }
 
-      .row-layout-list {
+      .stepper-wrap {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .stepper-btn {
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        font-size: 1.1em;
+        font-weight: 600;
+        color: var(--wc-text-secondary);
+        transition: all 0.15s;
+        flex-shrink: 0;
+      }
+
+      .stepper-btn:hover:not(:disabled) {
+        background: rgba(114, 47, 55, 0.1);
+        color: var(--wc-primary);
+      }
+
+      .stepper-btn:disabled {
+        opacity: 0.25;
+        cursor: default;
+      }
+
+      .stepper-value {
+        flex: 1;
+        text-align: center;
+        font-size: 0.9em;
+        font-weight: 600;
+        color: var(--wc-text);
+        padding: 6px 0;
+        min-width: 40px;
+      }
+
+      /* Visual grid preview */
+      .grid-preview {
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        padding: 8px;
+        margin-bottom: 8px;
+        overflow-x: auto;
+      }
+
+      .grid-preview-row {
+        display: flex;
+        gap: 3px;
+        margin-bottom: 3px;
+        align-items: center;
+      }
+
+      .grid-preview-row:last-child {
+        margin-bottom: 0;
+      }
+
+      .grid-preview-label {
+        width: 28px;
+        font-size: 0.65em;
+        font-weight: 600;
+        color: var(--wc-text-secondary);
+        text-align: center;
+        flex-shrink: 0;
+      }
+
+      .grid-preview-cell {
+        width: 20px;
+        height: 16px;
+        border-radius: 3px;
+        background: rgba(114, 47, 55, 0.15);
+        border: 1px solid rgba(114, 47, 55, 0.25);
+        flex-shrink: 0;
+      }
+
+      .grid-preview-row.storage .grid-preview-cell {
+        background: rgba(139, 105, 20, 0.15);
+        border-color: rgba(139, 105, 20, 0.3);
+      }
+
+      .grid-preview-storage-label {
+        font-size: 0.6em;
+        color: #8b6914;
+        font-weight: 600;
+        white-space: nowrap;
+        padding-left: 4px;
+      }
+
+      .grid-preview-row.storage .grid-preview-cell {
+        width: unset;
+        flex: 1;
+        max-width: none;
+      }
+
+      /* Row list */
+      .row-list {
         display: flex;
         flex-direction: column;
         gap: 3px;
@@ -4471,7 +4896,7 @@ RackSettingsDialog.styles = [
       }
 
       .row-entry:hover {
-        background: rgba(0, 0, 0, 0.04);
+        background: var(--wc-hover);
       }
 
       .row-entry.storage {
@@ -4480,7 +4905,7 @@ RackSettingsDialog.styles = [
       }
 
       .row-entry .row-num {
-        width: 32px;
+        width: 28px;
         font-weight: 600;
         color: var(--wc-text-secondary);
         font-size: 0.85em;
@@ -4519,12 +4944,51 @@ RackSettingsDialog.styles = [
       }
 
       .row-entry .toggle-btn:hover {
-        background: rgba(0, 0, 0, 0.06);
+        background: var(--wc-hover);
       }
 
       .row-entry.storage .toggle-btn {
         color: #8b6914;
         border-color: rgba(139, 105, 20, 0.4);
+      }
+
+      .row-controls {
+        display: flex;
+        gap: 6px;
+        margin-top: 6px;
+      }
+
+      .row-ctrl-btn {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        padding: 6px 0;
+        border: 1px dashed var(--wc-border);
+        border-radius: 6px;
+        background: transparent;
+        color: var(--wc-text-secondary);
+        cursor: pointer;
+        font-size: 0.8em;
+        transition: all 0.15s;
+      }
+
+      .row-ctrl-btn:hover:not(:disabled) {
+        border-color: var(--wc-primary);
+        color: var(--wc-primary);
+        background: rgba(114, 47, 55, 0.05);
+      }
+
+      .row-ctrl-btn:disabled {
+        opacity: 0.3;
+        cursor: default;
+      }
+
+      .row-ctrl-btn.danger:hover:not(:disabled) {
+        border-color: #c62828;
+        color: #c62828;
+        background: rgba(198, 40, 40, 0.05);
       }
     `,
 ];
@@ -4577,6 +5041,9 @@ let WineListDialog = class WineListDialog extends i {
         this._addedIndices = new Set();
         this._cancelEnrichment = false;
         this._buyListIndices = new Set();
+        this._detailWine = null;
+        this._showDetail = false;
+        this.hasGemini = false;
     }
     updated(changedProps) {
         if (changedProps.has("open") && this.open) {
@@ -4612,7 +5079,12 @@ let WineListDialog = class WineListDialog extends i {
                 this._phase = "capture";
                 return;
             }
-            const data = result.result;
+            const data = result;
+            if (!data || !Array.isArray(data.wines)) {
+                this._error = "No wines found in the image. Try a clearer photo.";
+                this._phase = "capture";
+                return;
+            }
             const baseIndex = this._wines.length;
             const newWines = data.wines.map((w, i) => ({
                 ...w,
@@ -4823,6 +5295,41 @@ let WineListDialog = class WineListDialog extends i {
             return { label: "Typical", color: "#f57f17" };
         return { label: "Premium", color: "#c62828" };
     }
+    _showWineDetail(wine) {
+        // Convert WineListItem to Wine-like object for the detail dialog
+        this._detailWine = {
+            id: `winelist-${wine.index}`,
+            barcode: "",
+            name: wine.name,
+            winery: wine.winery,
+            region: wine.region,
+            country: wine.country,
+            vintage: wine.vintage || 0,
+            type: wine.type || "red",
+            grape_variety: wine.grape_variety,
+            rating: wine.vivino_rating || 0,
+            ratings_count: wine.vivino_ratings_count || 0,
+            image_url: wine.vivino_image_url || "",
+            price: wine.list_price || 0,
+            retail_price: wine.vivino_price || wine.ai_estimated_price || 0,
+            purchase_date: "",
+            drink_by: "",
+            drink_window: wine.ai_drink_window || "",
+            notes: "",
+            description: wine.ai_description || "",
+            food_pairings: "",
+            alcohol: "",
+            cabinet_id: "",
+            row: null,
+            col: null,
+            depth: 0,
+            zone: "",
+            disposition: wine.ai_disposition || "",
+            ai_ratings: wine.ai_ratings,
+            added_at: "",
+        };
+        this._showDetail = true;
+    }
     _renderWineItem(wine) {
         const typeColor = WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red;
         const expanded = this._expandedIndex === wine.index;
@@ -4833,7 +5340,7 @@ let WineListDialog = class WineListDialog extends i {
         return b `
       <div
         class="wine-list-item ${expanded ? "expanded" : ""}"
-        @click=${() => (this._expandedIndex = expanded ? null : wine.index)}
+        @click=${() => this._showWineDetail(wine)}
       >
         <div class="wl-type-dot" style="background: ${typeColor}"></div>
         ${wine.vivino_image_url
@@ -5045,6 +5552,16 @@ let WineListDialog = class WineListDialog extends i {
             : A}
         </div>
       </div>
+
+      <!-- Wine detail dialog for wine list items -->
+      <wine-detail-dialog
+        .wine=${this._detailWine}
+        .hass=${this.hass}
+        .open=${this._showDetail}
+        .hasGemini=${this.hasGemini}
+        .mode=${"winelist"}
+        @close=${() => (this._showDetail = false)}
+      ></wine-detail-dialog>
     `;
     }
 };
@@ -5405,6 +5922,15 @@ __decorate([
 __decorate([
     r()
 ], WineListDialog.prototype, "_buyListIndices", void 0);
+__decorate([
+    r()
+], WineListDialog.prototype, "_detailWine", void 0);
+__decorate([
+    r()
+], WineListDialog.prototype, "_showDetail", void 0);
+__decorate([
+    n({ type: Boolean })
+], WineListDialog.prototype, "hasGemini", void 0);
 WineListDialog = __decorate([
     t("wine-list-dialog")
 ], WineListDialog);
@@ -5420,6 +5946,7 @@ let WineCellarCard = class WineCellarCard extends i {
         this._searchFilter = "all";
         this._selectedWine = null;
         this._showDetail = false;
+        this._detailMode = "cellar";
         this._showAddDialog = false;
         this._addPreselect = { cabinet: "", row: null, col: null, zone: "", depth: 0 };
         this._loading = true;
@@ -5434,6 +5961,13 @@ let WineCellarCard = class WineCellarCard extends i {
         this._buyList = [];
         this._addToBuyListMode = false;
         this._movingBuyListItem = null;
+        // Depth side panel
+        this._depthPanelOpen = false;
+        this._depthPanelCabinet = null;
+        this._depthPanelRow = null;
+        this._depthPanelCol = null;
+        this._depthPanelWines = [];
+        this._depthPanelMaxDepth = 1;
     }
     setConfig(config) {
         this._config = config;
@@ -5477,6 +6011,8 @@ let WineCellarCard = class WineCellarCard extends i {
                 if (updated)
                     this._selectedWine = updated;
             }
+            // Refresh depth panel if open
+            this._refreshDepthPanel();
         }
         catch (err) {
             console.error("Wine Cellar: Failed to load data", err);
@@ -5511,7 +6047,7 @@ let WineCellarCard = class WineCellarCard extends i {
     }
     // --- Copy/Paste wine ---
     _onCellClick(e) {
-        const { wine, cabinet, row, col, wineCount = 0, cabinetDepth = 1 } = e.detail;
+        const { wine, wines = [], cabinet, row, col, wineCount = 0, cabinetDepth = 1 } = e.detail;
         const hasRoom = wineCount < cabinetDepth;
         const nextDepth = wineCount;
         // If we have a copied wine and cell has room, paste it
@@ -5529,14 +6065,59 @@ let WineCellarCard = class WineCellarCard extends i {
             this._executeMoveTocellar(cabinet.id, row, col, "", nextDepth);
             return;
         }
+        // For deep cabinets (depth >= 2), open side panel instead of detail
+        if (cabinetDepth >= 2) {
+            this._openDepthPanel(cabinet, row, col, wines, cabinetDepth);
+            return;
+        }
         if (wine) {
             this._selectedWine = wine;
+            this._detailMode = "cellar";
             this._showDetail = true;
         }
         else {
             this._addPreselect = { cabinet: cabinet.id, row, col, zone: "", depth: 0 };
             this._showAddDialog = true;
         }
+    }
+    // --- Depth side panel ---
+    _openDepthPanel(cabinet, row, col, wines, maxDepth) {
+        this._depthPanelCabinet = cabinet;
+        this._depthPanelRow = row;
+        this._depthPanelCol = col;
+        this._depthPanelWines = [...wines].sort((a, b) => (a.depth || 0) - (b.depth || 0));
+        this._depthPanelMaxDepth = maxDepth;
+        this._depthPanelOpen = true;
+    }
+    _closeDepthPanel() {
+        this._depthPanelOpen = false;
+    }
+    _refreshDepthPanel() {
+        if (!this._depthPanelOpen || !this._depthPanelCabinet || this._depthPanelRow === null || this._depthPanelCol === null)
+            return;
+        const wines = this._wines.filter((w) => w.cabinet_id === this._depthPanelCabinet.id && w.row === this._depthPanelRow && w.col === this._depthPanelCol);
+        this._depthPanelWines = [...wines].sort((a, b) => (a.depth || 0) - (b.depth || 0));
+    }
+    _onDepthSlotClick(depthIndex, wine) {
+        if (wine) {
+            this._selectedWine = wine;
+            this._detailMode = "cellar";
+            this._showDetail = true;
+        }
+        else {
+            this._addPreselect = {
+                cabinet: this._depthPanelCabinet.id,
+                row: this._depthPanelRow,
+                col: this._depthPanelCol,
+                zone: "",
+                depth: depthIndex,
+            };
+            this._showAddDialog = true;
+        }
+    }
+    _getDepthLabel(index) {
+        const labels = ["Front", "2nd", "3rd", "4th", "5th", "6th"];
+        return labels[index] || `${index + 1}th`;
     }
     _onZoneClick(e) {
         const { wine, cabinet, zone } = e.detail;
@@ -5552,6 +6133,7 @@ let WineCellarCard = class WineCellarCard extends i {
         }
         if (wine) {
             this._selectedWine = wine;
+            this._detailMode = "cellar";
             this._showDetail = true;
         }
         else {
@@ -5714,6 +6296,11 @@ let WineCellarCard = class WineCellarCard extends i {
         this._batchVivino = false;
     }
     // --- Buy List ---
+    _showBuyListDetail(item) {
+        this._selectedWine = item;
+        this._detailMode = "buylist";
+        this._showDetail = true;
+    }
     async _removeBuyListItem(itemId) {
         try {
             await this.hass.callWS({
@@ -5933,12 +6520,10 @@ let WineCellarCard = class WineCellarCard extends i {
             Buy List (${this._buyList.length})
           </button>
           <button
-            class="tab"
+            class="tab manage-racks-btn"
             @click=${() => (this._showRackSettings = true)}
-            title="Manage Racks"
-            style="border-color: transparent; padding: 6px 10px;"
           >
-            ⚙️
+            Manage Racks
           </button>
         </div>
 
@@ -6000,7 +6585,7 @@ let WineCellarCard = class WineCellarCard extends i {
                                 : item.type === "sparkling" ? "#D4E09B"
                                     : "#DAA520";
                     return b `
-                        <div class="buy-list-card">
+                        <div class="buy-list-card" @click=${() => this._showBuyListDetail(item)} style="cursor:pointer">
                           ${item.image_url
                         ? b `<img class="wine-list-thumb" src="${item.image_url}" alt="" />`
                         : b `<div class="wine-list-dot" style="background: ${typeColor}"></div>`}
@@ -6015,14 +6600,14 @@ let WineCellarCard = class WineCellarCard extends i {
                           <div class="bl-actions">
                             <button
                               class="bl-cellar-btn"
-                              @click=${() => this._startMoveBuyListItem(item)}
+                              @click=${(e) => { e.stopPropagation(); this._startMoveBuyListItem(item); }}
                               title="Move to cellar"
                             >
                               + Cellar
                             </button>
                             <button
                               class="bl-remove-btn"
-                              @click=${() => this._removeBuyListItem(item.id)}
+                              @click=${(e) => { e.stopPropagation(); this._removeBuyListItem(item.id); }}
                               title="Remove from buy list"
                             >
                               ✕
@@ -6053,6 +6638,7 @@ let WineCellarCard = class WineCellarCard extends i {
                           class="wine-list-item"
                           @click=${() => {
                         this._selectedWine = wine;
+                        this._detailMode = "cellar";
                         this._showDetail = true;
                     }}
                         >
@@ -6113,9 +6699,14 @@ let WineCellarCard = class WineCellarCard extends i {
           .hass=${this.hass}
           .open=${this._showDetail}
           .hasGemini=${this._hasGemini}
+          .mode=${this._detailMode}
           @close=${() => (this._showDetail = false)}
           @remove-wine=${this._onRemoveWine}
+          @remove-buy-list-item=${(e) => {
+            this._removeBuyListItem(e.detail.item_id);
+        }}
           @wine-updated=${() => this._loadData()}
+          @buy-list-updated=${() => this._loadData()}
           @copy-wine=${(e) => this._copyWine(e.detail.wine)}
           @move-wine=${(e) => {
             this._showDetail = false;
@@ -6144,6 +6735,7 @@ let WineCellarCard = class WineCellarCard extends i {
         <wine-list-dialog
           .open=${this._showWineList}
           .hass=${this.hass}
+          .hasGemini=${this._hasGemini}
           @close=${() => (this._showWineList = false)}
           @wine-added=${this._onWineAdded}
           @buy-list-updated=${() => this._loadData()}
@@ -6158,6 +6750,60 @@ let WineCellarCard = class WineCellarCard extends i {
           @close=${() => (this._showRackSettings = false)}
           @racks-updated=${() => this._loadData()}
         ></rack-settings-dialog>
+
+        <!-- Depth Side Panel -->
+        ${this._depthPanelOpen
+            ? b `
+              <div class="depth-panel-backdrop" @click=${this._closeDepthPanel}></div>
+              <div class="depth-panel open">
+                <div class="depth-panel-header">
+                  <span class="depth-panel-title">
+                    Row ${(this._depthPanelRow ?? 0) + 1}, Col ${(this._depthPanelCol ?? 0) + 1}
+                    <span class="depth-panel-subtitle">
+                      ${this._depthPanelWines.length}/${this._depthPanelMaxDepth} deep
+                    </span>
+                  </span>
+                  <button class="depth-panel-close" @click=${this._closeDepthPanel}>✕</button>
+                </div>
+                <div class="depth-panel-slots">
+                  ${Array.from({ length: this._depthPanelMaxDepth }, (_, i) => {
+                const wine = this._depthPanelWines.find((w) => (w.depth || 0) === i);
+                const typeColor = wine ? WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red : "";
+                return b `
+                      <div
+                        class="depth-slot ${wine ? "filled" : "empty"}"
+                        @click=${() => this._onDepthSlotClick(i, wine)}
+                      >
+                        <div class="depth-slot-label">${this._getDepthLabel(i)}</div>
+                        ${wine
+                    ? b `
+                              <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
+                                ${wine.image_url
+                        ? b `<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
+                        : b `<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                <div class="depth-slot-info">
+                                  <div class="depth-slot-name">${wine.name}</div>
+                                  <div class="depth-slot-meta">
+                                    ${wine.vintage || "NV"}
+                                    ${wine.rating ? b ` · ★${wine.rating}` : A}
+                                    ${wine.price ? b ` · $${wine.price}` : A}
+                                  </div>
+                                </div>
+                              </div>
+                            `
+                    : b `
+                              <div class="depth-slot-empty">
+                                <span class="depth-slot-plus">+</span>
+                                <span>Empty</span>
+                              </div>
+                            `}
+                      </div>
+                    `;
+            })}
+                </div>
+              </div>
+            `
+            : A}
 
         <!-- Toast -->
         ${this._toast ? b `<div class="toast">${this._toast}</div>` : A}
@@ -6229,7 +6875,7 @@ WineCellarCard.styles = [
       }
 
       .wine-list-item:hover {
-        background: rgba(0, 0, 0, 0.04);
+        background: var(--wc-hover);
       }
 
       .wine-list-dot {
@@ -6494,6 +7140,9 @@ __decorate([
 ], WineCellarCard.prototype, "_showDetail", void 0);
 __decorate([
     r()
+], WineCellarCard.prototype, "_detailMode", void 0);
+__decorate([
+    r()
 ], WineCellarCard.prototype, "_showAddDialog", void 0);
 __decorate([
     r()
@@ -6534,6 +7183,24 @@ __decorate([
 __decorate([
     r()
 ], WineCellarCard.prototype, "_movingBuyListItem", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_depthPanelOpen", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_depthPanelCabinet", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_depthPanelRow", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_depthPanelCol", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_depthPanelWines", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_depthPanelMaxDepth", void 0);
 WineCellarCard = __decorate([
     t("wine-cellar-card")
 ], WineCellarCard);

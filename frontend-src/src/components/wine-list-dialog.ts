@@ -1,8 +1,9 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { WineListItem, WineType, WINE_TYPE_COLORS, WINE_TYPE_LABELS } from "../models";
+import { Wine, WineListItem, WineType, WINE_TYPE_COLORS, WINE_TYPE_LABELS } from "../models";
 import { sharedStyles } from "../styles";
 import "./label-camera";
+import "./wine-detail-dialog";
 
 type Phase = "capture" | "extracting" | "results";
 
@@ -22,6 +23,9 @@ export class WineListDialog extends LitElement {
   @state() private _addedIndices: Set<number> = new Set();
   @state() private _cancelEnrichment = false;
   @state() private _buyListIndices: Set<number> = new Set();
+  @state() private _detailWine: Wine | null = null;
+  @state() private _showDetail = false;
+  @property({ type: Boolean }) hasGemini = false;
 
   static styles = [
     sharedStyles,
@@ -381,7 +385,12 @@ export class WineListDialog extends LitElement {
         return;
       }
 
-      const data = result.result;
+      const data = result;
+      if (!data || !Array.isArray(data.wines)) {
+        this._error = "No wines found in the image. Try a clearer photo.";
+        this._phase = "capture";
+        return;
+      }
       const baseIndex = this._wines.length;
       const newWines: WineListItem[] = data.wines.map((w: any, i: number) => ({
         ...w,
@@ -610,6 +619,42 @@ export class WineListDialog extends LitElement {
     return { label: "Premium", color: "#c62828" };
   }
 
+  private _showWineDetail(wine: WineListItem) {
+    // Convert WineListItem to Wine-like object for the detail dialog
+    this._detailWine = {
+      id: `winelist-${wine.index}`,
+      barcode: "",
+      name: wine.name,
+      winery: wine.winery,
+      region: wine.region,
+      country: wine.country,
+      vintage: wine.vintage || 0,
+      type: wine.type || "red",
+      grape_variety: wine.grape_variety,
+      rating: wine.vivino_rating || 0,
+      ratings_count: wine.vivino_ratings_count || 0,
+      image_url: wine.vivino_image_url || "",
+      price: wine.list_price || 0,
+      retail_price: wine.vivino_price || wine.ai_estimated_price || 0,
+      purchase_date: "",
+      drink_by: "",
+      drink_window: wine.ai_drink_window || "",
+      notes: "",
+      description: wine.ai_description || "",
+      food_pairings: "",
+      alcohol: "",
+      cabinet_id: "",
+      row: null as any,
+      col: null as any,
+      depth: 0,
+      zone: "",
+      disposition: wine.ai_disposition || "",
+      ai_ratings: wine.ai_ratings as any,
+      added_at: "",
+    } as Wine;
+    this._showDetail = true;
+  }
+
   private _renderWineItem(wine: WineListItem) {
     const typeColor = WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red;
     const expanded = this._expandedIndex === wine.index;
@@ -621,8 +666,7 @@ export class WineListDialog extends LitElement {
     return html`
       <div
         class="wine-list-item ${expanded ? "expanded" : ""}"
-        @click=${() =>
-          (this._expandedIndex = expanded ? null : wine.index)}
+        @click=${() => this._showWineDetail(wine)}
       >
         <div class="wl-type-dot" style="background: ${typeColor}"></div>
         ${wine.vivino_image_url
@@ -840,6 +884,16 @@ export class WineListDialog extends LitElement {
             : nothing}
         </div>
       </div>
+
+      <!-- Wine detail dialog for wine list items -->
+      <wine-detail-dialog
+        .wine=${this._detailWine}
+        .hass=${this.hass}
+        .open=${this._showDetail}
+        .hasGemini=${this.hasGemini}
+        .mode=${"winelist"}
+        @close=${() => (this._showDetail = false)}
+      ></wine-detail-dialog>
     `;
   }
 }

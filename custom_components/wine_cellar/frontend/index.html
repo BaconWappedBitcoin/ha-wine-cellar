@@ -96,6 +96,18 @@
             return { result: { name: "Test Wine", winery: "Test Winery", region: "Test Region", country: "France", vintage: 2020, type: "red", grape_variety: "Merlot", rating: 4.0, ratings_count: 500, image_url: "https://images.vivino.com/thumbs/ApnxEJsiSaCuFadP5WMFKQ_375x500.jpg", price: 30, description: "A rich, full-bodied red.", food_pairings: "Beef, Pasta", alcohol: "13.5%", source: "mock" }, cached: false };
           case "wine_cellar/search_wine":
             return { results: [{ name: "Search Result Wine", winery: "Found Winery", region: "Found Region", country: "Italy", vintage: 2021, type: "red", grape_variety: "Sangiovese", rating: 3.8, ratings_count: 1200, image_url: "https://images.vivino.com/thumbs/I64BJ-p-T2awMGz0X-nGwQ_375x500.jpg", price: 25, description: "Fresh and fruity with cherry notes.", food_pairings: "Pasta, Pizza, Poultry", alcohol: "13.0%", source: "mock" }] };
+          case "wine_cellar/add_cabinet":
+            const newCab = { ...msg.cabinet, id: "cabinet-" + Date.now() };
+            mockCabinets.push(newCab);
+            return { cabinet: newCab };
+          case "wine_cellar/update_cabinet":
+            const cabToUpdate = mockCabinets.find(c => c.id === msg.cabinet_id);
+            if (cabToUpdate && msg.updates) Object.assign(cabToUpdate, msg.updates);
+            return { cabinet: cabToUpdate };
+          case "wine_cellar/remove_cabinet":
+            const cabIdx = mockCabinets.findIndex(c => c.id === msg.cabinet_id);
+            if (cabIdx >= 0) mockCabinets.splice(cabIdx, 1);
+            return { success: true };
           case "wine_cellar/add_wine":
             mockWines.push({ ...msg.wine, id: "new-" + Date.now(), added_at: new Date().toISOString() });
             return { wine: mockWines[mockWines.length - 1] };
@@ -136,6 +148,10 @@
             const newBLItem = { ...msg.wine, id: "bl-" + Date.now(), added_at: new Date().toISOString() };
             mockBuyList.push(newBLItem);
             return { item: newBLItem };
+          case "wine_cellar/update_buy_list_item":
+            const blUpdate = mockBuyList.find(i => i.id === msg.item_id);
+            if (blUpdate && msg.updates) Object.assign(blUpdate, msg.updates);
+            return { item: blUpdate };
           case "wine_cellar/remove_from_buy_list":
             const blIdx = mockBuyList.findIndex(i => i.id === msg.item_id);
             if (blIdx >= 0) mockBuyList.splice(blIdx, 1);
@@ -160,6 +176,20 @@
               mw.depth = msg.depth || 0;
             }
             return { wine: mw };
+          case "wine_cellar/extract_wine_list":
+            return {
+              restaurant_name: "Mock Restaurant",
+              currency: "USD",
+              wines: [
+                { name: "Caymus Cabernet Sauvignon 2019", winery: "Caymus Vineyards", region: "Napa Valley", country: "USA", vintage: 2019, type: "red", grape_variety: "Cabernet Sauvignon", price: 85 },
+                { name: "Sancerre Les Baronnes 2022", winery: "Henri Bourgeois", region: "Loire Valley", country: "France", vintage: 2022, type: "white", grape_variety: "Sauvignon Blanc", price: 32 },
+                { name: "Barolo Monfortino 2016", winery: "Giacomo Conterno", region: "Piedmont", country: "Italy", vintage: 2016, type: "red", grape_variety: "Nebbiolo", price: 450 },
+              ],
+            };
+          case "wine_cellar/vivino_enrich":
+            return { rating: 4.2, ratings_count: 3500, price: msg.price || 50, image_url: "https://images.vivino.com/thumbs/ApnxEJsiSaCuFadP5WMFKQ_375x500.jpg" };
+          case "wine_cellar/ai_enrich_wine":
+            return { description: "A complex and elegant wine with great structure.", disposition: "H", drink_window: "2025-2035", estimated_price: 75, ai_ratings: { rating_ws: 93, rating_rp: 94, rating_jd: 92, rating_ag: 91 } };
           default:
             return {};
         }

@@ -1,7 +1,7 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { sharedStyles } from "./styles";
-import { Wine, Cabinet, CellarStats } from "./models";
+import { Wine, Cabinet, CellarStats, WINE_TYPE_COLORS, WineType } from "./models";
 
 import "./components/cabinet-grid";
 import "./components/wine-detail-dialog";
@@ -28,6 +28,7 @@ export class WineCellarCard extends LitElement {
   @state() private _searchFilter = "all";
   @state() private _selectedWine: Wine | null = null;
   @state() private _showDetail = false;
+  @state() private _detailMode: "cellar" | "buylist" | "winelist" = "cellar";
   @state() private _showAddDialog = false;
   @state() private _addPreselect = { cabinet: "", row: null as number | null, col: null as number | null, zone: "", depth: 0 };
   @state() private _loading = true;
@@ -42,6 +43,14 @@ export class WineCellarCard extends LitElement {
   @state() private _buyList: Wine[] = [];
   @state() private _addToBuyListMode = false;
   @state() private _movingBuyListItem: Wine | null = null;
+
+  // Depth side panel
+  @state() private _depthPanelOpen = false;
+  @state() private _depthPanelCabinet: Cabinet | null = null;
+  @state() private _depthPanelRow: number | null = null;
+  @state() private _depthPanelCol: number | null = null;
+  @state() private _depthPanelWines: Wine[] = [];
+  @state() private _depthPanelMaxDepth = 1;
 
   static styles = [
     sharedStyles,
@@ -104,7 +113,7 @@ export class WineCellarCard extends LitElement {
       }
 
       .wine-list-item:hover {
-        background: rgba(0, 0, 0, 0.04);
+        background: var(--wc-hover);
       }
 
       .wine-list-dot {
@@ -391,6 +400,9 @@ export class WineCellarCard extends LitElement {
         const updated = this._wines.find((w: Wine) => w.id === this._selectedWine!.id);
         if (updated) this._selectedWine = updated;
       }
+
+      // Refresh depth panel if open
+      this._refreshDepthPanel();
     } catch (err) {
       console.error("Wine Cellar: Failed to load data", err);
     }
@@ -434,7 +446,7 @@ export class WineCellarCard extends LitElement {
 
   // --- Copy/Paste wine ---
   private _onCellClick(e: CustomEvent) {
-    const { wine, cabinet, row, col, wineCount = 0, cabinetDepth = 1 } = e.detail;
+    const { wine, wines = [], cabinet, row, col, wineCount = 0, cabinetDepth = 1 } = e.detail;
     const hasRoom = wineCount < cabinetDepth;
     const nextDepth = wineCount;
 
@@ -456,13 +468,64 @@ export class WineCellarCard extends LitElement {
       return;
     }
 
+    // For deep cabinets (depth >= 2), open side panel instead of detail
+    if (cabinetDepth >= 2) {
+      this._openDepthPanel(cabinet, row, col, wines, cabinetDepth);
+      return;
+    }
+
     if (wine) {
       this._selectedWine = wine;
+      this._detailMode = "cellar";
       this._showDetail = true;
     } else {
       this._addPreselect = { cabinet: cabinet.id, row, col, zone: "", depth: 0 };
       this._showAddDialog = true;
     }
+  }
+
+  // --- Depth side panel ---
+  private _openDepthPanel(cabinet: Cabinet, row: number, col: number, wines: Wine[], maxDepth: number) {
+    this._depthPanelCabinet = cabinet;
+    this._depthPanelRow = row;
+    this._depthPanelCol = col;
+    this._depthPanelWines = [...wines].sort((a, b) => (a.depth || 0) - (b.depth || 0));
+    this._depthPanelMaxDepth = maxDepth;
+    this._depthPanelOpen = true;
+  }
+
+  private _closeDepthPanel() {
+    this._depthPanelOpen = false;
+  }
+
+  private _refreshDepthPanel() {
+    if (!this._depthPanelOpen || !this._depthPanelCabinet || this._depthPanelRow === null || this._depthPanelCol === null) return;
+    const wines = this._wines.filter(
+      (w) => w.cabinet_id === this._depthPanelCabinet!.id && w.row === this._depthPanelRow && w.col === this._depthPanelCol
+    );
+    this._depthPanelWines = [...wines].sort((a, b) => (a.depth || 0) - (b.depth || 0));
+  }
+
+  private _onDepthSlotClick(depthIndex: number, wine?: Wine) {
+    if (wine) {
+      this._selectedWine = wine;
+      this._detailMode = "cellar";
+      this._showDetail = true;
+    } else {
+      this._addPreselect = {
+        cabinet: this._depthPanelCabinet!.id,
+        row: this._depthPanelRow,
+        col: this._depthPanelCol,
+        zone: "",
+        depth: depthIndex,
+      };
+      this._showAddDialog = true;
+    }
+  }
+
+  private _getDepthLabel(index: number): string {
+    const labels = ["Front", "2nd", "3rd", "4th", "5th", "6th"];
+    return labels[index] || `${index + 1}th`;
   }
 
   private _onZoneClick(e: CustomEvent) {
@@ -482,6 +545,7 @@ export class WineCellarCard extends LitElement {
 
     if (wine) {
       this._selectedWine = wine;
+      this._detailMode = "cellar";
       this._showDetail = true;
     } else {
       this._addPreselect = { cabinet: cabinet.id, row: null, col: null, zone: zone || "bottom", depth: 0 };
@@ -644,6 +708,12 @@ export class WineCellarCard extends LitElement {
   }
 
   // --- Buy List ---
+  private _showBuyListDetail(item: Wine) {
+    this._selectedWine = item;
+    this._detailMode = "buylist";
+    this._showDetail = true;
+  }
+
   private async _removeBuyListItem(itemId: string) {
     try {
       await this.hass.callWS({
@@ -870,12 +940,10 @@ export class WineCellarCard extends LitElement {
             Buy List (${this._buyList.length})
           </button>
           <button
-            class="tab"
+            class="tab manage-racks-btn"
             @click=${() => (this._showRackSettings = true)}
-            title="Manage Racks"
-            style="border-color: transparent; padding: 6px 10px;"
           >
-            ⚙️
+            Manage Racks
           </button>
         </div>
 
@@ -942,7 +1010,7 @@ export class WineCellarCard extends LitElement {
                               : item.type === "sparkling" ? "#D4E09B"
                                 : "#DAA520";
                       return html`
-                        <div class="buy-list-card">
+                        <div class="buy-list-card" @click=${() => this._showBuyListDetail(item)} style="cursor:pointer">
                           ${item.image_url
                             ? html`<img class="wine-list-thumb" src="${item.image_url}" alt="" />`
                             : html`<div class="wine-list-dot" style="background: ${typeColor}"></div>`}
@@ -957,14 +1025,14 @@ export class WineCellarCard extends LitElement {
                           <div class="bl-actions">
                             <button
                               class="bl-cellar-btn"
-                              @click=${() => this._startMoveBuyListItem(item)}
+                              @click=${(e: Event) => { e.stopPropagation(); this._startMoveBuyListItem(item); }}
                               title="Move to cellar"
                             >
                               + Cellar
                             </button>
                             <button
                               class="bl-remove-btn"
-                              @click=${() => this._removeBuyListItem(item.id)}
+                              @click=${(e: Event) => { e.stopPropagation(); this._removeBuyListItem(item.id); }}
                               title="Remove from buy list"
                             >
                               ✕
@@ -996,6 +1064,7 @@ export class WineCellarCard extends LitElement {
                           class="wine-list-item"
                           @click=${() => {
                             this._selectedWine = wine;
+                            this._detailMode = "cellar";
                             this._showDetail = true;
                           }}
                         >
@@ -1062,9 +1131,14 @@ export class WineCellarCard extends LitElement {
           .hass=${this.hass}
           .open=${this._showDetail}
           .hasGemini=${this._hasGemini}
+          .mode=${this._detailMode}
           @close=${() => (this._showDetail = false)}
           @remove-wine=${this._onRemoveWine}
+          @remove-buy-list-item=${(e: CustomEvent) => {
+            this._removeBuyListItem(e.detail.item_id);
+          }}
           @wine-updated=${() => this._loadData()}
+          @buy-list-updated=${() => this._loadData()}
           @copy-wine=${(e: CustomEvent) => this._copyWine(e.detail.wine)}
           @move-wine=${(e: CustomEvent) => {
             this._showDetail = false;
@@ -1093,6 +1167,7 @@ export class WineCellarCard extends LitElement {
         <wine-list-dialog
           .open=${this._showWineList}
           .hass=${this.hass}
+          .hasGemini=${this._hasGemini}
           @close=${() => (this._showWineList = false)}
           @wine-added=${this._onWineAdded}
           @buy-list-updated=${() => this._loadData()}
@@ -1107,6 +1182,60 @@ export class WineCellarCard extends LitElement {
           @close=${() => (this._showRackSettings = false)}
           @racks-updated=${() => this._loadData()}
         ></rack-settings-dialog>
+
+        <!-- Depth Side Panel -->
+        ${this._depthPanelOpen
+          ? html`
+              <div class="depth-panel-backdrop" @click=${this._closeDepthPanel}></div>
+              <div class="depth-panel open">
+                <div class="depth-panel-header">
+                  <span class="depth-panel-title">
+                    Row ${(this._depthPanelRow ?? 0) + 1}, Col ${(this._depthPanelCol ?? 0) + 1}
+                    <span class="depth-panel-subtitle">
+                      ${this._depthPanelWines.length}/${this._depthPanelMaxDepth} deep
+                    </span>
+                  </span>
+                  <button class="depth-panel-close" @click=${this._closeDepthPanel}>✕</button>
+                </div>
+                <div class="depth-panel-slots">
+                  ${Array.from({ length: this._depthPanelMaxDepth }, (_, i) => {
+                    const wine = this._depthPanelWines.find((w) => (w.depth || 0) === i);
+                    const typeColor = wine ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red : "";
+                    return html`
+                      <div
+                        class="depth-slot ${wine ? "filled" : "empty"}"
+                        @click=${() => this._onDepthSlotClick(i, wine)}
+                      >
+                        <div class="depth-slot-label">${this._getDepthLabel(i)}</div>
+                        ${wine
+                          ? html`
+                              <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
+                                ${wine.image_url
+                                  ? html`<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
+                                  : html`<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                <div class="depth-slot-info">
+                                  <div class="depth-slot-name">${wine.name}</div>
+                                  <div class="depth-slot-meta">
+                                    ${wine.vintage || "NV"}
+                                    ${wine.rating ? html` · ★${wine.rating}` : nothing}
+                                    ${wine.price ? html` · $${wine.price}` : nothing}
+                                  </div>
+                                </div>
+                              </div>
+                            `
+                          : html`
+                              <div class="depth-slot-empty">
+                                <span class="depth-slot-plus">+</span>
+                                <span>Empty</span>
+                              </div>
+                            `}
+                      </div>
+                    `;
+                  })}
+                </div>
+              </div>
+            `
+          : nothing}
 
         <!-- Toast -->
         ${this._toast ? html`<div class="toast">${this._toast}</div>` : nothing}

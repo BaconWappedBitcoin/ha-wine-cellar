@@ -4,11 +4,14 @@ import { Wine, TastingNotes, WINE_TYPE_LABELS, WINE_TYPE_COLORS, WineType } from
 import { sharedStyles } from "../styles";
 import "./star-rating";
 
+export type WineDetailMode = "cellar" | "buylist" | "winelist";
+
 @customElement("wine-detail-dialog")
 export class WineDetailDialog extends LitElement {
   @property({ attribute: false }) wine: Wine | null = null;
   @property({ attribute: false }) hass: any;
   @property({ type: Boolean }) open = false;
+  @property({ type: String }) mode: WineDetailMode = "cellar";
 
   @state() private _editing = false;
   @state() private _editingFields = false;
@@ -211,7 +214,7 @@ export class WineDetailDialog extends LitElement {
         font-size: 0.9em;
         color: var(--wc-text-secondary);
         font-style: italic;
-        background: rgba(0, 0, 0, 0.03);
+        background: rgba(128, 128, 128, 0.08);
         padding: 10px;
         border-radius: 8px;
       }
@@ -239,7 +242,7 @@ export class WineDetailDialog extends LitElement {
       .edit-toggle {
         background: none;
         border: none;
-        color: var(--wc-primary, #6d4c41);
+        color: var(--wc-primary-text);
         cursor: pointer;
         font-size: 0.85em;
         font-weight: 500;
@@ -308,13 +311,13 @@ export class WineDetailDialog extends LitElement {
 
       .tasting-field textarea:focus {
         outline: none;
-        border-color: var(--wc-primary, #6d4c41);
+        border-color: var(--wc-primary-text);
       }
 
       .tasting-value {
         font-size: 0.85em;
         color: var(--wc-text);
-        background: rgba(0, 0, 0, 0.03);
+        background: rgba(128, 128, 128, 0.08);
         padding: 8px;
         border-radius: 8px;
         min-height: 20px;
@@ -504,15 +507,27 @@ export class WineDetailDialog extends LitElement {
       if (updates.retail_price === "" || updates.retail_price === null) updates.retail_price = null;
       else updates.retail_price = parseFloat(updates.retail_price) || null;
 
-      await this.hass.callWS({
-        type: "wine_cellar/update_wine",
-        wine_id: this.wine.id,
-        updates,
-      });
-      this.wine = { ...this.wine, ...updates };
-      this._editingFields = false;
-      this._editData = {};
-      this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+      if (this.mode === "buylist") {
+        await this.hass.callWS({
+          type: "wine_cellar/update_buy_list_item",
+          item_id: this.wine.id,
+          updates,
+        });
+        this.wine = { ...this.wine, ...updates };
+        this._editingFields = false;
+        this._editData = {};
+        this.dispatchEvent(new CustomEvent("buy-list-updated", { bubbles: true, composed: true }));
+      } else {
+        await this.hass.callWS({
+          type: "wine_cellar/update_wine",
+          wine_id: this.wine.id,
+          updates,
+        });
+        this.wine = { ...this.wine, ...updates };
+        this._editingFields = false;
+        this._editData = {};
+        this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+      }
     } catch (err) {
       console.error("Failed to save wine fields", err);
     }
@@ -521,13 +536,23 @@ export class WineDetailDialog extends LitElement {
 
   private _onRemove() {
     if (this.wine) {
-      this.dispatchEvent(
-        new CustomEvent("remove-wine", {
-          detail: { wine_id: this.wine.id },
-          bubbles: true,
-          composed: true,
-        })
-      );
+      if (this.mode === "buylist") {
+        this.dispatchEvent(
+          new CustomEvent("remove-buy-list-item", {
+            detail: { item_id: this.wine.id },
+            bubbles: true,
+            composed: true,
+          })
+        );
+      } else {
+        this.dispatchEvent(
+          new CustomEvent("remove-wine", {
+            detail: { wine_id: this.wine.id },
+            bubbles: true,
+            composed: true,
+          })
+        );
+      }
       this._close();
     }
   }
@@ -575,14 +600,22 @@ export class WineDetailDialog extends LitElement {
         user_rating: this._userRating || null,
         tasting_notes: this._hasTastingNotes() ? this._tastingNotes : null,
       };
-      await this.hass.callWS({
-        type: "wine_cellar/update_wine",
-        wine_id: this.wine.id,
-        updates,
-      });
+      if (this.mode === "buylist") {
+        await this.hass.callWS({
+          type: "wine_cellar/update_buy_list_item",
+          item_id: this.wine.id,
+          updates,
+        });
+      } else {
+        await this.hass.callWS({
+          type: "wine_cellar/update_wine",
+          wine_id: this.wine.id,
+          updates,
+        });
+      }
       this.wine = { ...this.wine, ...updates };
       this._editing = false;
-      this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+      this.dispatchEvent(new CustomEvent(this.mode === "buylist" ? "buy-list-updated" : "wine-updated", { bubbles: true, composed: true }));
     } catch (err) {
       console.error("Failed to save rating/notes", err);
     }
@@ -763,7 +796,9 @@ export class WineDetailDialog extends LitElement {
       <div class="dialog-overlay" @click=${this._close}>
         <div class="dialog" @click=${(e: Event) => e.stopPropagation()}>
           <div class="dialog-top-bar">
-            <button class="icon-btn" title="Edit" @click=${this._startEditingFields}>✏️</button>
+            ${this.mode !== "winelist"
+              ? html`<button class="icon-btn" title="Edit" @click=${this._startEditingFields}>✏️</button>`
+              : nothing}
             <button class="icon-btn close-btn" title="Close" @click=${this._close}>✕</button>
           </div>
           <div class="wine-header">
@@ -804,21 +839,25 @@ export class WineDetailDialog extends LitElement {
                     </div>
                   `
                 : nothing}
-              <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:0.9em">
-                <span style="font-size:0.8em;color:var(--wc-text-secondary)">My Rating</span>
-                <star-rating
-                  .value=${this._userRating}
-                  .readonly=${!this._editing}
-                  .size=${20}
-                  @rating-change=${this._onRatingChange}
-                ></star-rating>
-                ${!this._editing && this._userRating === 0
-                  ? html`<span class="no-rating" style="font-size:0.8em">Not rated</span>`
-                  : nothing}
-                <button class="edit-toggle" style="font-size:0.75em;padding:2px 6px" @click=${() => (this._editing = !this._editing)}>
-                  ${this._editing ? "Cancel" : "Edit"}
-                </button>
-              </div>
+              ${this.mode !== "winelist"
+                ? html`
+                    <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:0.9em">
+                      <span style="font-size:0.8em;color:var(--wc-text-secondary)">My Rating</span>
+                      <star-rating
+                        .value=${this._userRating}
+                        .readonly=${!this._editing}
+                        .size=${20}
+                        @rating-change=${this._onRatingChange}
+                      ></star-rating>
+                      ${!this._editing && this._userRating === 0
+                        ? html`<span class="no-rating" style="font-size:0.8em">Not rated</span>`
+                        : nothing}
+                      <button class="edit-toggle" style="font-size:0.75em;padding:2px 6px" @click=${() => (this._editing = !this._editing)}>
+                        ${this._editing ? "Cancel" : "Edit"}
+                      </button>
+                    </div>
+                  `
+                : nothing}
             </div>
           </div>
 
@@ -892,15 +931,19 @@ export class WineDetailDialog extends LitElement {
                   ${wine.grape_variety
                     ? html`<div class="detail-item"><span class="detail-label">Grape</span><span class="detail-value">${wine.grape_variety}</span></div>`
                     : nothing}
-                  <div class="detail-item"><span class="detail-label">Purchase Price</span><span class="detail-value">${wine.price ? `$${wine.price.toFixed(2)}` : "—"}</span></div>
-                  <div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">${wine.retail_price ? `$${wine.retail_price.toFixed(2)}` : "—"}</span></div>
-                  ${wine.purchase_date
+                  ${wine.price
+                    ? html`<div class="detail-item"><span class="detail-label">${this.mode === "winelist" ? "Price" : "Purchase Price"}</span><span class="detail-value">$${wine.price.toFixed(2)}</span></div>`
+                    : nothing}
+                  ${wine.retail_price
+                    ? html`<div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">$${wine.retail_price.toFixed(2)}</span></div>`
+                    : nothing}
+                  ${wine.purchase_date && this.mode === "cellar"
                     ? html`<div class="detail-item"><span class="detail-label">Purchased</span><span class="detail-value">${wine.purchase_date}</span></div>`
                     : nothing}
                   ${wine.drink_by
                     ? html`<div class="detail-item"><span class="detail-label">Drink By</span><span class="detail-value">${wine.drink_by}</span></div>`
                     : nothing}
-                  ${wine.barcode
+                  ${wine.barcode && this.mode === "cellar"
                     ? html`<div class="detail-item"><span class="detail-label">Barcode</span><span class="detail-value">${wine.barcode}</span></div>`
                     : nothing}
                 </div>
@@ -914,6 +957,7 @@ export class WineDetailDialog extends LitElement {
                     `
                   : nothing}
 
+                ${this.mode !== "winelist" ? html`
                 <div class="divider"></div>
 
                 <!-- Tasting Notes section -->
@@ -987,7 +1031,9 @@ export class WineDetailDialog extends LitElement {
                       : html`<div class="no-rating">No tasting notes yet. Tap Edit to add your thoughts.</div>`
                   }
                 </div>
+                ` : nothing}
 
+                ${this.mode === "cellar" ? html`
                 <div class="actions">
                   <button class="btn btn-primary" style="background:#8e24aa"
                     ?disabled=${this._refreshing} @click=${this._refreshFromVivino}>
@@ -1004,6 +1050,24 @@ export class WineDetailDialog extends LitElement {
                   <button class="btn btn-primary" style="background:#c62828"
                     @click=${this._onRemove}>✕ Remove</button>
                 </div>
+                ` : nothing}
+
+                ${this.mode === "buylist" ? html`
+                <div class="actions">
+                  <button class="btn btn-primary" style="background:#8e24aa"
+                    ?disabled=${this._refreshing} @click=${this._refreshFromVivino}>
+                    ${this._refreshing ? "..." : "🍇 Vivino"}
+                  </button>
+                  ${this.hasGemini
+                    ? html`<button class="btn btn-primary" style="background:#1565c0"
+                        ?disabled=${this._analyzing} @click=${this._analyzeWithAI}>
+                        ${this._analyzing ? "..." : "🤖 AI Scan"}
+                      </button>`
+                    : nothing}
+                  <button class="btn btn-primary" style="background:#c62828"
+                    @click=${this._onRemove}>✕ Remove</button>
+                </div>
+                ` : nothing}
               `}
         </div>
       </div>

@@ -39,7 +39,7 @@ export class RackSettingsDialog extends LitElement {
       }
 
       .rack-item:hover {
-        background: rgba(0, 0, 0, 0.03);
+        background: var(--wc-hover);
       }
 
       .rack-info {
@@ -77,7 +77,7 @@ export class RackSettingsDialog extends LitElement {
       }
 
       .small-btn:hover {
-        background: rgba(0, 0, 0, 0.06);
+        background: var(--wc-hover);
       }
 
       .small-btn:disabled {
@@ -137,25 +137,145 @@ export class RackSettingsDialog extends LitElement {
         background: rgba(114, 47, 55, 0.05);
       }
 
-      /* Row layout editor */
-      .row-layout {
+      /* Grid editor */
+      .grid-editor {
         margin-top: 12px;
       }
 
-      .row-layout-title {
+      .grid-editor-title {
         font-size: 0.85em;
         font-weight: 600;
         color: var(--wc-text);
-        margin-bottom: 8px;
+        margin-bottom: 12px;
       }
 
-      .row-layout-hint {
+      /* Stepper controls for cols/depth */
+      .stepper-row {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .stepper {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 0;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .stepper-label {
         font-size: 0.75em;
         color: var(--wc-text-secondary);
-        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+        font-weight: 500;
       }
 
-      .row-layout-list {
+      .stepper-wrap {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .stepper-btn {
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        font-size: 1.1em;
+        font-weight: 600;
+        color: var(--wc-text-secondary);
+        transition: all 0.15s;
+        flex-shrink: 0;
+      }
+
+      .stepper-btn:hover:not(:disabled) {
+        background: rgba(114, 47, 55, 0.1);
+        color: var(--wc-primary);
+      }
+
+      .stepper-btn:disabled {
+        opacity: 0.25;
+        cursor: default;
+      }
+
+      .stepper-value {
+        flex: 1;
+        text-align: center;
+        font-size: 0.9em;
+        font-weight: 600;
+        color: var(--wc-text);
+        padding: 6px 0;
+        min-width: 40px;
+      }
+
+      /* Visual grid preview */
+      .grid-preview {
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        padding: 8px;
+        margin-bottom: 8px;
+        overflow-x: auto;
+      }
+
+      .grid-preview-row {
+        display: flex;
+        gap: 3px;
+        margin-bottom: 3px;
+        align-items: center;
+      }
+
+      .grid-preview-row:last-child {
+        margin-bottom: 0;
+      }
+
+      .grid-preview-label {
+        width: 28px;
+        font-size: 0.65em;
+        font-weight: 600;
+        color: var(--wc-text-secondary);
+        text-align: center;
+        flex-shrink: 0;
+      }
+
+      .grid-preview-cell {
+        width: 20px;
+        height: 16px;
+        border-radius: 3px;
+        background: rgba(114, 47, 55, 0.15);
+        border: 1px solid rgba(114, 47, 55, 0.25);
+        flex-shrink: 0;
+      }
+
+      .grid-preview-row.storage .grid-preview-cell {
+        background: rgba(139, 105, 20, 0.15);
+        border-color: rgba(139, 105, 20, 0.3);
+      }
+
+      .grid-preview-storage-label {
+        font-size: 0.6em;
+        color: #8b6914;
+        font-weight: 600;
+        white-space: nowrap;
+        padding-left: 4px;
+      }
+
+      .grid-preview-row.storage .grid-preview-cell {
+        width: unset;
+        flex: 1;
+        max-width: none;
+      }
+
+      /* Row list */
+      .row-list {
         display: flex;
         flex-direction: column;
         gap: 3px;
@@ -177,7 +297,7 @@ export class RackSettingsDialog extends LitElement {
       }
 
       .row-entry:hover {
-        background: rgba(0, 0, 0, 0.04);
+        background: var(--wc-hover);
       }
 
       .row-entry.storage {
@@ -186,7 +306,7 @@ export class RackSettingsDialog extends LitElement {
       }
 
       .row-entry .row-num {
-        width: 32px;
+        width: 28px;
         font-weight: 600;
         color: var(--wc-text-secondary);
         font-size: 0.85em;
@@ -225,12 +345,51 @@ export class RackSettingsDialog extends LitElement {
       }
 
       .row-entry .toggle-btn:hover {
-        background: rgba(0, 0, 0, 0.06);
+        background: var(--wc-hover);
       }
 
       .row-entry.storage .toggle-btn {
         color: #8b6914;
         border-color: rgba(139, 105, 20, 0.4);
+      }
+
+      .row-controls {
+        display: flex;
+        gap: 6px;
+        margin-top: 6px;
+      }
+
+      .row-ctrl-btn {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        padding: 6px 0;
+        border: 1px dashed var(--wc-border);
+        border-radius: 6px;
+        background: transparent;
+        color: var(--wc-text-secondary);
+        cursor: pointer;
+        font-size: 0.8em;
+        transition: all 0.15s;
+      }
+
+      .row-ctrl-btn:hover:not(:disabled) {
+        border-color: var(--wc-primary);
+        color: var(--wc-primary);
+        background: rgba(114, 47, 55, 0.05);
+      }
+
+      .row-ctrl-btn:disabled {
+        opacity: 0.3;
+        cursor: default;
+      }
+
+      .row-ctrl-btn.danger:hover:not(:disabled) {
+        border-color: #c62828;
+        color: #c62828;
+        background: rgba(198, 40, 40, 0.05);
       }
     `,
   ];
@@ -277,7 +436,7 @@ export class RackSettingsDialog extends LitElement {
     this._error = "";
     this._editCabinet = {
       name: "",
-      rows: 8,
+      rows: 1,
       cols: 8,
       depth: 1,
       has_bottom_zone: false,
@@ -319,6 +478,45 @@ export class RackSettingsDialog extends LitElement {
     return this._editStorageRows.some((sr) => sr.row === row);
   }
 
+  private _addRow() {
+    const current = this._editCabinet.rows || 1;
+    if (current >= 20) return;
+    this._editCabinet = { ...this._editCabinet, rows: current + 1 };
+  }
+
+  private _removeRow() {
+    const current = this._editCabinet.rows || 1;
+    if (current <= 1) return;
+    const newRows = current - 1;
+    // Remove storage row if last row was storage
+    this._editStorageRows = this._editStorageRows.filter((sr) => sr.row < newRows);
+    this._editCabinet = { ...this._editCabinet, rows: newRows };
+  }
+
+  private _addCol() {
+    const current = this._editCabinet.cols || 1;
+    if (current >= 20) return;
+    this._editCabinet = { ...this._editCabinet, cols: current + 1 };
+  }
+
+  private _removeCol() {
+    const current = this._editCabinet.cols || 1;
+    if (current <= 1) return;
+    this._editCabinet = { ...this._editCabinet, cols: current - 1 };
+  }
+
+  private _addDepth() {
+    const current = (this._editCabinet as any).depth || 1;
+    if (current >= 6) return;
+    this._editCabinet = { ...this._editCabinet, depth: current + 1 };
+  }
+
+  private _removeDepth() {
+    const current = (this._editCabinet as any).depth || 1;
+    if (current <= 1) return;
+    this._editCabinet = { ...this._editCabinet, depth: current - 1 };
+  }
+
   private async _saveAdd() {
     this._loading = true;
     this._error = "";
@@ -327,7 +525,7 @@ export class RackSettingsDialog extends LitElement {
         type: "wine_cellar/add_cabinet",
         cabinet: {
           name: this._editCabinet.name || "New Rack",
-          rows: this._editCabinet.rows || 8,
+          rows: this._editCabinet.rows || 1,
           cols: this._editCabinet.cols || 8,
           depth: this._editCabinet.depth || 1,
           has_bottom_zone: false,
@@ -349,7 +547,7 @@ export class RackSettingsDialog extends LitElement {
     this._error = "";
     try {
       const cabinetId = this._editCabinet.id!;
-      const newRows = this._editCabinet.rows || 8;
+      const newRows = this._editCabinet.rows || 1;
       const newCols = this._editCabinet.cols || 8;
 
       // Filter out storage rows beyond the new row count
@@ -511,7 +709,9 @@ export class RackSettingsDialog extends LitElement {
 
   private _renderForm() {
     const isEdit = this._mode === "edit";
-    const numRows = this._editCabinet.rows || 8;
+    const numRows = this._editCabinet.rows || 1;
+    const numCols = this._editCabinet.cols || 8;
+    const numDepth = (this._editCabinet as any).depth || 1;
 
     // Calculate out-of-bounds warning for edits
     let oobCount = 0;
@@ -545,59 +745,52 @@ export class RackSettingsDialog extends LitElement {
           />
         </div>
 
-        <div class="form-row">
-          <div class="form-group">
-            <label>Rows</label>
-            <input
-              type="number"
-              min="1"
-              max="20"
-              .value=${(this._editCabinet.rows || 8).toString()}
-              @input=${(e: InputEvent) => {
-                const newRows = parseInt((e.target as HTMLInputElement).value) || 1;
-                this._editCabinet = { ...this._editCabinet, rows: newRows };
-                // Remove storage rows that are beyond the new row count
-                this._editStorageRows = this._editStorageRows.filter((sr) => sr.row < newRows);
-              }}
-            />
-          </div>
-          <div class="form-group">
-            <label>Columns</label>
-            <input
-              type="number"
-              min="1"
-              max="20"
-              .value=${(this._editCabinet.cols || 8).toString()}
-              @input=${(e: InputEvent) =>
-                (this._editCabinet = {
-                  ...this._editCabinet,
-                  cols: parseInt((e.target as HTMLInputElement).value) || 1,
-                })}
-            />
-          </div>
-          <div class="form-group">
-            <label>Depth</label>
-            <select
-              .value=${((this._editCabinet as any).depth || 1).toString()}
-              @change=${(e: Event) =>
-                (this._editCabinet = {
-                  ...this._editCabinet,
-                  depth: parseInt((e.target as HTMLSelectElement).value) || 1,
-                })}
-              style="padding: 8px; border: 1px solid var(--wc-border); border-radius: 8px; background: var(--wc-bg); color: var(--wc-text); font-size: 1em;"
-            >
-              <option value="1">1 deep</option>
-              <option value="2">2 deep</option>
-              <option value="3">3 deep</option>
-            </select>
-          </div>
-        </div>
+        <!-- Grid Editor -->
+        <div class="grid-editor">
+          <div class="grid-editor-title">Grid Layout</div>
 
-        <!-- Row layout editor -->
-        <div class="row-layout">
-          <div class="row-layout-title">Row Layout</div>
-          <div class="row-layout-hint">Tap a row to toggle between bottle slots and storage zone</div>
-          <div class="row-layout-list">
+          <!-- Stepper controls -->
+          <div class="stepper-row">
+            <div class="stepper-wrap">
+              <div class="stepper-label">Columns</div>
+              <div class="stepper">
+                <button class="stepper-btn" @click=${this._removeCol} ?disabled=${numCols <= 1}>−</button>
+                <span class="stepper-value">${numCols}</span>
+                <button class="stepper-btn" @click=${this._addCol} ?disabled=${numCols >= 20}>+</button>
+              </div>
+            </div>
+            <div class="stepper-wrap">
+              <div class="stepper-label">Depth</div>
+              <div class="stepper">
+                <button class="stepper-btn" @click=${this._removeDepth} ?disabled=${numDepth <= 1}>−</button>
+                <span class="stepper-value">${numDepth}</span>
+                <button class="stepper-btn" @click=${this._addDepth} ?disabled=${numDepth >= 6}>+</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Visual grid preview -->
+          <div class="grid-preview">
+            ${Array.from({ length: numRows }, (_, row) => {
+              const isStorage = this._isStorageRow(row);
+              return html`
+                <div class="grid-preview-row ${isStorage ? "storage" : ""}">
+                  <span class="grid-preview-label">R${row + 1}</span>
+                  ${isStorage
+                    ? html`<div class="grid-preview-cell"></div><span class="grid-preview-storage-label">${this._editStorageRows.find(s => s.row === row)?.name || "Storage"}</span>`
+                    : Array.from({ length: Math.min(numCols, 15) }, () =>
+                        html`<div class="grid-preview-cell"></div>`
+                      )}
+                  ${!isStorage && numCols > 15
+                    ? html`<span style="font-size:0.65em;color:var(--wc-text-secondary)">+${numCols - 15}</span>`
+                    : nothing}
+                </div>
+              `;
+            })}
+          </div>
+
+          <!-- Row list with storage toggles -->
+          <div class="row-list">
             ${Array.from({ length: numRows }, (_, row) => {
               const isStorage = this._isStorageRow(row);
               const sr = this._editStorageRows.find((s) => s.row === row);
@@ -605,7 +798,7 @@ export class RackSettingsDialog extends LitElement {
                 <div class="row-entry ${isStorage ? "storage" : ""}">
                   <span class="row-num">R${row + 1}</span>
                   <span class="row-type ${isStorage ? "is-storage" : ""}">
-                    ${isStorage ? "Storage" : `${this._editCabinet.cols || 8} slots`}
+                    ${isStorage ? "Storage" : `${numCols} slots${numDepth > 1 ? ` × ${numDepth} deep` : ""}`}
                   </span>
                   ${isStorage
                     ? html`
@@ -629,6 +822,20 @@ export class RackSettingsDialog extends LitElement {
               `;
             })}
           </div>
+          <div class="row-controls">
+            <button
+              class="row-ctrl-btn danger"
+              @click=${this._removeRow}
+              ?disabled=${numRows <= 1}
+              title="Remove last row"
+            >− Remove Row</button>
+            <button
+              class="row-ctrl-btn"
+              @click=${this._addRow}
+              ?disabled=${numRows >= 20}
+              title="Add a row"
+            >+ Add Row</button>
+          </div>
         </div>
 
         ${oobCount > 0
@@ -640,7 +847,7 @@ export class RackSettingsDialog extends LitElement {
           : nothing}
 
         ${this._error
-          ? html`<div class="error-msg" style="color:#c62828;margin-top:8px">${this._error}</div>`
+          ? html`<div class="error-msg" style="color:#ef5350;margin-top:8px">${this._error}</div>`
           : nothing}
       </div>
 
@@ -675,7 +882,7 @@ export class RackSettingsDialog extends LitElement {
             : nothing}
         </div>
         ${this._error
-          ? html`<div style="color:#c62828;font-size:0.85em">${this._error}</div>`
+          ? html`<div style="color:#ef5350;font-size:0.85em">${this._error}</div>`
           : nothing}
       </div>
       <div class="dialog-footer">

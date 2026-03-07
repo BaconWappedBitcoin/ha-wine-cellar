@@ -267,7 +267,7 @@ export class AddWineDialog extends LitElement {
       }
 
       .confirm-summary {
-        background: rgba(0, 0, 0, 0.03);
+        background: rgba(128, 128, 128, 0.08);
         border-radius: 10px;
         padding: 16px;
       }

@@ -140,6 +140,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_analyze_wine_transient)
     websocket_api.async_register_command(hass, ws_get_buy_list)
     websocket_api.async_register_command(hass, ws_add_to_buy_list)
+    websocket_api.async_register_command(hass, ws_update_buy_list_item)
     websocket_api.async_register_command(hass, ws_remove_from_buy_list)
     websocket_api.async_register_command(hass, ws_move_to_cellar)
 
@@ -983,6 +984,30 @@ async def ws_add_to_buy_list(
 
     # Auto-enrich in background
     hass.async_create_task(_auto_enrich_buy_list_item(hass, item))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "wine_cellar/update_buy_list_item",
+        vol.Required("item_id"): str,
+        vol.Required("updates"): dict,
+    }
+)
+@websocket_api.async_response
+async def ws_update_buy_list_item(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Update a buy list item's fields."""
+    storage = hass.data[DOMAIN]["storage"]
+    item = storage.update_buy_list_item(msg["item_id"], msg["updates"])
+    if item:
+        await storage.async_save()
+        hass.bus.async_fire(f"{DOMAIN}_updated")
+        connection.send_result(msg["id"], {"item": item})
+    else:
+        connection.send_result(msg["id"], {"error": "Item not found."})
 
 
 @websocket_api.websocket_command(

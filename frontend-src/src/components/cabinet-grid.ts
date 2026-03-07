@@ -374,7 +374,7 @@ export class CabinetGrid extends LitElement {
     );
   }
 
-  private _onCellClick(row: number, col: number, wine?: Wine, wineCount = 0, cabinetDepth = 1) {
+  private _onCellClick(row: number, col: number, wine?: Wine, wineCount = 0, cabinetDepth = 1, wines: Wine[] = []) {
     this.dispatchEvent(
       new CustomEvent("cell-click", {
         detail: {
@@ -382,6 +382,7 @@ export class CabinetGrid extends LitElement {
           row,
           col,
           wine,
+          wines,
           wineCount,
           cabinetDepth,
         },
@@ -559,7 +560,7 @@ export class CabinetGrid extends LitElement {
               class="cell ${frontWine ? "filled" : "empty"} ${isDragOver ? "drag-over" : ""}"
               style=${frontWine ? `background: ${bgColor}; --bottle-type-color: ${ringColor}` : ""}
               draggable=${frontWine ? "true" : "false"}
-              @click=${() => this._onCellClick(row, col, frontWine, wineCount, cabinetDepth)}
+              @click=${() => this._onCellClick(row, col, frontWine, wineCount, cabinetDepth, wines)}
               @touchstart=${frontWine ? () => this._onTouchStart(frontWine) : nothing}
               @touchend=${frontWine ? () => this._onTouchEnd() : nothing}
               @touchmove=${frontWine ? () => this._onTouchMove() : nothing}
