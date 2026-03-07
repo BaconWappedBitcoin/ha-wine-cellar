@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from typing import Any
 
 import aiohttp
@@ -18,7 +19,7 @@ GEMINI_API_URL = (
     "gemini-2.5-flash:generateContent"
 )
 
-LABEL_PROMPT = """You are a master sommelier and wine label recognition expert. The current year is 2026. Analyze this wine label image, identify the wine, and provide a full assessment. Return ONLY a JSON object with these exact fields:
+LABEL_PROMPT = """You are a master sommelier and wine label recognition expert. The current year is {current_year}. Analyze this wine label image, identify the wine, and provide a full assessment. Return ONLY a JSON object with these exact fields:
 
 {
   "name": "the full wine name including style (e.g. Crémant Demi-Sec, Cabernet Sauvignon Reserve)",
@@ -59,7 +60,7 @@ Wine analysis rules:
   - Most whites: 1-3 years. Quality Chardonnay/Riesling: 3-5 years
   - Sparkling NV: 2-3 years. Vintage Champagne: 5-10 years
   - Dessert wines: 10-20+ years
-  - NV wines: "Drink Now" with drink_window "2026-2027"
+  - NV wines: "Drink Now" with drink_window "{current_year}-{next_year}"
 - "description": Professional tasting-style description of this wine's character
 - "estimated_price": estimated current US retail price as a number (e.g. 45.00). Use null only if truly unknown.
 - Rating fields (rating_ws, rating_rp, rating_jd, rating_ag): critic scores out of 100 if known. Use null if unknown. Do NOT fabricate.
@@ -93,7 +94,7 @@ class GeminiVisionClient:
             "contents": [
                 {
                     "parts": [
-                        {"text": LABEL_PROMPT},
+                        {"text": LABEL_PROMPT.format(current_year=datetime.now().year, next_year=datetime.now().year + 1)},
                         {
                             "inlineData": {
                                 "mimeType": "image/jpeg",
@@ -253,7 +254,7 @@ class GeminiVisionClient:
         if not self._api_key:
             return {"error": "Gemini API key is empty"}
 
-        current_year = 2026
+        current_year = datetime.now().year
         vintage = wine.get("vintage") or "NV"
         wine_type = wine.get("type", "red")
         name = wine.get("name", "Unknown")
@@ -388,7 +389,7 @@ Rules:
             return {"error": "Gemini API key is empty"}
 
         # Build a concise wine list for analysis
-        current_year = 2026
+        current_year = datetime.now().year
         wine_lines = []
         for w in wines:
             vintage = w.get("vintage") or "NV"
