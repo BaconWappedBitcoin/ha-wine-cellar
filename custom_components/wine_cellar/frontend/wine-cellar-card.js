@@ -4813,7 +4813,7 @@ let WineListDialog = class WineListDialog extends i {
                 ? b `<div class="header-subtitle">${this._wines.length} wines already scanned. Take another photo to add more.</div>`
                 : b `<div class="header-subtitle">Take a photo of a restaurant wine list to see ratings, scores, and value.</div>`}
                 <div style="padding: 0 16px 16px">
-                  <label-camera @photo-captured=${this._onPhotoCaptured}></label-camera>
+                  <label-camera .active=${this._phase === "capture"} @photo-captured=${this._onPhotoCaptured}></label-camera>
                 </div>
                 ${this._wines.length > 0
                 ? b `
