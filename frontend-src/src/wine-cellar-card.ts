@@ -9,6 +9,7 @@ import "./components/add-wine-dialog";
 import "./components/search-bar";
 import "./components/rack-settings-dialog";
 import "./components/wine-list-dialog";
+import "./components/inventory-dialog";
 
 interface WineCellarCardConfig {
   type: string;
@@ -40,6 +41,7 @@ export class WineCellarCard extends LitElement {
   @state() private _toast = "";
   @state() private _hasGemini = false;
   @state() private _showWineList = false;
+  @state() private _showInventory = false;
   @state() private _buyList: Wine[] = [];
   @state() private _addToBuyListMode = false;
   @state() private _movingBuyListItem: Wine | null = null;
@@ -868,6 +870,11 @@ export class WineCellarCard extends LitElement {
     return this._wines.filter((w) => w.cabinet_id === cabinetId);
   }
 
+  private _getUnassignedWines(): Wine[] {
+    const cabinetIds = new Set(this._cabinets.map((c) => c.id));
+    return this._wines.filter((w) => !w.cabinet_id || !cabinetIds.has(w.cabinet_id));
+  }
+
   render() {
     if (this._loading) {
       return html`
@@ -880,8 +887,10 @@ export class WineCellarCard extends LitElement {
     const title = this._config?.title || "Wine Cellar";
     const filteredWines = this._getFilteredWines();
     const isSearching = !!(this._searchQuery || this._searchFilter !== "all");
-    const showGrid = !isSearching && this._activeTab !== "buy-list" && (this._activeTab === "all" || this._cabinets.some((c) => c.id === this._activeTab));
+    const unassignedWines = this._getUnassignedWines();
+    const showGrid = !isSearching && this._activeTab !== "buy-list" && this._activeTab !== "unassigned" && (this._activeTab === "all" || this._cabinets.some((c) => c.id === this._activeTab));
     const showBuyList = this._activeTab === "buy-list" && !isSearching;
+    const showUnassigned = this._activeTab === "unassigned" && !isSearching;
 
     return html`
       <ha-card>
@@ -921,6 +930,14 @@ export class WineCellarCard extends LitElement {
                 🍽️ Scan List
               </button>
             ` : nothing}
+            <button
+              class="btn btn-primary"
+              style="font-size: 0.8em; padding: 5px 10px; background: #37474f;"
+              @click=${() => (this._showInventory = true)}
+              title="Browse full cellar inventory"
+            >
+              📦 Inventory
+            </button>
             <button
               class="btn btn-primary"
               @click=${() => {
@@ -1013,6 +1030,17 @@ export class WineCellarCard extends LitElement {
               </button>
             `
           )}
+          ${unassignedWines.length > 0
+            ? html`
+                <button
+                  class="tab ${this._activeTab === "unassigned" ? "active" : ""}"
+                  @click=${() => (this._activeTab = "unassigned")}
+                  style="${this._activeTab !== "unassigned" ? "border-color: #e65100; color: #e65100;" : ""}"
+                >
+                  Unassigned (${unassignedWines.length})
+                </button>
+              `
+            : nothing}
           <button
             class="tab ${this._activeTab === "buy-list" ? "active" : ""}"
             @click=${() => (this._activeTab = "buy-list")}
@@ -1066,6 +1094,42 @@ export class WineCellarCard extends LitElement {
                         `
                       )}
               </div>
+              ${this._activeTab === "all" && unassignedWines.length > 0
+                ? html`
+                    <div style="padding: 8px 16px 2px">
+                      <div style="font-size: 0.9em; font-weight: 600; color: var(--wc-text-secondary); margin-bottom: 4px">
+                        📦 Unassigned (${unassignedWines.length})
+                      </div>
+                    </div>
+                    <div class="wine-list" style="border-top: 1px solid var(--wc-border)">
+                      ${unassignedWines.map((wine) => {
+                          const typeColor = WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red;
+                          return html`
+                            <div
+                              class="wine-list-item"
+                              @click=${() => {
+                                this._selectedWine = wine;
+                                this._detailMode = "cellar";
+                                this._showDetail = true;
+                              }}
+                            >
+                              ${wine.image_url
+                                ? html`<img class="wine-list-thumb" src="${wine.image_url}" alt="" />`
+                                : html`<div class="wine-list-dot" style="background: ${typeColor}"></div>`}
+                              <div class="wine-list-info">
+                                <div class="wine-list-name">${wine.name}</div>
+                                <div class="wine-list-meta">
+                                  ${wine.winery}${wine.vintage ? ` · ${wine.vintage}` : ""}
+                                  ${wine.rating ? ` · ★${wine.rating}` : ""}
+                                </div>
+                              </div>
+                              <div class="wine-list-location" style="color:#e65100">Unassigned</div>
+                            </div>
+                          `;
+                        })}
+                    </div>
+                  `
+                : nothing}
             `
           : nothing}
 
@@ -1124,6 +1188,54 @@ export class WineCellarCard extends LitElement {
                         </div>
                       `;
                     })}
+              </div>
+            `
+          : nothing}
+
+        <!-- Unassigned wines view -->
+        ${showUnassigned
+          ? html`
+              <div class="wine-list">
+                <div style="padding: 12px 16px 4px; font-size: 0.85em; color: var(--wc-text-secondary)">
+                  These wines are not assigned to any rack. Tap a wine to view details, then use Move to place it.
+                </div>
+                ${unassignedWines.map((wine) => {
+                    const typeColor = WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red;
+                    return html`
+                      <div
+                        class="wine-list-item"
+                        @click=${() => {
+                          if (this._movingBuyListItem) return;
+                          this._selectedWine = wine;
+                          this._detailMode = "cellar";
+                          this._showDetail = true;
+                        }}
+                      >
+                        ${wine.image_url
+                          ? html`<img class="wine-list-thumb" src="${wine.image_url}" alt="" />`
+                          : html`<div class="wine-list-dot" style="background: ${typeColor}"></div>`}
+                        <div class="wine-list-info">
+                          <div class="wine-list-name">${wine.name}</div>
+                          <div class="wine-list-meta">
+                            ${wine.winery}${wine.vintage ? ` · ${wine.vintage}` : ""}
+                            ${wine.rating ? ` · ★${wine.rating}` : ""}
+                            ${wine.disposition
+                              ? html` · <span style="color: ${
+                                  wine.disposition === "D" ? "#2e7d32" :
+                                  wine.disposition === "H" ? "#1565c0" :
+                                  wine.disposition === "P" ? "#c62828" : "inherit"
+                                }">${
+                                  wine.disposition === "D" ? "Drink" :
+                                  wine.disposition === "H" ? "Hold" :
+                                  wine.disposition === "P" ? "Past Peak" : ""
+                                }</span>`
+                              : nothing}
+                          </div>
+                        </div>
+                        <div class="wine-list-location">Unassigned</div>
+                      </div>
+                    `;
+                  })}
               </div>
             `
           : nothing}
@@ -1255,6 +1367,17 @@ export class WineCellarCard extends LitElement {
           @wine-added=${this._onWineAdded}
           @buy-list-updated=${() => this._loadData()}
         ></wine-list-dialog>
+
+        <!-- Inventory Dialog -->
+        <inventory-dialog
+          .open=${this._showInventory}
+          .hass=${this.hass}
+          .wines=${this._wines}
+          .cabinets=${this._cabinets}
+          .hasGemini=${this._hasGemini}
+          @close=${() => (this._showInventory = false)}
+          @wine-updated=${() => this._loadData()}
+        ></inventory-dialog>
 
         <!-- Rack Settings Dialog -->
         <rack-settings-dialog
