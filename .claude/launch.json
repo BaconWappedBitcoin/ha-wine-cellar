@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "frontend-dev",
-      "runtimeExecutable": "npm",
+      "runtimeExecutable": "C:/Users/newadmin/node-portable/node-v22.14.0-win-x64/npm.cmd",
       "runtimeArgs": ["run", "dev"],
       "port": 5050,
       "cwd": "frontend-src"

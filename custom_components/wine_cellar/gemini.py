@@ -67,7 +67,7 @@ Wine analysis rules:
 - "notes": brief info from the label itself (appellation, classification, etc.)"""
 
 
-WINE_LIST_PROMPT = """You are a master sommelier. Analyze this photograph of a restaurant wine list or wine menu. Extract EVERY wine listed on the page.
+WINE_LIST_PROMPT = """You are a master sommelier. Analyze this photograph of a restaurant wine list, wine menu, store receipt, or purchase receipt. Extract EVERY wine listed on the page.
 
 Return ONLY a JSON object with this structure:
 {
@@ -86,25 +86,26 @@ Return ONLY a JSON object with this structure:
       "bottle_size": "750ml"
     }
   ],
-  "restaurant_name": "name if visible on the menu",
+  "restaurant_name": "name if visible on the menu or receipt (store name, restaurant name, etc.)",
   "currency": "USD"
 }
 
 Rules:
-- Extract ALL wines visible on the menu, including by-the-glass options
+- Extract ALL wines visible on the menu or receipt, including by-the-glass options
+- For receipts: extract wine items only (skip non-wine items like food, tax, tips, etc.)
 - "name" should include the wine name and style but NOT the winery/producer name
 - "vintage" must be a 4-digit year as an integer, or null if NV or not shown
 - "type" must be exactly one of: "red", "white", "rosé", "sparkling", "dessert"
-- "list_price" is the restaurant price as a number (e.g. 65.00). Use null only if truly unreadable.
+- "list_price" is the price as a number (e.g. 65.00). Use null only if truly unreadable.
 - "list_price_currency" should be the 3-letter currency code (USD, EUR, GBP, etc.)
 - "glass_price" is the by-the-glass price if offered, otherwise null
 - "bottle_size" defaults to "750ml" unless the menu specifies otherwise
-- "currency" is the primary currency used on the menu
-- "restaurant_name" from any header/logo visible, or null
+- "currency" is the primary currency used on the document
+- "restaurant_name" from any header/logo/store name visible, or null
 - For ambiguous types, infer from grape variety or region
-- If the image is not a wine list, return {"error": "not_a_wine_list"}
+- If the image contains no wines at all, return {"error": "not_a_wine_list"}
 - Be thorough: do not skip any wines. If text is partially obscured, include what you can read.
-- Preserve the order wines appear on the menu."""
+- Preserve the order wines appear on the document."""
 
 
 class GeminiVisionClient:

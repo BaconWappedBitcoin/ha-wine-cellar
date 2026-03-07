@@ -39,9 +39,21 @@ export interface Wine {
   ai_ratings: Record<string, number> | null;
 }
 
+export type StorageRowType = "bulk" | "box" | "horizontal";
+
+export const STORAGE_ROW_TYPE_LABELS: Record<StorageRowType, string> = {
+  bulk: "Bulk Bin",
+  box: "Wine Box",
+  horizontal: "Horizontal",
+};
+
+export const BOX_SIZES = [1, 3, 6, 12, 24] as const;
+
 export interface StorageRow {
   row: number;
   name: string;
+  type: StorageRowType;
+  capacity: number;
 }
 
 export interface Cabinet {

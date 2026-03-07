@@ -511,6 +511,12 @@ const sharedStyles = i$3 `
   }
 `;
 
+const STORAGE_ROW_TYPE_LABELS = {
+    bulk: "Bulk Bin",
+    box: "Wine Box",
+    horizontal: "Horizontal",
+};
+const BOX_SIZES = [1, 3, 6, 12, 24];
 const WINE_TYPE_COLORS = {
     red: "#722F37",
     white: "#F5E6CA",
@@ -541,10 +547,12 @@ let CabinetGrid = class CabinetGrid extends i {
         const rows = this.cabinet.storage_rows;
         return new Set((rows || []).map((sr) => sr.row));
     }
-    _getStorageRowName(row) {
+    _getStorageRowConfig(row) {
         const rows = this.cabinet.storage_rows;
-        const sr = (rows || []).find((s) => s.row === row);
-        return sr?.name || "Storage";
+        return (rows || []).find((s) => s.row === row);
+    }
+    _getStorageRowName(row) {
+        return this._getStorageRowConfig(row)?.name || "Storage";
     }
     _getBottomZoneWines() {
         return this.wines.filter((w) => w.cabinet_id === this.cabinet.id && w.zone === "bottom");
@@ -573,6 +581,17 @@ let CabinetGrid = class CabinetGrid extends i {
                 cabinet: this.cabinet,
                 zone,
                 wine,
+            },
+            bubbles: true,
+            composed: true,
+        }));
+    }
+    _onZoneContainerClick(zone, storageRow) {
+        this.dispatchEvent(new CustomEvent("zone-container-click", {
+            detail: {
+                cabinet: this.cabinet,
+                zone,
+                storageRow,
             },
             bubbles: true,
             composed: true,
@@ -664,18 +683,31 @@ let CabinetGrid = class CabinetGrid extends i {
         catch { /* ignore bad data */ }
     }
     _renderStorageZone(row) {
-        const zoneName = this._getStorageRowName(row);
+        const sr = this._getStorageRowConfig(row);
+        const zoneName = sr?.name || "Storage";
+        const zoneType = sr?.type || "bulk";
+        const capacity = sr?.capacity || 20;
         const zoneId = `storage-${row}`;
         const wines = this._getStorageRowWines(row);
         const zoneKey = `zone-${zoneId}`;
         const isDragOver = this._dragOverCell === zoneKey;
+        if (zoneType === "box") {
+            return this._renderBoxZone(zoneId, zoneKey, zoneName, capacity, wines, isDragOver, sr);
+        }
+        if (zoneType === "horizontal") {
+            return this._renderHorizontalZone(zoneId, zoneKey, zoneName, capacity, wines, isDragOver, sr);
+        }
+        // Default: bulk
+        return this._renderBulkZone(zoneId, zoneKey, zoneName, capacity, wines, isDragOver, sr);
+    }
+    _renderBulkZone(zoneId, zoneKey, name, capacity, wines, isDragOver, sr) {
         return b `
       <div class="bottom-zone ${isDragOver ? "drag-over" : ""}"
-        @click=${() => this._onZoneClick(undefined, zoneId)}
+        @click=${() => sr ? this._onZoneContainerClick(zoneId, sr) : this._onZoneClick(undefined, zoneId)}
         @dragover=${(e) => this._onDragOver(e, zoneKey)}
         @dragleave=${(e) => this._onDragLeave(e)}
         @drop=${(e) => this._onDrop(e, undefined, undefined, zoneId)}>
-        <div class="bottom-zone-label">${zoneName}</div>
+        <div class="bottom-zone-label">◇ ${name} <span class="zone-count">${wines.length}/${capacity}</span></div>
         ${wines.map((wine) => b `
             <div
               class="zone-bottle"
@@ -692,6 +724,42 @@ let CabinetGrid = class CabinetGrid extends i {
               ${(wine.vintage || "NV").toString().slice(-2)}
             </div>
           `)}
+      </div>
+    `;
+    }
+    _renderBoxZone(zoneId, zoneKey, name, capacity, wines, isDragOver, sr) {
+        return b `
+      <div class="bottom-zone zone-box-row ${isDragOver ? "drag-over" : ""}"
+        @click=${() => this._onZoneContainerClick(zoneId, sr)}
+        @dragover=${(e) => this._onDragOver(e, zoneKey)}
+        @dragleave=${(e) => this._onDragLeave(e)}
+        @drop=${(e) => this._onDrop(e, undefined, undefined, zoneId)}>
+        <div class="bottom-zone-label">📦 ${name} <span class="zone-count">${wines.length}/${capacity}</span></div>
+        <div class="zone-fill-dots">
+          ${Array.from({ length: capacity }, (_, i) => {
+            const wine = wines.find((w) => (w.depth || 0) === i);
+            const color = wine ? WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red : "";
+            return b `<span class="zone-fill-dot ${wine ? "filled" : "empty"}" style=${wine ? `background: ${color}` : ""}></span>`;
+        })}
+        </div>
+      </div>
+    `;
+    }
+    _renderHorizontalZone(zoneId, zoneKey, name, capacity, wines, isDragOver, sr) {
+        return b `
+      <div class="bottom-zone zone-horiz-row ${isDragOver ? "drag-over" : ""}"
+        @click=${() => this._onZoneContainerClick(zoneId, sr)}
+        @dragover=${(e) => this._onDragOver(e, zoneKey)}
+        @dragleave=${(e) => this._onDragLeave(e)}
+        @drop=${(e) => this._onDrop(e, undefined, undefined, zoneId)}>
+        <div class="bottom-zone-label">🔲 ${name} <span class="zone-count">${wines.length}/${capacity}</span></div>
+        <div class="zone-fill-dots">
+          ${Array.from({ length: capacity }, (_, i) => {
+            const wine = wines.find((w) => (w.depth || 0) === i);
+            const color = wine ? WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red : "";
+            return b `<span class="zone-fill-dot ${wine ? "filled" : "empty"}" style=${wine ? `background: ${color}` : ""}></span>`;
+        })}
+        </div>
       </div>
     `;
     }
@@ -739,8 +807,30 @@ let CabinetGrid = class CabinetGrid extends i {
                     ${dispClass ? b `<span class="disposition ${dispClass}">${disp}</span>` : A}
                     ${ratingDisplay ? b `<span class="rating-badge">★${ratingDisplay}</span>` : A}
                     ${wineCount > 1 ? b `<span class="depth-badge">${wineCount}</span>` : A}
+                    ${cabinetDepth >= 2
+                    ? b `
+                          <span class="depth-dots">
+                            ${Array.from({ length: cabinetDepth }, (_, d) => {
+                        const wineAtDepth = wines.find((w) => (w.depth || 0) === d);
+                        const dotColor = wineAtDepth
+                            ? WINE_TYPE_COLORS[wineAtDepth.type] || WINE_TYPE_COLORS.red
+                            : "";
+                        return b `<span
+                                class="depth-dot ${wineAtDepth ? "" : "empty"}"
+                                style=${wineAtDepth ? `background: ${dotColor}` : ""}
+                              ></span>`;
+                    })}
+                          </span>
+                        `
+                    : A}
                   `
-                : A}
+                : cabinetDepth >= 2 && wineCount === 0
+                    ? b `
+                      <span class="depth-dots">
+                        ${Array.from({ length: cabinetDepth }, () => b `<span class="depth-dot empty"></span>`)}
+                      </span>
+                    `
+                    : A}
             </div>
           `;
         })}
@@ -997,6 +1087,30 @@ CabinetGrid.styles = [
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
       }
 
+      .depth-dots {
+        position: absolute;
+        bottom: 16%;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 3px;
+        z-index: 3;
+        pointer-events: none;
+      }
+
+      .depth-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        border: 1.5px solid rgba(255, 255, 255, 0.6);
+        box-shadow: 0 0 3px rgba(0, 0, 0, 0.6);
+      }
+
+      .depth-dot.empty {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.25);
+      }
+
       .bottom-zone {
         margin-top: 8px;
         background: linear-gradient(135deg, #6b5010 0%, #8b6914 100%);
@@ -1067,6 +1181,42 @@ CabinetGrid.styles = [
       .bottom-zone.drag-over {
         box-shadow: inset 0 0 0 2px rgba(66, 165, 245, 0.8);
         background: rgba(66, 165, 245, 0.1);
+      }
+
+      .zone-count {
+        font-weight: 400;
+        opacity: 0.7;
+        margin-left: 4px;
+      }
+
+      .zone-fill-dots {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        align-items: center;
+      }
+
+      .zone-fill-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        border: 1.5px solid rgba(255, 255, 255, 0.4);
+        box-shadow: 0 0 2px rgba(0, 0, 0, 0.4);
+      }
+
+      .zone-fill-dot.empty {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.2);
+      }
+
+      .zone-box-row,
+      .zone-horiz-row {
+        cursor: pointer;
+      }
+
+      .zone-box-row:hover,
+      .zone-horiz-row:hover {
+        background: linear-gradient(135deg, #7a5a12 0%, #9a7820 100%);
       }
 
       /* Phone: tighter spacing, smaller elements */
@@ -2912,6 +3062,7 @@ let AddWineDialog = class AddWineDialog extends i {
         this._error = "";
         this._hasGemini = false;
         this._labelLoading = false;
+        this._searchResults = [];
     }
     get _steps() {
         return this.buyListMode
@@ -2954,6 +3105,7 @@ let AddWineDialog = class AddWineDialog extends i {
                 this._error = "";
                 this._loading = false;
                 this._labelLoading = false;
+                this._searchResults = [];
                 this._wineData = {
                     name: "",
                     winery: "",
@@ -3044,31 +3196,14 @@ let AddWineDialog = class AddWineDialog extends i {
             return;
         this._loading = true;
         this._error = "";
+        this._searchResults = [];
         try {
             const result = await this.hass.callWS({
                 type: "wine_cellar/search_wine",
                 query: input.value.trim(),
             });
             if (result.results && result.results.length > 0) {
-                const first = result.results[0];
-                this._lookupResult = first;
-                this._wineData = {
-                    ...this._wineData,
-                    name: first.name || "",
-                    winery: first.winery || "",
-                    type: first.type || "red",
-                    vintage: first.vintage,
-                    region: first.region || "",
-                    country: first.country || "",
-                    grape_variety: first.grape_variety || "",
-                    rating: first.rating,
-                    ratings_count: first.ratings_count || null,
-                    image_url: first.image_url || "",
-                    description: first.description || "",
-                    food_pairings: first.food_pairings || "",
-                    alcohol: first.alcohol || "",
-                };
-                this._step = "details";
+                this._searchResults = result.results;
             }
             else {
                 this._error = "No results found. You can enter details manually.";
@@ -3078,6 +3213,27 @@ let AddWineDialog = class AddWineDialog extends i {
             this._error = "Search failed. You can enter details manually.";
         }
         this._loading = false;
+    }
+    _selectSearchResult(item) {
+        this._lookupResult = item;
+        this._wineData = {
+            ...this._wineData,
+            name: item.name || "",
+            winery: item.winery || "",
+            type: item.type || "red",
+            vintage: item.vintage,
+            region: item.region || "",
+            country: item.country || "",
+            grape_variety: item.grape_variety || "",
+            rating: item.rating,
+            ratings_count: item.ratings_count || null,
+            image_url: item.image_url || "",
+            description: item.description || "",
+            food_pairings: item.food_pairings || "",
+            alcohol: item.alcohol || "",
+        };
+        this._searchResults = [];
+        this._step = "details";
     }
     _onBarcodeDetected(e) {
         this._barcode = e.detail.barcode;
@@ -3310,9 +3466,40 @@ let AddWineDialog = class AddWineDialog extends i {
             @keypress=${(e) => e.key === "Enter" && this._searchWine()}
           />
           <button class="btn btn-outline" @click=${this._searchWine}>
-            Search
+            ${this._loading
+            ? b `<span class="loading-spinner"></span>`
+            : "Search"}
           </button>
         </div>
+
+        ${this._searchResults.length > 0
+            ? b `
+              <div class="search-results">
+                <div class="search-results-label">
+                  ${this._searchResults.length} result${this._searchResults.length > 1 ? "s" : ""} — tap to select
+                </div>
+                ${this._searchResults.map((item) => b `
+                    <button
+                      class="search-result-item"
+                      @click=${() => this._selectSearchResult(item)}
+                    >
+                      ${item.image_url
+                ? b `<img class="search-result-thumb" src="${item.image_url}" alt="" />`
+                : b `<div class="search-result-thumb" style="display:flex;align-items:center;justify-content:center;font-size:1.2em;">🍷</div>`}
+                      <div class="search-result-info">
+                        <div class="search-result-name">${item.name || "Unknown"}</div>
+                        <div class="search-result-meta">
+                          ${item.winery || ""}${item.vintage ? ` · ${item.vintage}` : ""}${item.region ? ` · ${item.region}` : ""}
+                        </div>
+                      </div>
+                      ${item.rating
+                ? b `<span class="search-result-rating">★ ${item.rating.toFixed(1)}</span>`
+                : A}
+                    </button>
+                  `)}
+              </div>
+            `
+            : A}
 
         ${this._error
             ? b `<div class="error-msg">${this._error}</div>`
@@ -3914,6 +4101,77 @@ AddWineDialog.styles = [
         color: var(--wc-text-secondary);
         margin-bottom: 6px;
       }
+
+      .search-results {
+        margin-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: 280px;
+        overflow-y: auto;
+      }
+
+      .search-results-label {
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+        margin-bottom: 2px;
+      }
+
+      .search-result-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border: 1px solid var(--wc-border);
+        border-radius: 10px;
+        cursor: pointer;
+        transition: all 0.15s;
+        background: transparent;
+        text-align: left;
+        color: var(--wc-text);
+        width: 100%;
+        box-sizing: border-box;
+      }
+
+      .search-result-item:hover {
+        border-color: var(--wc-primary);
+        background: var(--wc-hover);
+      }
+
+      .search-result-thumb {
+        width: 36px;
+        height: 48px;
+        border-radius: 4px;
+        object-fit: cover;
+        flex-shrink: 0;
+        background: rgba(128, 128, 128, 0.1);
+      }
+
+      .search-result-info {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .search-result-name {
+        font-weight: 600;
+        font-size: 0.9em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .search-result-meta {
+        font-size: 0.78em;
+        color: var(--wc-text-secondary);
+        margin-top: 2px;
+      }
+
+      .search-result-rating {
+        font-size: 0.8em;
+        font-weight: 600;
+        color: #f5a623;
+        flex-shrink: 0;
+      }
     `,
 ];
 __decorate([
@@ -3970,6 +4228,9 @@ __decorate([
 __decorate([
     r()
 ], AddWineDialog.prototype, "_labelLoading", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_searchResults", void 0);
 AddWineDialog = __decorate([
     t("add-wine-dialog")
 ], AddWineDialog);
@@ -4176,20 +4437,36 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
         this._error = "";
         this._deleteCabinet = cabinet;
     }
-    _toggleStorageRow(row) {
-        const existing = this._editStorageRows.find((sr) => sr.row === row);
-        if (existing) {
+    _setRowType(row, type) {
+        if (type === "slots") {
+            // Remove from storage rows
             this._editStorageRows = this._editStorageRows.filter((sr) => sr.row !== row);
         }
         else {
-            this._editStorageRows = [...this._editStorageRows, { row, name: "Storage" }];
+            const existing = this._editStorageRows.find((sr) => sr.row === row);
+            const defaultCapacity = type === "box" ? 12 : type === "horizontal" ? 10 : 20;
+            if (existing) {
+                this._editStorageRows = this._editStorageRows.map((sr) => sr.row === row ? { ...sr, type, capacity: defaultCapacity } : sr);
+            }
+            else {
+                this._editStorageRows = [
+                    ...this._editStorageRows,
+                    { row, name: STORAGE_ROW_TYPE_LABELS[type], type, capacity: defaultCapacity },
+                ];
+            }
         }
     }
     _updateStorageRowName(row, name) {
         this._editStorageRows = this._editStorageRows.map((sr) => sr.row === row ? { ...sr, name } : sr);
     }
+    _updateStorageRowCapacity(row, capacity) {
+        this._editStorageRows = this._editStorageRows.map((sr) => sr.row === row ? { ...sr, capacity } : sr);
+    }
     _isStorageRow(row) {
         return this._editStorageRows.some((sr) => sr.row === row);
+    }
+    _getStorageRow(row) {
+        return this._editStorageRows.find((sr) => sr.row === row);
     }
     _addRow() {
         const current = this._editCabinet.rows || 1;
@@ -4470,11 +4747,13 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
           <div class="grid-preview">
             ${Array.from({ length: numRows }, (_, row) => {
             const isStorage = this._isStorageRow(row);
+            const sr = this._getStorageRow(row);
+            const typeIcon = sr?.type === "box" ? "📦" : sr?.type === "horizontal" ? "🔲" : "◇";
             return b `
                 <div class="grid-preview-row ${isStorage ? "storage" : ""}">
                   <span class="grid-preview-label">R${row + 1}</span>
                   ${isStorage
-                ? b `<div class="grid-preview-cell"></div><span class="grid-preview-storage-label">${this._editStorageRows.find(s => s.row === row)?.name || "Storage"}</span>`
+                ? b `<div class="grid-preview-cell"></div><span class="grid-preview-storage-label">${typeIcon} ${sr?.name || "Storage"}</span>`
                 : Array.from({ length: Math.min(numCols, 15) }, () => b `<div class="grid-preview-cell"></div>`)}
                   ${!isStorage && numCols > 15
                 ? b `<span style="font-size:0.65em;color:var(--wc-text-secondary)">+${numCols - 15}</span>`
@@ -4484,34 +4763,57 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
         })}
           </div>
 
-          <!-- Row list with storage toggles -->
+          <!-- Row list with type selectors -->
           <div class="row-list">
             ${Array.from({ length: numRows }, (_, row) => {
             const isStorage = this._isStorageRow(row);
-            const sr = this._editStorageRows.find((s) => s.row === row);
+            const sr = this._getStorageRow(row);
+            const currentType = sr?.type || "slots";
             return b `
                 <div class="row-entry ${isStorage ? "storage" : ""}">
                   <span class="row-num">R${row + 1}</span>
-                  <span class="row-type ${isStorage ? "is-storage" : ""}">
-                    ${isStorage ? "Storage" : `${numCols} slots${numDepth > 1 ? ` × ${numDepth} deep` : ""}`}
-                  </span>
+                  <select
+                    class="row-type-select"
+                    @change=${(e) => {
+                const val = e.target.value;
+                this._setRowType(row, val);
+            }}
+                    @click=${(e) => e.stopPropagation()}
+                  >
+                    <option value="slots" ?selected=${!isStorage}>Slots</option>
+                    <option value="bulk" ?selected=${currentType === "bulk"}>Bulk Bin</option>
+                    <option value="box" ?selected=${currentType === "box"}>Wine Box</option>
+                    <option value="horizontal" ?selected=${currentType === "horizontal"}>Horizontal</option>
+                  </select>
                   ${isStorage
                 ? b `
                         <input
                           type="text"
+                          class="row-name-input"
                           .value=${sr?.name || "Storage"}
                           @input=${(e) => this._updateStorageRowName(row, e.target.value)}
                           @click=${(e) => e.stopPropagation()}
                           placeholder="Zone name"
                         />
+                        ${sr?.type === "box"
+                    ? b `
+                              <select
+                                class="row-cap-select"
+                                @change=${(e) => this._updateStorageRowCapacity(row, parseInt(e.target.value))}
+                                @click=${(e) => e.stopPropagation()}
+                              >
+                                ${BOX_SIZES.map((s) => b `<option value=${s} ?selected=${(sr?.capacity || 12) === s}>${s}-pack</option>`)}
+                              </select>
+                            `
+                    : b `
+                              <div class="row-cap-stepper">
+                                <button class="stepper-btn-sm" @click=${(e) => { e.stopPropagation(); this._updateStorageRowCapacity(row, Math.max(1, (sr?.capacity || 20) - 1)); }}>−</button>
+                                <span class="stepper-val-sm">${sr?.capacity || 20}</span>
+                                <button class="stepper-btn-sm" @click=${(e) => { e.stopPropagation(); this._updateStorageRowCapacity(row, Math.min(100, (sr?.capacity || 20) + 1)); }}>+</button>
+                              </div>
+                            `}
                       `
-                : A}
-                  <button
-                    class="toggle-btn"
-                    @click=${() => this._toggleStorageRow(row)}
-                  >
-                    ${isStorage ? "→ Slots" : "→ Storage"}
-                  </button>
+                : b `<span class="row-type-info">${numCols} slots${numDepth > 1 ? ` × ${numDepth} deep` : ""}</span>`}
                 </div>
               `;
         })}
@@ -4911,14 +5213,74 @@ RackSettingsDialog.styles = [
         font-size: 0.85em;
       }
 
-      .row-entry .row-type {
-        flex: 1;
-        font-size: 0.85em;
+      .row-type-select {
+        padding: 2px 4px;
+        border: 1px solid var(--wc-border);
+        border-radius: 4px;
+        font-size: 0.8em;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        cursor: pointer;
       }
 
-      .row-entry .row-type.is-storage {
-        color: #8b6914;
+      .row-name-input {
+        width: 80px;
+        padding: 2px 6px;
+        border: 1px solid var(--wc-border);
+        border-radius: 4px;
+        font-size: 0.8em;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        flex-shrink: 1;
+        min-width: 60px;
+      }
+
+      .row-cap-select {
+        padding: 2px 4px;
+        border: 1px solid var(--wc-border);
+        border-radius: 4px;
+        font-size: 0.8em;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        cursor: pointer;
+      }
+
+      .row-cap-stepper {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+      }
+
+      .stepper-btn-sm {
+        width: 20px;
+        height: 20px;
+        border: 1px solid var(--wc-border);
+        border-radius: 4px;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        cursor: pointer;
+        font-size: 0.8em;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+      }
+
+      .stepper-btn-sm:hover {
+        background: var(--wc-hover);
+      }
+
+      .stepper-val-sm {
+        font-size: 0.8em;
         font-weight: 600;
+        min-width: 22px;
+        text-align: center;
+      }
+
+      .row-type-info {
+        flex: 1;
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
       }
 
       .row-entry input[type="text"] {
@@ -4929,27 +5291,6 @@ RackSettingsDialog.styles = [
         font-size: 0.85em;
         background: var(--wc-bg);
         color: var(--wc-text);
-      }
-
-      .row-entry .toggle-btn {
-        background: transparent;
-        border: 1px solid var(--wc-border);
-        border-radius: 4px;
-        padding: 2px 8px;
-        font-size: 0.75em;
-        cursor: pointer;
-        color: var(--wc-text-secondary);
-        transition: all 0.15s;
-        white-space: nowrap;
-      }
-
-      .row-entry .toggle-btn:hover {
-        background: var(--wc-hover);
-      }
-
-      .row-entry.storage .toggle-btn {
-        color: #8b6914;
-        border-color: rgba(139, 105, 20, 0.4);
       }
 
       .row-controls {
@@ -5446,10 +5787,10 @@ let WineListDialog = class WineListDialog extends i {
           <div class="header">
             <span class="header-title">
               ${this._phase === "capture"
-            ? "\uD83C\uDF7D\uFE0F Scan Wine List"
+            ? "\uD83C\uDF7D\uFE0F Scan List"
             : this._restaurantName
                 ? `\uD83C\uDF7D\uFE0F ${this._restaurantName}`
-                : "\uD83C\uDF7D\uFE0F Wine List"}
+                : "\uD83C\uDF7D\uFE0F Scanned List"}
             </span>
             <button class="close-btn" @click=${this._close}>\u2715</button>
           </div>
@@ -5461,7 +5802,7 @@ let WineListDialog = class WineListDialog extends i {
                 : A}
                 ${this._wines.length > 0
                 ? b `<div class="header-subtitle">${this._wines.length} wines already scanned. Take another photo to add more.</div>`
-                : b `<div class="header-subtitle">Take a photo of a restaurant wine list to see ratings, scores, and value.</div>`}
+                : b `<div class="header-subtitle">Take a photo of a wine list or receipt to see ratings, scores, and value.</div>`}
                 <div style="padding: 0 16px 16px">
                   <label-camera .active=${this._phase === "capture"} @photo-captured=${this._onPhotoCaptured}></label-camera>
                 </div>
@@ -5481,8 +5822,8 @@ let WineListDialog = class WineListDialog extends i {
             ? b `
                 <div class="extracting">
                   <div class="spinner"></div>
-                  <div>Analyzing wine list...</div>
-                  <div style="font-size:0.85em">Gemini is reading the menu</div>
+                  <div>Analyzing list...</div>
+                  <div style="font-size:0.85em">Gemini is reading the image</div>
                 </div>
               `
             : A}
@@ -5968,6 +6309,14 @@ let WineCellarCard = class WineCellarCard extends i {
         this._depthPanelCol = null;
         this._depthPanelWines = [];
         this._depthPanelMaxDepth = 1;
+        // Zone side panel (boxes, bulk bins, horizontal racks)
+        this._zonePanelOpen = false;
+        this._zonePanelCabinet = null;
+        this._zonePanelZone = "";
+        this._zonePanelType = "bulk";
+        this._zonePanelCapacity = 20;
+        this._zonePanelName = "";
+        this._zonePanelWines = [];
     }
     setConfig(config) {
         this._config = config;
@@ -6013,6 +6362,8 @@ let WineCellarCard = class WineCellarCard extends i {
             }
             // Refresh depth panel if open
             this._refreshDepthPanel();
+            // Refresh zone panel if open
+            this._refreshZonePanel();
         }
         catch (err) {
             console.error("Wine Cellar: Failed to load data", err);
@@ -6140,6 +6491,76 @@ let WineCellarCard = class WineCellarCard extends i {
             this._addPreselect = { cabinet: cabinet.id, row: null, col: null, zone: zone || "bottom", depth: 0 };
             this._showAddDialog = true;
         }
+    }
+    // --- Zone side panel (boxes, bulk bins, horizontal racks) ---
+    _onZoneContainerClick(e) {
+        const { cabinet, zone, storageRow } = e.detail;
+        // If moving wine, drop it in this zone instead of opening panel
+        if (this._movingWine) {
+            this._executeMoveWine(cabinet.id, null, null, zone);
+            return;
+        }
+        if (this._movingBuyListItem) {
+            this._executeMoveTocellar(cabinet.id, null, null, zone);
+            return;
+        }
+        this._openZonePanel(cabinet, zone, storageRow);
+    }
+    _openZonePanel(cabinet, zone, storageRow) {
+        this._zonePanelCabinet = cabinet;
+        this._zonePanelZone = zone;
+        this._zonePanelType = storageRow.type || "bulk";
+        this._zonePanelCapacity = storageRow.capacity || 20;
+        this._zonePanelName = storageRow.name || "Storage";
+        this._zonePanelWines = this._wines
+            .filter((w) => w.cabinet_id === cabinet.id && w.zone === zone)
+            .sort((a, b) => (a.depth || 0) - (b.depth || 0));
+        this._zonePanelOpen = true;
+    }
+    _closeZonePanel() {
+        this._zonePanelOpen = false;
+    }
+    _refreshZonePanel() {
+        if (!this._zonePanelOpen || !this._zonePanelCabinet)
+            return;
+        this._zonePanelWines = this._wines
+            .filter((w) => w.cabinet_id === this._zonePanelCabinet.id && w.zone === this._zonePanelZone)
+            .sort((a, b) => (a.depth || 0) - (b.depth || 0));
+    }
+    _onZonePanelSlotClick(slotIndex, wine) {
+        if (wine) {
+            this._selectedWine = wine;
+            this._detailMode = "cellar";
+            this._showDetail = true;
+        }
+        else {
+            this._addPreselect = {
+                cabinet: this._zonePanelCabinet.id,
+                row: null,
+                col: null,
+                zone: this._zonePanelZone,
+                depth: slotIndex,
+            };
+            this._showAddDialog = true;
+        }
+    }
+    _onZonePanelBulkAdd() {
+        const nextDepth = this._zonePanelWines.length;
+        this._addPreselect = {
+            cabinet: this._zonePanelCabinet.id,
+            row: null,
+            col: null,
+            zone: this._zonePanelZone,
+            depth: nextDepth,
+        };
+        this._showAddDialog = true;
+    }
+    _getZoneSlotLabel(type, index) {
+        if (type === "horizontal") {
+            const labels = ["Top", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"];
+            return labels[index] || `${index + 1}th`;
+        }
+        return `Slot ${index + 1}`;
     }
     async _executeMoveWine(cabinetId, row, col, zone, depth = 0) {
         if (!this._movingWine)
@@ -6410,18 +6831,11 @@ let WineCellarCard = class WineCellarCard extends i {
                 class="btn btn-primary"
                 style="font-size: 0.8em; padding: 5px 10px; background: #00695c;"
                 @click=${() => (this._showWineList = true)}
-                title="Scan a restaurant wine list for ratings and value"
+                title="Scan a wine list or receipt for ratings and value"
               >
-                🍽️ Scan Wine List
+                🍽️ Scan List
               </button>
             ` : A}
-            <button
-              class="btn btn-primary"
-              style="background: #e65100;"
-              @click=${() => { this._addToBuyListMode = true; this._showAddDialog = true; }}
-            >
-              + Buy List
-            </button>
             <button
               class="btn btn-primary"
               @click=${() => {
@@ -6541,6 +6955,7 @@ let WineCellarCard = class WineCellarCard extends i {
                           .wines=${this._getCabinetWines(cab.id)}
                           @cell-click=${this._onCellClick}
                           @zone-click=${this._onZoneClick}
+                          @zone-container-click=${this._onZoneContainerClick}
                           @wine-drop=${this._onWineDrop}
                           @wine-longpress=${(e) => {
                     this._movingWine = e.detail.wine;
@@ -6556,6 +6971,7 @@ let WineCellarCard = class WineCellarCard extends i {
                             .wines=${this._getCabinetWines(cab.id)}
                             @cell-click=${this._onCellClick}
                             @zone-click=${this._onZoneClick}
+                            @zone-container-click=${this._onZoneContainerClick}
                           ></cabinet-grid>
                         `)}
               </div>
@@ -6800,6 +7216,104 @@ let WineCellarCard = class WineCellarCard extends i {
                       </div>
                     `;
             })}
+                </div>
+              </div>
+            `
+            : A}
+
+        <!-- Zone Side Panel (Boxes, Bulk Bins, Horizontal Racks) -->
+        ${this._zonePanelOpen
+            ? b `
+              <div class="depth-panel-backdrop" @click=${this._closeZonePanel}></div>
+              <div class="depth-panel open">
+                <div class="depth-panel-header">
+                  <span class="depth-panel-title">
+                    ${this._zonePanelName}
+                    <span class="depth-panel-subtitle">
+                      ${this._zonePanelWines.length}/${this._zonePanelCapacity}
+                      ${this._zonePanelType === "box" ? "bottles" : this._zonePanelType === "horizontal" ? "positions" : "stored"}
+                    </span>
+                  </span>
+                  <button class="depth-panel-close" @click=${this._closeZonePanel}>✕</button>
+                </div>
+                <div class="depth-panel-slots">
+                  ${this._zonePanelType === "bulk"
+                ? b `
+                        <!-- Bulk mode: scrollable wine list + add button -->
+                        ${this._zonePanelWines.map((wine) => {
+                    const typeColor = WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red;
+                    return b `
+                            <div
+                              class="depth-slot filled"
+                              @click=${() => this._onZonePanelSlotClick(0, wine)}
+                            >
+                              <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
+                                ${wine.image_url
+                        ? b `<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
+                        : b `<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                <div class="depth-slot-info">
+                                  <div class="depth-slot-name">${wine.name}</div>
+                                  <div class="depth-slot-meta">
+                                    ${wine.vintage || "NV"}
+                                    ${wine.rating ? b ` · ★${wine.rating}` : A}
+                                    ${wine.price ? b ` · $${wine.price}` : A}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          `;
+                })}
+                        ${this._zonePanelWines.length < this._zonePanelCapacity
+                    ? b `
+                              <div
+                                class="depth-slot empty"
+                                @click=${this._onZonePanelBulkAdd}
+                              >
+                                <div class="depth-slot-empty">
+                                  <span class="depth-slot-plus">+</span>
+                                  <span>Add Wine</span>
+                                </div>
+                              </div>
+                            `
+                    : A}
+                      `
+                : b `
+                        <!-- Box / Horizontal mode: fixed numbered slots -->
+                        ${Array.from({ length: this._zonePanelCapacity }, (_, i) => {
+                    const wine = this._zonePanelWines.find((w) => (w.depth || 0) === i);
+                    const typeColor = wine ? WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red : "";
+                    return b `
+                            <div
+                              class="depth-slot ${wine ? "filled" : "empty"}"
+                              @click=${() => this._onZonePanelSlotClick(i, wine)}
+                            >
+                              <div class="depth-slot-label">${this._getZoneSlotLabel(this._zonePanelType, i)}</div>
+                              ${wine
+                        ? b `
+                                    <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
+                                      ${wine.image_url
+                            ? b `<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
+                            : b `<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                      <div class="depth-slot-info">
+                                        <div class="depth-slot-name">${wine.name}</div>
+                                        <div class="depth-slot-meta">
+                                          ${wine.vintage || "NV"}
+                                          ${wine.rating ? b ` · ★${wine.rating}` : A}
+                                          ${wine.price ? b ` · $${wine.price}` : A}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  `
+                        : b `
+                                    <div class="depth-slot-empty">
+                                      <span class="depth-slot-plus">+</span>
+                                      <span>Empty</span>
+                                    </div>
+                                  `}
+                            </div>
+                          `;
+                })}
+                      `}
                 </div>
               </div>
             `
@@ -7201,6 +7715,27 @@ __decorate([
 __decorate([
     r()
 ], WineCellarCard.prototype, "_depthPanelMaxDepth", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_zonePanelOpen", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_zonePanelCabinet", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_zonePanelZone", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_zonePanelType", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_zonePanelCapacity", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_zonePanelName", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_zonePanelWines", void 0);
 WineCellarCard = __decorate([
     t("wine-cellar-card")
 ], WineCellarCard);

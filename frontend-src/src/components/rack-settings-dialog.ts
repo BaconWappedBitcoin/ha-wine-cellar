@@ -1,6 +1,6 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { Cabinet, Wine, StorageRow } from "../models";
+import { Cabinet, Wine, StorageRow, StorageRowType, STORAGE_ROW_TYPE_LABELS, BOX_SIZES } from "../models";
 import { sharedStyles } from "../styles";
 
 type Mode = "list" | "add" | "edit" | "delete-confirm";
@@ -312,14 +312,74 @@ export class RackSettingsDialog extends LitElement {
         font-size: 0.85em;
       }
 
-      .row-entry .row-type {
-        flex: 1;
-        font-size: 0.85em;
+      .row-type-select {
+        padding: 2px 4px;
+        border: 1px solid var(--wc-border);
+        border-radius: 4px;
+        font-size: 0.8em;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        cursor: pointer;
       }
 
-      .row-entry .row-type.is-storage {
-        color: #8b6914;
+      .row-name-input {
+        width: 80px;
+        padding: 2px 6px;
+        border: 1px solid var(--wc-border);
+        border-radius: 4px;
+        font-size: 0.8em;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        flex-shrink: 1;
+        min-width: 60px;
+      }
+
+      .row-cap-select {
+        padding: 2px 4px;
+        border: 1px solid var(--wc-border);
+        border-radius: 4px;
+        font-size: 0.8em;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        cursor: pointer;
+      }
+
+      .row-cap-stepper {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+      }
+
+      .stepper-btn-sm {
+        width: 20px;
+        height: 20px;
+        border: 1px solid var(--wc-border);
+        border-radius: 4px;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        cursor: pointer;
+        font-size: 0.8em;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+      }
+
+      .stepper-btn-sm:hover {
+        background: var(--wc-hover);
+      }
+
+      .stepper-val-sm {
+        font-size: 0.8em;
         font-weight: 600;
+        min-width: 22px;
+        text-align: center;
+      }
+
+      .row-type-info {
+        flex: 1;
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
       }
 
       .row-entry input[type="text"] {
@@ -330,27 +390,6 @@ export class RackSettingsDialog extends LitElement {
         font-size: 0.85em;
         background: var(--wc-bg);
         color: var(--wc-text);
-      }
-
-      .row-entry .toggle-btn {
-        background: transparent;
-        border: 1px solid var(--wc-border);
-        border-radius: 4px;
-        padding: 2px 8px;
-        font-size: 0.75em;
-        cursor: pointer;
-        color: var(--wc-text-secondary);
-        transition: all 0.15s;
-        white-space: nowrap;
-      }
-
-      .row-entry .toggle-btn:hover {
-        background: var(--wc-hover);
-      }
-
-      .row-entry.storage .toggle-btn {
-        color: #8b6914;
-        border-color: rgba(139, 105, 20, 0.4);
       }
 
       .row-controls {
@@ -459,12 +498,23 @@ export class RackSettingsDialog extends LitElement {
     this._deleteCabinet = cabinet;
   }
 
-  private _toggleStorageRow(row: number) {
-    const existing = this._editStorageRows.find((sr) => sr.row === row);
-    if (existing) {
+  private _setRowType(row: number, type: "slots" | StorageRowType) {
+    if (type === "slots") {
+      // Remove from storage rows
       this._editStorageRows = this._editStorageRows.filter((sr) => sr.row !== row);
     } else {
-      this._editStorageRows = [...this._editStorageRows, { row, name: "Storage" }];
+      const existing = this._editStorageRows.find((sr) => sr.row === row);
+      const defaultCapacity = type === "box" ? 12 : type === "horizontal" ? 10 : 20;
+      if (existing) {
+        this._editStorageRows = this._editStorageRows.map((sr) =>
+          sr.row === row ? { ...sr, type, capacity: defaultCapacity } : sr
+        );
+      } else {
+        this._editStorageRows = [
+          ...this._editStorageRows,
+          { row, name: STORAGE_ROW_TYPE_LABELS[type], type, capacity: defaultCapacity },
+        ];
+      }
     }
   }
 
@@ -474,8 +524,18 @@ export class RackSettingsDialog extends LitElement {
     );
   }
 
+  private _updateStorageRowCapacity(row: number, capacity: number) {
+    this._editStorageRows = this._editStorageRows.map((sr) =>
+      sr.row === row ? { ...sr, capacity } : sr
+    );
+  }
+
   private _isStorageRow(row: number): boolean {
     return this._editStorageRows.some((sr) => sr.row === row);
+  }
+
+  private _getStorageRow(row: number): StorageRow | undefined {
+    return this._editStorageRows.find((sr) => sr.row === row);
   }
 
   private _addRow() {
@@ -773,11 +833,13 @@ export class RackSettingsDialog extends LitElement {
           <div class="grid-preview">
             ${Array.from({ length: numRows }, (_, row) => {
               const isStorage = this._isStorageRow(row);
+              const sr = this._getStorageRow(row);
+              const typeIcon = sr?.type === "box" ? "📦" : sr?.type === "horizontal" ? "🔲" : "◇";
               return html`
                 <div class="grid-preview-row ${isStorage ? "storage" : ""}">
                   <span class="grid-preview-label">R${row + 1}</span>
                   ${isStorage
-                    ? html`<div class="grid-preview-cell"></div><span class="grid-preview-storage-label">${this._editStorageRows.find(s => s.row === row)?.name || "Storage"}</span>`
+                    ? html`<div class="grid-preview-cell"></div><span class="grid-preview-storage-label">${typeIcon} ${sr?.name || "Storage"}</span>`
                     : Array.from({ length: Math.min(numCols, 15) }, () =>
                         html`<div class="grid-preview-cell"></div>`
                       )}
@@ -789,35 +851,59 @@ export class RackSettingsDialog extends LitElement {
             })}
           </div>
 
-          <!-- Row list with storage toggles -->
+          <!-- Row list with type selectors -->
           <div class="row-list">
             ${Array.from({ length: numRows }, (_, row) => {
               const isStorage = this._isStorageRow(row);
-              const sr = this._editStorageRows.find((s) => s.row === row);
+              const sr = this._getStorageRow(row);
+              const currentType = sr?.type || "slots";
               return html`
                 <div class="row-entry ${isStorage ? "storage" : ""}">
                   <span class="row-num">R${row + 1}</span>
-                  <span class="row-type ${isStorage ? "is-storage" : ""}">
-                    ${isStorage ? "Storage" : `${numCols} slots${numDepth > 1 ? ` × ${numDepth} deep` : ""}`}
-                  </span>
+                  <select
+                    class="row-type-select"
+                    @change=${(e: Event) => {
+                      const val = (e.target as HTMLSelectElement).value;
+                      this._setRowType(row, val as "slots" | StorageRowType);
+                    }}
+                    @click=${(e: Event) => e.stopPropagation()}
+                  >
+                    <option value="slots" ?selected=${!isStorage}>Slots</option>
+                    <option value="bulk" ?selected=${currentType === "bulk"}>Bulk Bin</option>
+                    <option value="box" ?selected=${currentType === "box"}>Wine Box</option>
+                    <option value="horizontal" ?selected=${currentType === "horizontal"}>Horizontal</option>
+                  </select>
                   ${isStorage
                     ? html`
                         <input
                           type="text"
+                          class="row-name-input"
                           .value=${sr?.name || "Storage"}
                           @input=${(e: InputEvent) =>
                             this._updateStorageRowName(row, (e.target as HTMLInputElement).value)}
                           @click=${(e: Event) => e.stopPropagation()}
                           placeholder="Zone name"
                         />
+                        ${sr?.type === "box"
+                          ? html`
+                              <select
+                                class="row-cap-select"
+                                @change=${(e: Event) =>
+                                  this._updateStorageRowCapacity(row, parseInt((e.target as HTMLSelectElement).value))}
+                                @click=${(e: Event) => e.stopPropagation()}
+                              >
+                                ${BOX_SIZES.map((s) => html`<option value=${s} ?selected=${(sr?.capacity || 12) === s}>${s}-pack</option>`)}
+                              </select>
+                            `
+                          : html`
+                              <div class="row-cap-stepper">
+                                <button class="stepper-btn-sm" @click=${(e: Event) => { e.stopPropagation(); this._updateStorageRowCapacity(row, Math.max(1, (sr?.capacity || 20) - 1)); }}>−</button>
+                                <span class="stepper-val-sm">${sr?.capacity || 20}</span>
+                                <button class="stepper-btn-sm" @click=${(e: Event) => { e.stopPropagation(); this._updateStorageRowCapacity(row, Math.min(100, (sr?.capacity || 20) + 1)); }}>+</button>
+                              </div>
+                            `}
                       `
-                    : nothing}
-                  <button
-                    class="toggle-btn"
-                    @click=${() => this._toggleStorageRow(row)}
-                  >
-                    ${isStorage ? "→ Slots" : "→ Storage"}
-                  </button>
+                    : html`<span class="row-type-info">${numCols} slots${numDepth > 1 ? ` × ${numDepth} deep` : ""}</span>`}
                 </div>
               `;
             })}

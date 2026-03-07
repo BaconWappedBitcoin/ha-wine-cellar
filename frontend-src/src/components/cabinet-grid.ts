@@ -216,6 +216,30 @@ export class CabinetGrid extends LitElement {
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
       }
 
+      .depth-dots {
+        position: absolute;
+        bottom: 16%;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 3px;
+        z-index: 3;
+        pointer-events: none;
+      }
+
+      .depth-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        border: 1.5px solid rgba(255, 255, 255, 0.6);
+        box-shadow: 0 0 3px rgba(0, 0, 0, 0.6);
+      }
+
+      .depth-dot.empty {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.25);
+      }
+
       .bottom-zone {
         margin-top: 8px;
         background: linear-gradient(135deg, #6b5010 0%, #8b6914 100%);
@@ -288,6 +312,42 @@ export class CabinetGrid extends LitElement {
         background: rgba(66, 165, 245, 0.1);
       }
 
+      .zone-count {
+        font-weight: 400;
+        opacity: 0.7;
+        margin-left: 4px;
+      }
+
+      .zone-fill-dots {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        align-items: center;
+      }
+
+      .zone-fill-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        border: 1.5px solid rgba(255, 255, 255, 0.4);
+        box-shadow: 0 0 2px rgba(0, 0, 0, 0.4);
+      }
+
+      .zone-fill-dot.empty {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.2);
+      }
+
+      .zone-box-row,
+      .zone-horiz-row {
+        cursor: pointer;
+      }
+
+      .zone-box-row:hover,
+      .zone-horiz-row:hover {
+        background: linear-gradient(135deg, #7a5a12 0%, #9a7820 100%);
+      }
+
       /* Phone: tighter spacing, smaller elements */
       @media (max-width: 599px) {
         .cabinet {
@@ -356,10 +416,13 @@ export class CabinetGrid extends LitElement {
     return new Set((rows || []).map((sr) => sr.row));
   }
 
-  private _getStorageRowName(row: number): string {
+  private _getStorageRowConfig(row: number): StorageRow | undefined {
     const rows = (this.cabinet as any).storage_rows as StorageRow[] | undefined;
-    const sr = (rows || []).find((s) => s.row === row);
-    return sr?.name || "Storage";
+    return (rows || []).find((s) => s.row === row);
+  }
+
+  private _getStorageRowName(row: number): string {
+    return this._getStorageRowConfig(row)?.name || "Storage";
   }
 
   private _getBottomZoneWines(): Wine[] {
@@ -399,6 +462,20 @@ export class CabinetGrid extends LitElement {
           cabinet: this.cabinet,
           zone,
           wine,
+        },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  private _onZoneContainerClick(zone: string, storageRow: StorageRow) {
+    this.dispatchEvent(
+      new CustomEvent("zone-container-click", {
+        detail: {
+          cabinet: this.cabinet,
+          zone,
+          storageRow,
         },
         bubbles: true,
         composed: true,
@@ -502,18 +579,33 @@ export class CabinetGrid extends LitElement {
   }
 
   private _renderStorageZone(row: number) {
-    const zoneName = this._getStorageRowName(row);
+    const sr = this._getStorageRowConfig(row);
+    const zoneName = sr?.name || "Storage";
+    const zoneType = sr?.type || "bulk";
+    const capacity = sr?.capacity || 20;
     const zoneId = `storage-${row}`;
     const wines = this._getStorageRowWines(row);
     const zoneKey = `zone-${zoneId}`;
     const isDragOver = this._dragOverCell === zoneKey;
+
+    if (zoneType === "box") {
+      return this._renderBoxZone(zoneId, zoneKey, zoneName, capacity, wines, isDragOver, sr!);
+    }
+    if (zoneType === "horizontal") {
+      return this._renderHorizontalZone(zoneId, zoneKey, zoneName, capacity, wines, isDragOver, sr!);
+    }
+    // Default: bulk
+    return this._renderBulkZone(zoneId, zoneKey, zoneName, capacity, wines, isDragOver, sr!);
+  }
+
+  private _renderBulkZone(zoneId: string, zoneKey: string, name: string, capacity: number, wines: Wine[], isDragOver: boolean, sr: StorageRow) {
     return html`
       <div class="bottom-zone ${isDragOver ? "drag-over" : ""}"
-        @click=${() => this._onZoneClick(undefined, zoneId)}
+        @click=${() => sr ? this._onZoneContainerClick(zoneId, sr) : this._onZoneClick(undefined, zoneId)}
         @dragover=${(e: DragEvent) => this._onDragOver(e, zoneKey)}
         @dragleave=${(e: DragEvent) => this._onDragLeave(e)}
         @drop=${(e: DragEvent) => this._onDrop(e, undefined, undefined, zoneId)}>
-        <div class="bottom-zone-label">${zoneName}</div>
+        <div class="bottom-zone-label">◇ ${name} <span class="zone-count">${wines.length}/${capacity}</span></div>
         ${wines.map(
           (wine) => html`
             <div
@@ -532,6 +624,44 @@ export class CabinetGrid extends LitElement {
             </div>
           `
         )}
+      </div>
+    `;
+  }
+
+  private _renderBoxZone(zoneId: string, zoneKey: string, name: string, capacity: number, wines: Wine[], isDragOver: boolean, sr: StorageRow) {
+    return html`
+      <div class="bottom-zone zone-box-row ${isDragOver ? "drag-over" : ""}"
+        @click=${() => this._onZoneContainerClick(zoneId, sr)}
+        @dragover=${(e: DragEvent) => this._onDragOver(e, zoneKey)}
+        @dragleave=${(e: DragEvent) => this._onDragLeave(e)}
+        @drop=${(e: DragEvent) => this._onDrop(e, undefined, undefined, zoneId)}>
+        <div class="bottom-zone-label">📦 ${name} <span class="zone-count">${wines.length}/${capacity}</span></div>
+        <div class="zone-fill-dots">
+          ${Array.from({ length: capacity }, (_, i) => {
+            const wine = wines.find((w) => (w.depth || 0) === i);
+            const color = wine ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red : "";
+            return html`<span class="zone-fill-dot ${wine ? "filled" : "empty"}" style=${wine ? `background: ${color}` : ""}></span>`;
+          })}
+        </div>
+      </div>
+    `;
+  }
+
+  private _renderHorizontalZone(zoneId: string, zoneKey: string, name: string, capacity: number, wines: Wine[], isDragOver: boolean, sr: StorageRow) {
+    return html`
+      <div class="bottom-zone zone-horiz-row ${isDragOver ? "drag-over" : ""}"
+        @click=${() => this._onZoneContainerClick(zoneId, sr)}
+        @dragover=${(e: DragEvent) => this._onDragOver(e, zoneKey)}
+        @dragleave=${(e: DragEvent) => this._onDragLeave(e)}
+        @drop=${(e: DragEvent) => this._onDrop(e, undefined, undefined, zoneId)}>
+        <div class="bottom-zone-label">🔲 ${name} <span class="zone-count">${wines.length}/${capacity}</span></div>
+        <div class="zone-fill-dots">
+          ${Array.from({ length: capacity }, (_, i) => {
+            const wine = wines.find((w) => (w.depth || 0) === i);
+            const color = wine ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red : "";
+            return html`<span class="zone-fill-dot ${wine ? "filled" : "empty"}" style=${wine ? `background: ${color}` : ""}></span>`;
+          })}
+        </div>
       </div>
     `;
   }
@@ -580,8 +710,32 @@ export class CabinetGrid extends LitElement {
                     ${dispClass ? html`<span class="disposition ${dispClass}">${disp}</span>` : nothing}
                     ${ratingDisplay ? html`<span class="rating-badge">★${ratingDisplay}</span>` : nothing}
                     ${wineCount > 1 ? html`<span class="depth-badge">${wineCount}</span>` : nothing}
+                    ${cabinetDepth >= 2
+                      ? html`
+                          <span class="depth-dots">
+                            ${Array.from({ length: cabinetDepth }, (_, d) => {
+                              const wineAtDepth = wines.find((w) => (w.depth || 0) === d);
+                              const dotColor = wineAtDepth
+                                ? WINE_TYPE_COLORS[wineAtDepth.type as WineType] || WINE_TYPE_COLORS.red
+                                : "";
+                              return html`<span
+                                class="depth-dot ${wineAtDepth ? "" : "empty"}"
+                                style=${wineAtDepth ? `background: ${dotColor}` : ""}
+                              ></span>`;
+                            })}
+                          </span>
+                        `
+                      : nothing}
                   `
-                : nothing}
+                : cabinetDepth >= 2 && wineCount === 0
+                  ? html`
+                      <span class="depth-dots">
+                        ${Array.from({ length: cabinetDepth }, () =>
+                          html`<span class="depth-dot empty"></span>`
+                        )}
+                      </span>
+                    `
+                  : nothing}
             </div>
           `;
         })}

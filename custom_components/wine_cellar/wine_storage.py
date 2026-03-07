@@ -68,6 +68,12 @@ class WineCellarStorage:
                     cab["storage_rows"] = []
                 if "depth" not in cab:
                     cab["depth"] = 1
+                # Migrate storage rows to include type and capacity
+                for sr in cab.get("storage_rows", []):
+                    if "type" not in sr:
+                        sr["type"] = "bulk"
+                    if "capacity" not in sr:
+                        sr["capacity"] = 20
             # Ensure all wines have retail_price and depth fields
             for wine in self._data.get(CONF_WINES, []):
                 if "retail_price" not in wine:

@@ -778,10 +778,10 @@ export class WineListDialog extends LitElement {
           <div class="header">
             <span class="header-title">
               ${this._phase === "capture"
-                ? "\uD83C\uDF7D\uFE0F Scan Wine List"
+                ? "\uD83C\uDF7D\uFE0F Scan List"
                 : this._restaurantName
                   ? `\uD83C\uDF7D\uFE0F ${this._restaurantName}`
-                  : "\uD83C\uDF7D\uFE0F Wine List"}
+                  : "\uD83C\uDF7D\uFE0F Scanned List"}
             </span>
             <button class="close-btn" @click=${this._close}>\u2715</button>
           </div>
@@ -793,7 +793,7 @@ export class WineListDialog extends LitElement {
                   : nothing}
                 ${this._wines.length > 0
                   ? html`<div class="header-subtitle">${this._wines.length} wines already scanned. Take another photo to add more.</div>`
-                  : html`<div class="header-subtitle">Take a photo of a restaurant wine list to see ratings, scores, and value.</div>`}
+                  : html`<div class="header-subtitle">Take a photo of a wine list or receipt to see ratings, scores, and value.</div>`}
                 <div style="padding: 0 16px 16px">
                   <label-camera .active=${this._phase === "capture"} @photo-captured=${this._onPhotoCaptured}></label-camera>
                 </div>
@@ -813,8 +813,8 @@ export class WineListDialog extends LitElement {
             ? html`
                 <div class="extracting">
                   <div class="spinner"></div>
-                  <div>Analyzing wine list...</div>
-                  <div style="font-size:0.85em">Gemini is reading the menu</div>
+                  <div>Analyzing list...</div>
+                  <div style="font-size:0.85em">Gemini is reading the image</div>
                 </div>
               `
             : nothing}

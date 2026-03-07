@@ -37,6 +37,7 @@ export class AddWineDialog extends LitElement {
   @state() private _error = "";
   @state() private _hasGemini = false;
   @state() private _labelLoading = false;
+  @state() private _searchResults: BarcodeLookupResult[] = [];
 
   static styles = [
     sharedStyles,
@@ -317,6 +318,77 @@ export class AddWineDialog extends LitElement {
         color: var(--wc-text-secondary);
         margin-bottom: 6px;
       }
+
+      .search-results {
+        margin-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: 280px;
+        overflow-y: auto;
+      }
+
+      .search-results-label {
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+        margin-bottom: 2px;
+      }
+
+      .search-result-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border: 1px solid var(--wc-border);
+        border-radius: 10px;
+        cursor: pointer;
+        transition: all 0.15s;
+        background: transparent;
+        text-align: left;
+        color: var(--wc-text);
+        width: 100%;
+        box-sizing: border-box;
+      }
+
+      .search-result-item:hover {
+        border-color: var(--wc-primary);
+        background: var(--wc-hover);
+      }
+
+      .search-result-thumb {
+        width: 36px;
+        height: 48px;
+        border-radius: 4px;
+        object-fit: cover;
+        flex-shrink: 0;
+        background: rgba(128, 128, 128, 0.1);
+      }
+
+      .search-result-info {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .search-result-name {
+        font-weight: 600;
+        font-size: 0.9em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .search-result-meta {
+        font-size: 0.78em;
+        color: var(--wc-text-secondary);
+        margin-top: 2px;
+      }
+
+      .search-result-rating {
+        font-size: 0.8em;
+        font-weight: 600;
+        color: #f5a623;
+        flex-shrink: 0;
+      }
     `,
   ];
 
@@ -357,6 +429,7 @@ export class AddWineDialog extends LitElement {
         this._error = "";
         this._loading = false;
         this._labelLoading = false;
+        this._searchResults = [];
         this._wineData = {
           name: "",
           winery: "",
@@ -451,6 +524,7 @@ export class AddWineDialog extends LitElement {
 
     this._loading = true;
     this._error = "";
+    this._searchResults = [];
 
     try {
       const result = await this.hass.callWS({
@@ -459,25 +533,7 @@ export class AddWineDialog extends LitElement {
       });
 
       if (result.results && result.results.length > 0) {
-        const first = result.results[0];
-        this._lookupResult = first;
-        this._wineData = {
-          ...this._wineData,
-          name: first.name || "",
-          winery: first.winery || "",
-          type: first.type || "red",
-          vintage: first.vintage,
-          region: first.region || "",
-          country: first.country || "",
-          grape_variety: first.grape_variety || "",
-          rating: first.rating,
-          ratings_count: first.ratings_count || null,
-          image_url: first.image_url || "",
-          description: first.description || "",
-          food_pairings: first.food_pairings || "",
-          alcohol: first.alcohol || "",
-        };
-        this._step = "details";
+        this._searchResults = result.results;
       } else {
         this._error = "No results found. You can enter details manually.";
       }
@@ -486,6 +542,28 @@ export class AddWineDialog extends LitElement {
     }
 
     this._loading = false;
+  }
+
+  private _selectSearchResult(item: BarcodeLookupResult) {
+    this._lookupResult = item;
+    this._wineData = {
+      ...this._wineData,
+      name: item.name || "",
+      winery: item.winery || "",
+      type: item.type || "red",
+      vintage: item.vintage,
+      region: item.region || "",
+      country: item.country || "",
+      grape_variety: item.grape_variety || "",
+      rating: item.rating,
+      ratings_count: item.ratings_count || null,
+      image_url: item.image_url || "",
+      description: item.description || "",
+      food_pairings: item.food_pairings || "",
+      alcohol: item.alcohol || "",
+    };
+    this._searchResults = [];
+    this._step = "details";
   }
 
   private _onBarcodeDetected(e: CustomEvent) {
@@ -736,9 +814,42 @@ export class AddWineDialog extends LitElement {
               e.key === "Enter" && this._searchWine()}
           />
           <button class="btn btn-outline" @click=${this._searchWine}>
-            Search
+            ${this._loading
+              ? html`<span class="loading-spinner"></span>`
+              : "Search"}
           </button>
         </div>
+
+        ${this._searchResults.length > 0
+          ? html`
+              <div class="search-results">
+                <div class="search-results-label">
+                  ${this._searchResults.length} result${this._searchResults.length > 1 ? "s" : ""} — tap to select
+                </div>
+                ${this._searchResults.map(
+                  (item) => html`
+                    <button
+                      class="search-result-item"
+                      @click=${() => this._selectSearchResult(item)}
+                    >
+                      ${item.image_url
+                        ? html`<img class="search-result-thumb" src="${item.image_url}" alt="" />`
+                        : html`<div class="search-result-thumb" style="display:flex;align-items:center;justify-content:center;font-size:1.2em;">🍷</div>`}
+                      <div class="search-result-info">
+                        <div class="search-result-name">${item.name || "Unknown"}</div>
+                        <div class="search-result-meta">
+                          ${item.winery || ""}${item.vintage ? ` · ${item.vintage}` : ""}${item.region ? ` · ${item.region}` : ""}
+                        </div>
+                      </div>
+                      ${item.rating
+                        ? html`<span class="search-result-rating">★ ${item.rating.toFixed(1)}</span>`
+                        : nothing}
+                    </button>
+                  `
+                )}
+              </div>
+            `
+          : nothing}
 
         ${this._error
           ? html`<div class="error-msg">${this._error}</div>`

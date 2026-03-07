@@ -1,7 +1,7 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { sharedStyles } from "./styles";
-import { Wine, Cabinet, CellarStats, WINE_TYPE_COLORS, WineType } from "./models";
+import { Wine, Cabinet, CellarStats, WINE_TYPE_COLORS, WineType, StorageRow, StorageRowType } from "./models";
 
 import "./components/cabinet-grid";
 import "./components/wine-detail-dialog";
@@ -51,6 +51,15 @@ export class WineCellarCard extends LitElement {
   @state() private _depthPanelCol: number | null = null;
   @state() private _depthPanelWines: Wine[] = [];
   @state() private _depthPanelMaxDepth = 1;
+
+  // Zone side panel (boxes, bulk bins, horizontal racks)
+  @state() private _zonePanelOpen = false;
+  @state() private _zonePanelCabinet: Cabinet | null = null;
+  @state() private _zonePanelZone = "";
+  @state() private _zonePanelType: StorageRowType = "bulk";
+  @state() private _zonePanelCapacity = 20;
+  @state() private _zonePanelName = "";
+  @state() private _zonePanelWines: Wine[] = [];
 
   static styles = [
     sharedStyles,
@@ -403,6 +412,8 @@ export class WineCellarCard extends LitElement {
 
       // Refresh depth panel if open
       this._refreshDepthPanel();
+      // Refresh zone panel if open
+      this._refreshZonePanel();
     } catch (err) {
       console.error("Wine Cellar: Failed to load data", err);
     }
@@ -551,6 +562,83 @@ export class WineCellarCard extends LitElement {
       this._addPreselect = { cabinet: cabinet.id, row: null, col: null, zone: zone || "bottom", depth: 0 };
       this._showAddDialog = true;
     }
+  }
+
+  // --- Zone side panel (boxes, bulk bins, horizontal racks) ---
+  private _onZoneContainerClick(e: CustomEvent) {
+    const { cabinet, zone, storageRow } = e.detail;
+
+    // If moving wine, drop it in this zone instead of opening panel
+    if (this._movingWine) {
+      this._executeMoveWine(cabinet.id, null, null, zone);
+      return;
+    }
+    if (this._movingBuyListItem) {
+      this._executeMoveTocellar(cabinet.id, null, null, zone);
+      return;
+    }
+
+    this._openZonePanel(cabinet, zone, storageRow);
+  }
+
+  private _openZonePanel(cabinet: Cabinet, zone: string, storageRow: StorageRow) {
+    this._zonePanelCabinet = cabinet;
+    this._zonePanelZone = zone;
+    this._zonePanelType = storageRow.type || "bulk";
+    this._zonePanelCapacity = storageRow.capacity || 20;
+    this._zonePanelName = storageRow.name || "Storage";
+    this._zonePanelWines = this._wines
+      .filter((w) => w.cabinet_id === cabinet.id && w.zone === zone)
+      .sort((a, b) => (a.depth || 0) - (b.depth || 0));
+    this._zonePanelOpen = true;
+  }
+
+  private _closeZonePanel() {
+    this._zonePanelOpen = false;
+  }
+
+  private _refreshZonePanel() {
+    if (!this._zonePanelOpen || !this._zonePanelCabinet) return;
+    this._zonePanelWines = this._wines
+      .filter((w) => w.cabinet_id === this._zonePanelCabinet!.id && w.zone === this._zonePanelZone)
+      .sort((a, b) => (a.depth || 0) - (b.depth || 0));
+  }
+
+  private _onZonePanelSlotClick(slotIndex: number, wine?: Wine) {
+    if (wine) {
+      this._selectedWine = wine;
+      this._detailMode = "cellar";
+      this._showDetail = true;
+    } else {
+      this._addPreselect = {
+        cabinet: this._zonePanelCabinet!.id,
+        row: null,
+        col: null,
+        zone: this._zonePanelZone,
+        depth: slotIndex,
+      };
+      this._showAddDialog = true;
+    }
+  }
+
+  private _onZonePanelBulkAdd() {
+    const nextDepth = this._zonePanelWines.length;
+    this._addPreselect = {
+      cabinet: this._zonePanelCabinet!.id,
+      row: null,
+      col: null,
+      zone: this._zonePanelZone,
+      depth: nextDepth,
+    };
+    this._showAddDialog = true;
+  }
+
+  private _getZoneSlotLabel(type: StorageRowType, index: number): string {
+    if (type === "horizontal") {
+      const labels = ["Top", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"];
+      return labels[index] || `${index + 1}th`;
+    }
+    return `Slot ${index + 1}`;
   }
 
   private async _executeMoveWine(cabinetId: string, row: number | null, col: number | null, zone: string, depth = 0) {
@@ -828,18 +916,11 @@ export class WineCellarCard extends LitElement {
                 class="btn btn-primary"
                 style="font-size: 0.8em; padding: 5px 10px; background: #00695c;"
                 @click=${() => (this._showWineList = true)}
-                title="Scan a restaurant wine list for ratings and value"
+                title="Scan a wine list or receipt for ratings and value"
               >
-                🍽️ Scan Wine List
+                🍽️ Scan List
               </button>
             ` : nothing}
-            <button
-              class="btn btn-primary"
-              style="background: #e65100;"
-              @click=${() => { this._addToBuyListMode = true; this._showAddDialog = true; }}
-            >
-              + Buy List
-            </button>
             <button
               class="btn btn-primary"
               @click=${() => {
@@ -962,6 +1043,7 @@ export class WineCellarCard extends LitElement {
                           .wines=${this._getCabinetWines(cab.id)}
                           @cell-click=${this._onCellClick}
                           @zone-click=${this._onZoneClick}
+                          @zone-container-click=${this._onZoneContainerClick}
                           @wine-drop=${this._onWineDrop}
                           @wine-longpress=${(e: CustomEvent) => {
                             this._movingWine = e.detail.wine;
@@ -979,6 +1061,7 @@ export class WineCellarCard extends LitElement {
                             .wines=${this._getCabinetWines(cab.id)}
                             @cell-click=${this._onCellClick}
                             @zone-click=${this._onZoneClick}
+                            @zone-container-click=${this._onZoneContainerClick}
                           ></cabinet-grid>
                         `
                       )}
@@ -1232,6 +1315,104 @@ export class WineCellarCard extends LitElement {
                       </div>
                     `;
                   })}
+                </div>
+              </div>
+            `
+          : nothing}
+
+        <!-- Zone Side Panel (Boxes, Bulk Bins, Horizontal Racks) -->
+        ${this._zonePanelOpen
+          ? html`
+              <div class="depth-panel-backdrop" @click=${this._closeZonePanel}></div>
+              <div class="depth-panel open">
+                <div class="depth-panel-header">
+                  <span class="depth-panel-title">
+                    ${this._zonePanelName}
+                    <span class="depth-panel-subtitle">
+                      ${this._zonePanelWines.length}/${this._zonePanelCapacity}
+                      ${this._zonePanelType === "box" ? "bottles" : this._zonePanelType === "horizontal" ? "positions" : "stored"}
+                    </span>
+                  </span>
+                  <button class="depth-panel-close" @click=${this._closeZonePanel}>✕</button>
+                </div>
+                <div class="depth-panel-slots">
+                  ${this._zonePanelType === "bulk"
+                    ? html`
+                        <!-- Bulk mode: scrollable wine list + add button -->
+                        ${this._zonePanelWines.map((wine) => {
+                          const typeColor = WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red;
+                          return html`
+                            <div
+                              class="depth-slot filled"
+                              @click=${() => this._onZonePanelSlotClick(0, wine)}
+                            >
+                              <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
+                                ${wine.image_url
+                                  ? html`<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
+                                  : html`<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                <div class="depth-slot-info">
+                                  <div class="depth-slot-name">${wine.name}</div>
+                                  <div class="depth-slot-meta">
+                                    ${wine.vintage || "NV"}
+                                    ${wine.rating ? html` · ★${wine.rating}` : nothing}
+                                    ${wine.price ? html` · $${wine.price}` : nothing}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          `;
+                        })}
+                        ${this._zonePanelWines.length < this._zonePanelCapacity
+                          ? html`
+                              <div
+                                class="depth-slot empty"
+                                @click=${this._onZonePanelBulkAdd}
+                              >
+                                <div class="depth-slot-empty">
+                                  <span class="depth-slot-plus">+</span>
+                                  <span>Add Wine</span>
+                                </div>
+                              </div>
+                            `
+                          : nothing}
+                      `
+                    : html`
+                        <!-- Box / Horizontal mode: fixed numbered slots -->
+                        ${Array.from({ length: this._zonePanelCapacity }, (_, i) => {
+                          const wine = this._zonePanelWines.find((w) => (w.depth || 0) === i);
+                          const typeColor = wine ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red : "";
+                          return html`
+                            <div
+                              class="depth-slot ${wine ? "filled" : "empty"}"
+                              @click=${() => this._onZonePanelSlotClick(i, wine)}
+                            >
+                              <div class="depth-slot-label">${this._getZoneSlotLabel(this._zonePanelType, i)}</div>
+                              ${wine
+                                ? html`
+                                    <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
+                                      ${wine.image_url
+                                        ? html`<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
+                                        : html`<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                      <div class="depth-slot-info">
+                                        <div class="depth-slot-name">${wine.name}</div>
+                                        <div class="depth-slot-meta">
+                                          ${wine.vintage || "NV"}
+                                          ${wine.rating ? html` · ★${wine.rating}` : nothing}
+                                          ${wine.price ? html` · $${wine.price}` : nothing}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  `
+                                : html`
+                                    <div class="depth-slot-empty">
+                                      <span class="depth-slot-plus">+</span>
+                                      <span>Empty</span>
+                                    </div>
+                                  `}
+                            </div>
+                          `;
+                        })}
+                      `}
                 </div>
               </div>
             `
