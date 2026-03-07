@@ -829,8 +829,8 @@ export class InventoryDialog extends LitElement {
         this._syncSaveLabel = "";
       } else {
         this._statusMsg = `☁️ Saved — ${result?.wines ?? "?"} wines, ${result?.cabinets ?? "?"} racks`;
-        this._syncSaveLabel = "Saved!";
-        setTimeout(() => { this._syncSaveLabel = ""; }, 2000);
+        this._syncSaveLabel = "✅ Saved!";
+        setTimeout(() => { this._syncSaveLabel = ""; }, 4000);
       }
     } catch (err: any) {
       this._statusMsg = `Sync save failed: ${err.message || err}`;
@@ -1064,6 +1064,9 @@ export class InventoryDialog extends LitElement {
                 ? `${filteredWines.length} wines`
                 : `${filteredWines.length} of ${this.wines.length} wines`}
             </span>
+            ${this._statusMsg
+              ? html`<div class="inv-status">${this._statusMsg}</div>`
+              : nothing}
             <div class="inv-footer-btns">
               <button
                 class="inv-btn"
@@ -1113,9 +1116,6 @@ export class InventoryDialog extends LitElement {
                 📥 Export
               </button>
             </div>
-            ${this._statusMsg
-              ? html`<div class="inv-status">${this._statusMsg}</div>`
-              : nothing}
           </div>
 
           <!-- Hidden file inputs -->

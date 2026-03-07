@@ -62,9 +62,9 @@
     ];
 
     const mockCabinets = [
-      { id: "cabinet-1", name: "Section 1", type: "grid", rows: 10, cols: 9, depth: 1, has_bottom_zone: false, bottom_zone_name: "", storage_rows: [{ row: 9, name: "Bulk Bin", type: "bulk", capacity: 20 }], order: 0 },
-      { id: "cabinet-2", name: "Section 2", type: "grid", rows: 10, cols: 9, depth: 2, has_bottom_zone: false, bottom_zone_name: "", storage_rows: [{ row: 9, name: "Bordeaux Case", type: "box", capacity: 12 }], order: 1 },
-      { id: "cabinet-3", name: "Section 3", type: "grid", rows: 10, cols: 9, depth: 1, has_bottom_zone: false, bottom_zone_name: "", storage_rows: [{ row: 9, name: "Wall Rack", type: "horizontal", capacity: 6 }], order: 2 },
+      { id: "cabinet-1", name: "Section 1", type: "grid", rows: 10, cols: 9, depth: 1, has_bottom_zone: false, bottom_zone_name: "", storage_rows: [{ row: 9, name: "Bulk Bin", type: "bulk", capacity: 20 }], order: 0, orientation: "vertical" },
+      { id: "cabinet-2", name: "Section 2", type: "grid", rows: 10, cols: 9, depth: 2, has_bottom_zone: false, bottom_zone_name: "", storage_rows: [{ row: 9, name: "Bordeaux Case", type: "box", capacity: 12, boxes: [12] }], order: 1, orientation: "horizontal" },
+      { id: "cabinet-3", name: "Section 3", type: "grid", rows: 10, cols: 9, depth: 1, has_bottom_zone: false, bottom_zone_name: "", storage_rows: [{ row: 9, name: "Wall Rack", type: "bulk", capacity: 6 }], order: 2, orientation: "vertical" },
     ];
 
     const mockBuyList = [
@@ -190,6 +190,12 @@
                 { name: "Barolo Monfortino 2016", winery: "Giacomo Conterno", region: "Piedmont", country: "Italy", vintage: 2016, type: "red", grape_variety: "Nebbiolo", price: 450 },
               ],
             };
+          case "wine_cellar/sync_save":
+            return { success: true, path: "/config/wine_cellar_backup.json", wines: mockWines.length, cabinets: mockCabinets.length };
+          case "wine_cellar/sync_load":
+            return { success: true, wines: mockWines.length, cabinets: mockCabinets.length, timestamp: new Date().toISOString() };
+          case "wine_cellar/backup_data":
+            return { wines: mockWines, cabinets: mockCabinets, buy_list: mockBuyList };
           case "wine_cellar/vivino_enrich":
             return { rating: 4.2, ratings_count: 3500, price: msg.price || 50, image_url: "https://images.vivino.com/thumbs/ApnxEJsiSaCuFadP5WMFKQ_375x500.jpg" };
           case "wine_cellar/ai_enrich_wine":

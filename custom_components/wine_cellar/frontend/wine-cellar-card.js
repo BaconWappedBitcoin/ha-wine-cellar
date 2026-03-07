@@ -6821,8 +6821,8 @@ let InventoryDialog = class InventoryDialog extends i {
             }
             else {
                 this._statusMsg = `☁️ Saved — ${result?.wines ?? "?"} wines, ${result?.cabinets ?? "?"} racks`;
-                this._syncSaveLabel = "Saved!";
-                setTimeout(() => { this._syncSaveLabel = ""; }, 2000);
+                this._syncSaveLabel = "✅ Saved!";
+                setTimeout(() => { this._syncSaveLabel = ""; }, 4000);
             }
         }
         catch (err) {
@@ -7043,6 +7043,9 @@ let InventoryDialog = class InventoryDialog extends i {
             ? `${filteredWines.length} wines`
             : `${filteredWines.length} of ${this.wines.length} wines`}
             </span>
+            ${this._statusMsg
+            ? b `<div class="inv-status">${this._statusMsg}</div>`
+            : A}
             <div class="inv-footer-btns">
               <button
                 class="inv-btn"
@@ -7092,9 +7095,6 @@ let InventoryDialog = class InventoryDialog extends i {
                 📥 Export
               </button>
             </div>
-            ${this._statusMsg
-            ? b `<div class="inv-status">${this._statusMsg}</div>`
-            : A}
           </div>
 
           <!-- Hidden file inputs -->
