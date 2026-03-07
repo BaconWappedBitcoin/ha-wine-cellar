@@ -9,6 +9,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 
@@ -52,7 +53,10 @@ def _register_static_path(hass: HomeAssistant) -> None:
 
 
 def _register_frontend_resource(hass: HomeAssistant) -> None:
-    """Register the card JS as a Lovelace resource with cache-busted URL."""
+    """Register the card JS as a Lovelace resource with cache-busted URL.
+
+    Waits for HA to fully start so that lovelace_resources is available.
+    """
     url = f"/wine_cellar/wine-cellar-card-{FRONTEND_VERSION}.js"
 
     # Use the lovelace resources collection if available
@@ -64,11 +68,16 @@ def _register_frontend_resource(hass: HomeAssistant) -> None:
         _LOGGER.debug("Lovelace resources API not available, skipping auto-register")
         return
 
-    async def _async_add_resource() -> None:
+    async def _async_add_resource(*_args) -> None:
         """Add or update Lovelace resource."""
         try:
             resources = hass.data.get("lovelace_resources")
             if resources is None:
+                _LOGGER.debug(
+                    "lovelace_resources not in hass.data, "
+                    "card must be added manually via Settings > Dashboards > Resources: %s",
+                    url,
+                )
                 return
 
             # Check existing resources
@@ -89,9 +98,19 @@ def _register_frontend_resource(hass: HomeAssistant) -> None:
                 await resources.async_create_item({"res_type": "module", "url": url})
                 _LOGGER.debug("Registered wine cellar frontend resource: %s", url)
         except Exception as err:
-            _LOGGER.debug("Could not auto-register frontend resource: %s", err)
+            _LOGGER.warning(
+                "Could not auto-register frontend resource (%s). "
+                "Add it manually via Settings > Dashboards > Resources: %s",
+                err,
+                url,
+            )
 
-    hass.async_create_task(_async_add_resource())
+    # If HA is already running (e.g. integration reload), register immediately.
+    # Otherwise wait for full startup so lovelace_resources is available.
+    if hass.is_running:
+        hass.async_create_task(_async_add_resource())
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_add_resource)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -21,7 +21,7 @@ GEMINI_API_URL = (
 
 LABEL_PROMPT = """You are a master sommelier and wine label recognition expert. The current year is {current_year}. Analyze this wine label image, identify the wine, and provide a full assessment. Return ONLY a JSON object with these exact fields:
 
-{
+{{
   "name": "the full wine name including style (e.g. Crémant Demi-Sec, Cabernet Sauvignon Reserve)",
   "winery": "the producer/winery/domaine/château name",
   "vintage": 2020,
@@ -39,14 +39,14 @@ LABEL_PROMPT = """You are a master sommelier and wine label recognition expert. 
   "rating_jd": null,
   "rating_ag": null,
   "notes": "brief notes from the label"
-}
+}}
 
 Label reading rules:
 - "name" should include the wine name AND style/designation (Brut, Demi-Sec, Reserve, Grand Cru, etc.) but NOT the winery name
 - "vintage" must be a 4-digit year as an integer, or null if not visible (NV wines = null)
 - "type" must be exactly one of: "red", "white", "rosé", "sparkling", "dessert"
 - For "type", infer from visual cues (bottle color, label text like "Blanc", "Rosé", "Brut") if not explicitly stated
-- If the image is not a wine label, return {"error": "not_a_wine_label"}
+- If the image is not a wine label, return {{"error": "not_a_wine_label"}}
 
 Wine analysis rules:
 - "disposition": "D" = Drink Now, "H" = Hold, "P" = Past Peak
@@ -70,9 +70,9 @@ Wine analysis rules:
 WINE_LIST_PROMPT = """You are a master sommelier. Analyze this photograph of a restaurant wine list or wine menu. Extract EVERY wine listed on the page.
 
 Return ONLY a JSON object with this structure:
-{{
+{
   "wines": [
-    {{
+    {
       "name": "the wine name (grape/style/designation, NOT the winery)",
       "winery": "the producer/winery/domaine/chateau",
       "vintage": 2020,
@@ -84,11 +84,11 @@ Return ONLY a JSON object with this structure:
       "list_price_currency": "USD",
       "glass_price": null,
       "bottle_size": "750ml"
-    }}
+    }
   ],
   "restaurant_name": "name if visible on the menu",
   "currency": "USD"
-}}
+}
 
 Rules:
 - Extract ALL wines visible on the menu, including by-the-glass options
@@ -102,7 +102,7 @@ Rules:
 - "currency" is the primary currency used on the menu
 - "restaurant_name" from any header/logo visible, or null
 - For ambiguous types, infer from grape variety or region
-- If the image is not a wine list, return {{"error": "not_a_wine_list"}}
+- If the image is not a wine list, return {"error": "not_a_wine_list"}
 - Be thorough: do not skip any wines. If text is partially obscured, include what you can read.
 - Preserve the order wines appear on the menu."""
 

@@ -61,8 +61,16 @@ class VivinoClient:
         return None
 
     async def search_wine(self, query: str) -> list[dict[str, Any]]:
-        """Search for wines by name/text query."""
-        # Vivino HTML search is the most reliable (explore API ignores q param)
+        """Search for wines by name/text query.
+
+        Tries the explore API first (structured JSON), then HTML scrape fallback.
+        """
+        # Try explore API first — returns structured JSON with reliable prices
+        results = await self._search_vivino_explore(query)
+        if results:
+            return results
+
+        # Fall back to HTML scraping
         result = await self._search_vivino_html(query)
         if result:
             return [result]
@@ -116,6 +124,42 @@ class VivinoClient:
                     country = region.get("country", {})
                     wine_type = _map_wine_type(wine.get("type_id"))
 
+                    # Extract price from explore API response
+                    price = None
+                    price_info = match.get("price", {})
+                    if price_info:
+                        amt = price_info.get("amount")
+                        if amt and isinstance(amt, (int, float)) and amt >= 6.0:
+                            price = round(float(amt), 2)
+
+                    # Extract grape variety
+                    grape = ""
+                    grapes = wine.get("grapes", [])
+                    if grapes:
+                        grape = ", ".join(
+                            g.get("name", "") for g in grapes if g.get("name")
+                        )
+
+                    # Extract ratings count
+                    stats = wine.get("statistics", {})
+                    rating = stats.get("ratings_average")
+                    if rating and isinstance(rating, (int, float)) and rating > 0:
+                        rating = round(float(rating), 1)
+                    else:
+                        rating = None
+                    ratings_count = stats.get("ratings_count")
+
+                    # Extract alcohol
+                    alcohol = ""
+                    alc = wine.get("alcohol")
+                    if alc and isinstance(alc, (int, float)) and alc > 0:
+                        alcohol = f"{alc}%"
+
+                    # Image URL
+                    image_url = vintage.get("image", {}).get("location", "")
+                    if image_url and image_url.startswith("//"):
+                        image_url = "https:" + image_url
+
                     results.append(
                         {
                             "name": wine.get("name", ""),
@@ -124,14 +168,12 @@ class VivinoClient:
                             "country": country.get("name", ""),
                             "vintage": vintage.get("year"),
                             "type": wine_type,
-                            "grape_variety": "",
-                            "rating": wine.get("statistics", {}).get(
-                                "ratings_average"
-                            ),
-                            "image_url": vintage.get("image", {}).get(
-                                "location", ""
-                            ),
-                            "price": None,
+                            "grape_variety": grape,
+                            "rating": rating,
+                            "ratings_count": ratings_count,
+                            "image_url": image_url,
+                            "price": price,
+                            "alcohol": alcohol,
                             "source": "vivino",
                         }
                     )
@@ -453,8 +495,9 @@ def _parse_vivino_html(html: str) -> dict[str, Any] | None:
             alcohol = f"{alc_match.group(1)}%"
 
         # Extract price from Vivino
-        # Use findall to check ALL matches, not just the first (which is often 4.99 boilerplate)
+        # Strategy: collect all price candidates, filter boilerplate, pick the best
         price = None
+        price_candidates: list[float] = []
         for price_pattern in [
             r'"price":\{[^}]*"amount":([\d.]+)',
             r'"median":\{[^}]*"amount":([\d.]+)',
@@ -462,14 +505,19 @@ def _parse_vivino_html(html: str) -> dict[str, Any] | None:
             for match_val in re.findall(price_pattern, decoded):
                 try:
                     val = float(match_val)
-                    # Filter out unrealistic prices: min $6 (no real wine < $6)
+                    # Filter unrealistic prices
                     if 6.0 <= val <= 50000.0:
-                        price = round(val, 2)
-                        break
+                        price_candidates.append(val)
                 except ValueError:
                     pass
-            if price:
-                break
+
+        if price_candidates:
+            # If multiple candidates, skip the first (often boilerplate/template)
+            # and use the second one which is more likely the actual wine price
+            if len(price_candidates) > 1:
+                price = round(price_candidates[1], 2)
+            else:
+                price = round(price_candidates[0], 2)
 
         return {
             "name": wine_name,
