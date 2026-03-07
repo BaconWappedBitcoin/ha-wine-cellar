@@ -813,6 +813,7 @@ export class RackSettingsDialog extends LitElement {
 
   private _renderForm() {
     const isEdit = this._mode === "edit";
+    const isHoriz = this._editCabinet.orientation === "horizontal";
     const numRows = this._editCabinet.rows || 1;
     const numCols = this._editCabinet.cols || 8;
     const numDepth = (this._editCabinet as any).depth || 1;
@@ -858,17 +859,17 @@ export class RackSettingsDialog extends LitElement {
             <div class="stepper-wrap">
               <div class="stepper-label">Rows</div>
               <div class="stepper">
-                <button class="stepper-btn" @click=${this._removeRow} ?disabled=${numRows <= 1}>−</button>
-                <span class="stepper-value">${numRows}</span>
-                <button class="stepper-btn" @click=${this._addRow} ?disabled=${numRows >= 20}>+</button>
+                <button class="stepper-btn" @click=${isHoriz ? this._removeCol : this._removeRow} ?disabled=${(isHoriz ? numCols : numRows) <= 1}>−</button>
+                <span class="stepper-value">${isHoriz ? numCols : numRows}</span>
+                <button class="stepper-btn" @click=${isHoriz ? this._addCol : this._addRow} ?disabled=${(isHoriz ? numCols : numRows) >= 20}>+</button>
               </div>
             </div>
             <div class="stepper-wrap">
               <div class="stepper-label">Columns</div>
               <div class="stepper">
-                <button class="stepper-btn" @click=${this._removeCol} ?disabled=${numCols <= 1}>−</button>
-                <span class="stepper-value">${numCols}</span>
-                <button class="stepper-btn" @click=${this._addCol} ?disabled=${numCols >= 20}>+</button>
+                <button class="stepper-btn" @click=${isHoriz ? this._removeRow : this._removeCol} ?disabled=${(isHoriz ? numRows : numCols) <= 1}>−</button>
+                <span class="stepper-value">${isHoriz ? numRows : numCols}</span>
+                <button class="stepper-btn" @click=${isHoriz ? this._addRow : this._addCol} ?disabled=${(isHoriz ? numRows : numCols) >= 20}>+</button>
               </div>
             </div>
             <div class="stepper-wrap">
