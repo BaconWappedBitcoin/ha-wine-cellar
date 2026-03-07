@@ -62,6 +62,7 @@ export class WineCellarCard extends LitElement {
   @state() private _zonePanelCapacity = 20;
   @state() private _zonePanelName = "";
   @state() private _zonePanelWines: Wine[] = [];
+  @state() private _zonePanelStorageRow: StorageRow | null = null;
 
   static styles = [
     sharedStyles,
@@ -566,7 +567,7 @@ export class WineCellarCard extends LitElement {
     }
   }
 
-  // --- Zone side panel (boxes, bulk bins, horizontal racks) ---
+  // --- Zone side panel (boxes, bulk bins) ---
   private _onZoneContainerClick(e: CustomEvent) {
     const { cabinet, zone, storageRow } = e.detail;
 
@@ -589,6 +590,7 @@ export class WineCellarCard extends LitElement {
     this._zonePanelType = storageRow.type || "bulk";
     this._zonePanelCapacity = storageRow.capacity || 20;
     this._zonePanelName = storageRow.name || "Storage";
+    this._zonePanelStorageRow = storageRow;
     this._zonePanelWines = this._wines
       .filter((w) => w.cabinet_id === cabinet.id && w.zone === zone)
       .sort((a, b) => (a.depth || 0) - (b.depth || 0));
@@ -635,11 +637,7 @@ export class WineCellarCard extends LitElement {
     this._showAddDialog = true;
   }
 
-  private _getZoneSlotLabel(type: StorageRowType, index: number): string {
-    if (type === "horizontal") {
-      const labels = ["Top", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"];
-      return labels[index] || `${index + 1}th`;
-    }
+  private _getZoneSlotLabel(_type: StorageRowType, index: number): string {
     return `Slot ${index + 1}`;
   }
 
@@ -1443,7 +1441,7 @@ export class WineCellarCard extends LitElement {
             `
           : nothing}
 
-        <!-- Zone Side Panel (Boxes, Bulk Bins, Horizontal Racks) -->
+        <!-- Zone Side Panel (Boxes, Bulk Bins) -->
         ${this._zonePanelOpen
           ? html`
               <div class="depth-panel-backdrop" @click=${this._closeZonePanel}></div>
@@ -1453,7 +1451,7 @@ export class WineCellarCard extends LitElement {
                     ${this._zonePanelName}
                     <span class="depth-panel-subtitle">
                       ${this._zonePanelWines.length}/${this._zonePanelCapacity}
-                      ${this._zonePanelType === "box" ? "bottles" : this._zonePanelType === "horizontal" ? "positions" : "stored"}
+                      ${this._zonePanelType === "box" ? "bottles" : "stored"}
                     </span>
                   </span>
                   <button class="depth-panel-close" @click=${this._closeZonePanel}>✕</button>
@@ -1500,41 +1498,57 @@ export class WineCellarCard extends LitElement {
                           : nothing}
                       `
                     : html`
-                        <!-- Box / Horizontal mode: fixed numbered slots -->
-                        ${Array.from({ length: this._zonePanelCapacity }, (_, i) => {
-                          const wine = this._zonePanelWines.find((w) => (w.depth || 0) === i);
-                          const typeColor = wine ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red : "";
-                          return html`
-                            <div
-                              class="depth-slot ${wine ? "filled" : "empty"}"
-                              @click=${() => this._onZonePanelSlotClick(i, wine)}
-                            >
-                              <div class="depth-slot-label">${this._getZoneSlotLabel(this._zonePanelType, i)}</div>
-                              ${wine
-                                ? html`
-                                    <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
-                                      ${wine.image_url
-                                        ? html`<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
-                                        : html`<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
-                                      <div class="depth-slot-info">
-                                        <div class="depth-slot-name">${wine.name}</div>
-                                        <div class="depth-slot-meta">
-                                          ${wine.vintage || "NV"}
-                                          ${wine.rating ? html` · ★${wine.rating}` : nothing}
-                                          ${wine.price ? html` · $${wine.price}` : nothing}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  `
-                                : html`
-                                    <div class="depth-slot-empty">
-                                      <span class="depth-slot-plus">+</span>
-                                      <span>Empty</span>
-                                    </div>
-                                  `}
-                            </div>
-                          `;
-                        })}
+                        <!-- Box mode: slots grouped by box -->
+                        ${(() => {
+                          const boxes = this._zonePanelStorageRow?.boxes || [this._zonePanelCapacity];
+                          let offset = 0;
+                          return boxes.map((boxSize: number, bi: number) => {
+                            const start = offset;
+                            offset += boxSize;
+                            return html`
+                              ${boxes.length > 1
+                                ? html`<div style="font-size:0.75em;font-weight:600;color:var(--wc-text-secondary);padding:8px 0 2px;${bi > 0 ? "border-top:1px solid var(--wc-border);margin-top:4px;" : ""}">
+                                    Box ${bi + 1} (${boxSize}-pack)
+                                  </div>`
+                                : nothing}
+                              ${Array.from({ length: boxSize }, (_, slotInBox) => {
+                                const depthIdx = start + slotInBox;
+                                const wine = this._zonePanelWines.find((w) => (w.depth || 0) === depthIdx);
+                                const typeColor = wine ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red : "";
+                                return html`
+                                  <div
+                                    class="depth-slot ${wine ? "filled" : "empty"}"
+                                    @click=${() => this._onZonePanelSlotClick(depthIdx, wine)}
+                                  >
+                                    <div class="depth-slot-label">Slot ${slotInBox + 1}</div>
+                                    ${wine
+                                      ? html`
+                                          <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
+                                            ${wine.image_url
+                                              ? html`<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
+                                              : html`<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                            <div class="depth-slot-info">
+                                              <div class="depth-slot-name">${wine.name}</div>
+                                              <div class="depth-slot-meta">
+                                                ${wine.vintage || "NV"}
+                                                ${wine.rating ? html` · ★${wine.rating}` : nothing}
+                                                ${wine.price ? html` · $${wine.price}` : nothing}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        `
+                                      : html`
+                                          <div class="depth-slot-empty">
+                                            <span class="depth-slot-plus">+</span>
+                                            <span>Empty</span>
+                                          </div>
+                                        `}
+                                  </div>
+                                `;
+                              })}
+                            `;
+                          });
+                        })()}
                       `}
                 </div>
               </div>

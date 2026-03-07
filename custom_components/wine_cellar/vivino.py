@@ -53,9 +53,9 @@ class VivinoClient:
             return result
 
         # 3. Try Vivino HTML search as last resort
-        result = await self._search_vivino_html(barcode)
-        if result:
-            return result
+        html_results = await self._search_vivino_html(barcode)
+        if html_results:
+            return html_results[0]
 
         _LOGGER.warning("No results found for barcode: %s", barcode)
         return None
@@ -72,9 +72,9 @@ class VivinoClient:
 
         # Fall back to HTML scraping (no price data — only explore API has prices)
         _LOGGER.debug("Vivino explore API returned no results for '%s', falling back to HTML scrape", query)
-        result = await self._search_vivino_html(query)
-        if result:
-            return [result]
+        results = await self._search_vivino_html(query)
+        if results:
+            return results
 
         return []
 
@@ -186,7 +186,7 @@ class VivinoClient:
 
     # ── Vivino HTML Search (scrape) ──────────────────────────────────
 
-    async def _search_vivino_html(self, query: str) -> dict[str, Any] | None:
+    async def _search_vivino_html(self, query: str) -> list[dict[str, Any]]:
         """Search Vivino by scraping the HTML search results page."""
         session = async_get_clientsession(self._hass)
 
@@ -200,23 +200,22 @@ class VivinoClient:
             ) as resp:
                 if resp.status != 200:
                     _LOGGER.debug("Vivino HTML search status %s", resp.status)
-                    return None
+                    return []
 
-                html = await resp.text()
+                html_text = await resp.text()
 
                 # Vivino embeds wine data as HTML-encoded JSON in React component props
-                # Look for js-react-on-rails-component with wine data
-                wine_data = _parse_vivino_html(html)
-                if wine_data:
+                results = _parse_vivino_html(html_text)
+                if results:
                     _LOGGER.debug(
-                        "Vivino HTML search found: %s", wine_data.get("name")
+                        "Vivino HTML search found %d results", len(results)
                     )
-                    return wine_data
+                    return results
 
         except Exception as err:
             _LOGGER.debug("Vivino HTML search error: %s", err)
 
-        return None
+        return []
 
     # ── UPC Item DB ──────────────────────────────────────────────────
 
@@ -371,158 +370,182 @@ class VivinoClient:
         return None
 
 
-def _parse_vivino_html(html: str) -> dict[str, Any] | None:
-    """Extract the first wine result from Vivino's HTML search page.
+def _parse_vivino_html(html: str) -> list[dict[str, Any]]:
+    """Extract wine results from Vivino's HTML search page.
 
-    Vivino embeds wine data as JSON in the HTML. We extract the first
-    wine result using regex patterns against the decoded HTML.
+    Vivino embeds wine data as JSON in the HTML. We extract up to 5
+    wine results using regex patterns against the decoded HTML.
     """
+    results: list[dict[str, Any]] = []
     try:
         decoded = unescape(html)
 
         # Find wines via "seo_name":"slug","name":"Wine Name" pattern
-        wine_matches = re.findall(
+        wine_iter = list(re.finditer(
             r'"seo_name":"([^"]+)","name":"([^"]+)"', decoded
-        )
-        if not wine_matches:
-            return None
+        ))
+        if not wine_iter:
+            return []
 
-        # First match is the first wine result
-        _, wine_name = wine_matches[0]
+        seen_names: set[str] = set()
 
-        # Extract vintage from wine name (e.g. "2023" in "Apothic Red 2023")
-        vintage = None
-        year_match = re.search(r"\b(19|20)\d{2}\b", wine_name)
-        if year_match:
-            vintage = int(year_match.group())
+        for idx, match in enumerate(wine_iter[:10]):  # scan up to 10, keep up to 5
+            wine_name = match.group(2)
 
-        # Extract winery name
-        winery_match = re.search(
-            r'"winery":\{"id":\d+,"name":"([^"]+)"', decoded
-        )
+            # Skip duplicates
+            if wine_name in seen_names:
+                continue
+            seen_names.add(wine_name)
 
-        # Extract region name
-        region_match = re.search(
-            r'"region":\{"id":\d+,"name":"([^"]+)"', decoded
-        )
+            # Extract a segment of HTML around this wine entry for per-wine fields
+            start = max(0, match.start() - 200)
+            if idx + 1 < len(wine_iter):
+                end = wine_iter[idx + 1].start() + 200
+            else:
+                end = min(len(decoded), match.end() + 3000)
+            segment = decoded[start:end]
 
-        # Extract country name
-        country_match = re.search(
-            r'"country":\{"code":"[^"]*","name":"([^"]+)"', decoded
-        )
+            # Extract vintage from wine name
+            vintage = None
+            year_match = re.search(r"\b(19|20)\d{2}\b", wine_name)
+            if year_match:
+                vintage = int(year_match.group())
 
-        # Extract wine type
-        type_match = re.search(r'"type_id":(\d+)', decoded)
-        wine_type = _map_wine_type(
-            int(type_match.group(1)) if type_match else None
-        )
+            # Extract winery name
+            winery = ""
+            winery_match = re.search(
+                r'"winery":\{"id":\d+,"name":"([^"]+)"', segment
+            )
+            if winery_match:
+                winery = winery_match.group(1)
 
-        # Extract rating
-        rating = None
-        for pattern in [r'"wine_ratings_average":([\d.]+)',
-                        r'"ratings_average":([\d.]+)']:
-            m = re.search(pattern, decoded)
-            if m:
-                val = float(m.group(1))
-                if val > 0:
-                    rating = round(val, 1)
+            # Extract region name
+            region = ""
+            region_match = re.search(
+                r'"region":\{"id":\d+,"name":"([^"]+)"', segment
+            )
+            if region_match:
+                region = region_match.group(1)
+
+            # Extract country name
+            country = ""
+            country_match = re.search(
+                r'"country":\{"code":"[^"]*","name":"([^"]+)"', segment
+            )
+            if country_match:
+                country = country_match.group(1)
+
+            # Extract wine type
+            type_match = re.search(r'"type_id":(\d+)', segment)
+            wine_type = _map_wine_type(
+                int(type_match.group(1)) if type_match else None
+            )
+
+            # Extract rating
+            rating = None
+            for pattern in [r'"wine_ratings_average":([\d.]+)',
+                            r'"ratings_average":([\d.]+)']:
+                m = re.search(pattern, segment)
+                if m:
+                    val = float(m.group(1))
+                    if val > 0:
+                        rating = round(val, 1)
+                        break
+
+            # Extract image URL
+            image_url = ""
+            for img_pattern in [
+                r'"location":"((?:https?:)?//[^"]+images\.vivino\.com[^"]+)"',
+                r'"image":\{"location":"((?:https?:)?//[^"]+)"',
+                r'"image":\{[^}]*"location":"((?:https?:)?//[^"]+)"',
+                r'"bottle_large":"((?:https?:)?//[^"]+)"',
+                r'"bottle_medium":"((?:https?:)?//[^"]+)"',
+            ]:
+                img_match = re.search(img_pattern, segment)
+                if img_match:
+                    image_url = img_match.group(1)
+                    if image_url.startswith("//"):
+                        image_url = "https:" + image_url
                     break
 
-        # Extract image URL from Vivino HTML (handles both https:// and protocol-relative //)
-        image_url = ""
-        for img_pattern in [
-            r'"location":"((?:https?:)?//[^"]+images\.vivino\.com[^"]+)"',
-            r'"image":\{"location":"((?:https?:)?//[^"]+)"',
-            r'"image":\{[^}]*"location":"((?:https?:)?//[^"]+)"',
-            r'<img[^>]+class="[^"]*wine[^"]*"[^>]+src="((?:https?:)?//[^"]+)"',
-            r'"bottle_large":"((?:https?:)?//[^"]+)"',
-            r'"bottle_medium":"((?:https?:)?//[^"]+)"',
-        ]:
-            img_match = re.search(img_pattern, decoded)
-            if img_match:
-                image_url = img_match.group(1)
-                # Fix protocol-relative URLs
-                if image_url.startswith("//"):
-                    image_url = "https:" + image_url
+            # Extract grape variety
+            grape = ""
+            grape_match = re.search(
+                r'"grapes":\[\{"name":"([^"]+)"', segment
+            )
+            if grape_match:
+                grape = grape_match.group(1)
+
+            # Extract ratings count
+            ratings_count = None
+            for rc_pattern in [
+                r'"wine_ratings_count":(\d+)',
+                r'"ratings_count":(\d+)',
+            ]:
+                rc_match = re.search(rc_pattern, segment)
+                if rc_match:
+                    val = int(rc_match.group(1))
+                    if val > 0:
+                        ratings_count = val
+                        break
+
+            # Extract wine style description
+            description = ""
+            desc_match = re.search(
+                r'"description":"([^"]{10,500})"', segment
+            )
+            if desc_match:
+                desc_text = desc_match.group(1).replace("\\n", " ").strip()
+                error_keywords = ("forbidden", "underage", "try searching", "page is blocked")
+                if not any(kw in desc_text.lower() for kw in error_keywords):
+                    description = desc_text
+
+            # Extract food pairings
+            food_pairings = ""
+            food_matches = re.findall(
+                r'"food":\[([^\]]+)\]', segment
+            )
+            if food_matches:
+                food_names = re.findall(r'"name":"([^"]+)"', food_matches[0])
+                if food_names:
+                    food_pairings = ", ".join(food_names)
+
+            # Extract alcohol content
+            alcohol = ""
+            alc_match = re.search(r'"alcohol":([\d.]+)', segment)
+            if alc_match:
+                alcohol = f"{alc_match.group(1)}%"
+
+            # NOTE: Do NOT extract price from HTML scraping — the page contains
+            # boilerplate/template prices that are the same for every search query.
+            # Only the Vivino Explore API returns reliable per-wine pricing.
+            price = None
+
+            results.append({
+                "name": wine_name,
+                "winery": winery,
+                "region": region,
+                "country": country,
+                "vintage": vintage,
+                "type": wine_type,
+                "grape_variety": grape,
+                "rating": rating,
+                "ratings_count": ratings_count,
+                "image_url": image_url,
+                "description": description,
+                "food_pairings": food_pairings,
+                "alcohol": alcohol,
+                "price": price,
+                "source": "vivino",
+            })
+
+            if len(results) >= 5:
                 break
-
-        # Extract grape variety
-        grape = ""
-        grape_match = re.search(
-            r'"grapes":\[\{"name":"([^"]+)"', decoded
-        )
-        if grape_match:
-            grape = grape_match.group(1)
-
-        # Extract ratings count
-        ratings_count = None
-        for rc_pattern in [
-            r'"wine_ratings_count":(\d+)',
-            r'"ratings_count":(\d+)',
-        ]:
-            rc_match = re.search(rc_pattern, decoded)
-            if rc_match:
-                val = int(rc_match.group(1))
-                if val > 0:
-                    ratings_count = val
-                    break
-
-        # Extract wine style description
-        description = ""
-        desc_match = re.search(
-            r'"description":"([^"]{10,500})"', decoded
-        )
-        if desc_match:
-            desc_text = desc_match.group(1).replace("\\n", " ").strip()
-            # Filter out Vivino error page text
-            error_keywords = ("forbidden", "underage", "try searching", "page is blocked")
-            if not any(kw in desc_text.lower() for kw in error_keywords):
-                description = desc_text
-
-        # Extract food pairings
-        food_pairings = ""
-        food_matches = re.findall(
-            r'"food":\[([^\]]+)\]', decoded
-        )
-        if food_matches:
-            food_names = re.findall(r'"name":"([^"]+)"', food_matches[0])
-            if food_names:
-                food_pairings = ", ".join(food_names)
-
-        # Extract alcohol content
-        alcohol = ""
-        alc_match = re.search(r'"alcohol":([\d.]+)', decoded)
-        if alc_match:
-            alcohol = f"{alc_match.group(1)}%"
-
-        # NOTE: Do NOT extract price from HTML scraping — the page contains
-        # boilerplate/template prices that are the same for every search query,
-        # leading to every wine getting the same price (e.g. $47.90).
-        # Only the Vivino Explore API returns reliable per-wine pricing.
-        price = None
-
-        return {
-            "name": wine_name,
-            "winery": winery_match.group(1) if winery_match else "",
-            "region": region_match.group(1) if region_match else "",
-            "country": country_match.group(1) if country_match else "",
-            "vintage": vintage,
-            "type": wine_type,
-            "grape_variety": grape,
-            "rating": rating,
-            "ratings_count": ratings_count,
-            "image_url": image_url,
-            "description": description,
-            "food_pairings": food_pairings,
-            "alcohol": alcohol,
-            "price": price,
-            "source": "vivino",
-        }
 
     except Exception as err:
         _LOGGER.debug("Failed to parse Vivino HTML: %s", err)
 
-    return None
+    return results
 
 
 def _map_wine_type(type_id: int | None) -> str:

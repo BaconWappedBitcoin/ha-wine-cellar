@@ -480,6 +480,7 @@ export class RackSettingsDialog extends LitElement {
       depth: 1,
       has_bottom_zone: false,
       bottom_zone_name: "",
+      orientation: "vertical",
     };
     this._editStorageRows = [];
   }
@@ -504,16 +505,21 @@ export class RackSettingsDialog extends LitElement {
       this._editStorageRows = this._editStorageRows.filter((sr) => sr.row !== row);
     } else {
       const existing = this._editStorageRows.find((sr) => sr.row === row);
-      const defaultCapacity = type === "box" ? 12 : type === "horizontal" ? 10 : 20;
+      const isBox = type === "box";
+      const defaultCapacity = isBox ? 12 : 20;
+      const newRow: StorageRow = {
+        row,
+        name: existing?.name || STORAGE_ROW_TYPE_LABELS[type],
+        type,
+        capacity: defaultCapacity,
+        ...(isBox ? { boxes: [12] } : {}),
+      };
       if (existing) {
         this._editStorageRows = this._editStorageRows.map((sr) =>
-          sr.row === row ? { ...sr, type, capacity: defaultCapacity } : sr
+          sr.row === row ? newRow : sr
         );
       } else {
-        this._editStorageRows = [
-          ...this._editStorageRows,
-          { row, name: STORAGE_ROW_TYPE_LABELS[type], type, capacity: defaultCapacity },
-        ];
+        this._editStorageRows = [...this._editStorageRows, newRow];
       }
     }
   }
@@ -528,6 +534,27 @@ export class RackSettingsDialog extends LitElement {
     this._editStorageRows = this._editStorageRows.map((sr) =>
       sr.row === row ? { ...sr, capacity } : sr
     );
+  }
+
+  private _updateBoxCount(row: number, count: number) {
+    this._editStorageRows = this._editStorageRows.map((sr) => {
+      if (sr.row !== row || sr.type !== "box") return sr;
+      const boxes = [...(sr.boxes || [12])];
+      while (boxes.length < count) boxes.push(12);
+      while (boxes.length > count) boxes.pop();
+      const capacity = boxes.reduce((sum, s) => sum + s, 0);
+      return { ...sr, boxes, capacity };
+    });
+  }
+
+  private _updateBoxSize(row: number, boxIndex: number, size: number) {
+    this._editStorageRows = this._editStorageRows.map((sr) => {
+      if (sr.row !== row || sr.type !== "box") return sr;
+      const boxes = [...(sr.boxes || [12])];
+      boxes[boxIndex] = size;
+      const capacity = boxes.reduce((sum, s) => sum + s, 0);
+      return { ...sr, boxes, capacity };
+    });
   }
 
   private _isStorageRow(row: number): boolean {
@@ -592,6 +619,7 @@ export class RackSettingsDialog extends LitElement {
           bottom_zone_name: "",
           storage_rows: this._editStorageRows,
           order: this.cabinets.length,
+          orientation: this._editCabinet.orientation || "vertical",
         },
       });
       this._notifyUpdate();
@@ -624,6 +652,7 @@ export class RackSettingsDialog extends LitElement {
           has_bottom_zone: false,
           bottom_zone_name: "",
           storage_rows: validStorageRows,
+          orientation: this._editCabinet.orientation || "vertical",
         },
       });
 
@@ -734,6 +763,7 @@ export class RackSettingsDialog extends LitElement {
                       ${cab.rows} rows × ${cab.cols} cols${(cab.depth || 1) > 1 ? ` × ${cab.depth} deep` : ""}
                       · ${this._winesInCabinet(cab.id)} bottles
                       ${storageCount > 0 ? ` · ${storageCount} storage row${storageCount > 1 ? "s" : ""}` : ""}
+                      ${cab.orientation === "horizontal" ? " · ↔ Horizontal" : ""}
                       ${cab.has_bottom_zone ? " · + bottom zone" : ""}
                     </div>
                   </div>
@@ -837,12 +867,29 @@ export class RackSettingsDialog extends LitElement {
             </div>
           </div>
 
+          <!-- Orientation toggle -->
+          <div style="margin-bottom:12px;">
+            <div class="stepper-label">Orientation</div>
+            <div style="display:flex;gap:4px;">
+              <button
+                class="small-btn"
+                style="${this._editCabinet.orientation !== 'horizontal' ? 'background:var(--wc-primary);color:white;border-color:var(--wc-primary);' : ''}"
+                @click=${() => this._editCabinet = { ...this._editCabinet, orientation: 'vertical' as const }}
+              >↕ Vertical</button>
+              <button
+                class="small-btn"
+                style="${this._editCabinet.orientation === 'horizontal' ? 'background:var(--wc-primary);color:white;border-color:var(--wc-primary);' : ''}"
+                @click=${() => this._editCabinet = { ...this._editCabinet, orientation: 'horizontal' as const }}
+              >↔ Horizontal</button>
+            </div>
+          </div>
+
           <!-- Visual grid preview -->
           <div class="grid-preview">
             ${Array.from({ length: numRows }, (_, row) => {
               const isStorage = this._isStorageRow(row);
               const sr = this._getStorageRow(row);
-              const typeIcon = sr?.type === "box" ? "📦" : sr?.type === "horizontal" ? "🔲" : "◇";
+              const typeIcon = sr?.type === "box" ? "📦" : "◇";
               return html`
                 <div class="grid-preview-row ${isStorage ? "storage" : ""}">
                   <span class="grid-preview-label">R${row + 1}</span>
@@ -879,7 +926,6 @@ export class RackSettingsDialog extends LitElement {
                     <option value="slots" ?selected=${!isStorage}>Slots</option>
                     <option value="bulk" ?selected=${currentType === "bulk"}>Bulk Bin</option>
                     <option value="box" ?selected=${currentType === "box"}>Wine Box</option>
-                    <option value="horizontal" ?selected=${currentType === "horizontal"}>Horizontal</option>
                   </select>
                   ${isStorage
                     ? html`
@@ -894,14 +940,24 @@ export class RackSettingsDialog extends LitElement {
                         />
                         ${sr?.type === "box"
                           ? html`
-                              <select
-                                class="row-cap-select"
-                                @change=${(e: Event) =>
-                                  this._updateStorageRowCapacity(row, parseInt((e.target as HTMLSelectElement).value))}
-                                @click=${(e: Event) => e.stopPropagation()}
-                              >
-                                ${BOX_SIZES.map((s) => html`<option value=${s} ?selected=${(sr?.capacity || 12) === s}>${s}-pack</option>`)}
-                              </select>
+                              <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+                                <div class="row-cap-stepper">
+                                  <button class="stepper-btn-sm" @click=${(e: Event) => { e.stopPropagation(); this._updateBoxCount(row, Math.max(1, (sr?.boxes || [12]).length - 1)); }}>−</button>
+                                  <span class="stepper-val-sm">${(sr?.boxes || [12]).length}</span>
+                                  <button class="stepper-btn-sm" @click=${(e: Event) => { e.stopPropagation(); this._updateBoxCount(row, Math.min(10, (sr?.boxes || [12]).length + 1)); }}>+</button>
+                                </div>
+                                ${(sr?.boxes || [12]).map((boxSize: number, bi: number) => html`
+                                  <select
+                                    class="row-cap-select"
+                                    @change=${(e: Event) =>
+                                      this._updateBoxSize(row, bi, parseInt((e.target as HTMLSelectElement).value))}
+                                    @click=${(e: Event) => e.stopPropagation()}
+                                  >
+                                    ${BOX_SIZES.map((s) => html`<option value=${s} ?selected=${boxSize === s}>${s}-pk</option>`)}
+                                  </select>
+                                `)}
+                                <span style="font-size:0.7em;color:var(--wc-text-secondary);">= ${sr?.capacity || 12}</span>
+                              </div>
                             `
                           : html`
                               <div class="row-cap-stepper">

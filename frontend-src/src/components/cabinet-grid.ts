@@ -338,13 +338,11 @@ export class CabinetGrid extends LitElement {
         border-color: rgba(255, 255, 255, 0.2);
       }
 
-      .zone-box-row,
-      .zone-horiz-row {
+      .zone-box-row {
         cursor: pointer;
       }
 
-      .zone-box-row:hover,
-      .zone-horiz-row:hover {
+      .zone-box-row:hover {
         background: linear-gradient(135deg, #7a5a12 0%, #9a7820 100%);
       }
 
@@ -591,9 +589,6 @@ export class CabinetGrid extends LitElement {
     if (zoneType === "box") {
       return this._renderBoxZone(zoneId, zoneKey, zoneName, capacity, wines, isDragOver, sr!);
     }
-    if (zoneType === "horizontal") {
-      return this._renderHorizontalZone(zoneId, zoneKey, zoneName, capacity, wines, isDragOver, sr!);
-    }
     // Default: bulk
     return this._renderBulkZone(zoneId, zoneKey, zoneName, capacity, wines, isDragOver, sr!);
   }
@@ -629,6 +624,14 @@ export class CabinetGrid extends LitElement {
   }
 
   private _renderBoxZone(zoneId: string, zoneKey: string, name: string, capacity: number, wines: Wine[], isDragOver: boolean, sr: StorageRow) {
+    const boxes = sr.boxes || [capacity];
+    let offset = 0;
+    const boxSegments = boxes.map((boxSize) => {
+      const start = offset;
+      offset += boxSize;
+      return { size: boxSize, start };
+    });
+
     return html`
       <div class="bottom-zone zone-box-row ${isDragOver ? "drag-over" : ""}"
         @click=${() => this._onZoneContainerClick(zoneId, sr)}
@@ -637,30 +640,15 @@ export class CabinetGrid extends LitElement {
         @drop=${(e: DragEvent) => this._onDrop(e, undefined, undefined, zoneId)}>
         <div class="bottom-zone-label">📦 ${name} <span class="zone-count">${wines.length}/${capacity}</span></div>
         <div class="zone-fill-dots">
-          ${Array.from({ length: capacity }, (_, i) => {
-            const wine = wines.find((w) => (w.depth || 0) === i);
-            const color = wine ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red : "";
-            return html`<span class="zone-fill-dot ${wine ? "filled" : "empty"}" style=${wine ? `background: ${color}` : ""}></span>`;
-          })}
-        </div>
-      </div>
-    `;
-  }
-
-  private _renderHorizontalZone(zoneId: string, zoneKey: string, name: string, capacity: number, wines: Wine[], isDragOver: boolean, sr: StorageRow) {
-    return html`
-      <div class="bottom-zone zone-horiz-row ${isDragOver ? "drag-over" : ""}"
-        @click=${() => this._onZoneContainerClick(zoneId, sr)}
-        @dragover=${(e: DragEvent) => this._onDragOver(e, zoneKey)}
-        @dragleave=${(e: DragEvent) => this._onDragLeave(e)}
-        @drop=${(e: DragEvent) => this._onDrop(e, undefined, undefined, zoneId)}>
-        <div class="bottom-zone-label">🔲 ${name} <span class="zone-count">${wines.length}/${capacity}</span></div>
-        <div class="zone-fill-dots">
-          ${Array.from({ length: capacity }, (_, i) => {
-            const wine = wines.find((w) => (w.depth || 0) === i);
-            const color = wine ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red : "";
-            return html`<span class="zone-fill-dot ${wine ? "filled" : "empty"}" style=${wine ? `background: ${color}` : ""}></span>`;
-          })}
+          ${boxSegments.map((seg, bi) => html`
+            ${bi > 0 ? html`<span style="width:2px;height:14px;background:rgba(255,255,255,0.3);border-radius:1px;flex-shrink:0;margin:0 2px;"></span>` : nothing}
+            ${Array.from({ length: seg.size }, (_, i) => {
+              const depthIdx = seg.start + i;
+              const wine = wines.find((w) => (w.depth || 0) === depthIdx);
+              const color = wine ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red : "";
+              return html`<span class="zone-fill-dot ${wine ? "filled" : "empty"}" style=${wine ? `background: ${color}` : ""}></span>`;
+            })}
+          `)}
         </div>
       </div>
     `;
@@ -743,19 +731,118 @@ export class CabinetGrid extends LitElement {
     `;
   }
 
+  private _renderCell(row: number, col: number) {
+    const cabinetDepth = (this.cabinet as any).depth || 1;
+    const wines = this._getWinesAt(row, col);
+    const wineCount = wines.length;
+    const frontWine = wines.length > 0
+      ? wines.sort((a, b) => (a.depth || 0) - (b.depth || 0))[0]
+      : undefined;
+    const bgColor = frontWine
+      ? WINE_TYPE_COLORS[frontWine.type as WineType] || WINE_TYPE_COLORS.red
+      : "transparent";
+    const disp = frontWine?.disposition || "";
+    const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
+    const ratingDisplay = frontWine?.rating ? frontWine.rating.toFixed(1) : "";
+    const ringColor = frontWine ? this._brightenColor(bgColor) : "";
+    const cellKey = `${row}-${col}`;
+    const isDragOver = this._dragOverCell === cellKey;
+    return html`
+      <div
+        class="cell ${frontWine ? "filled" : "empty"} ${isDragOver ? "drag-over" : ""}"
+        style=${frontWine ? `background: ${bgColor}; --bottle-type-color: ${ringColor}` : ""}
+        draggable=${frontWine ? "true" : "false"}
+        @click=${() => this._onCellClick(row, col, frontWine, wineCount, cabinetDepth, wines)}
+        @touchstart=${frontWine ? () => this._onTouchStart(frontWine) : nothing}
+        @touchend=${frontWine ? () => this._onTouchEnd() : nothing}
+        @touchmove=${frontWine ? () => this._onTouchMove() : nothing}
+        @dragstart=${frontWine ? (e: DragEvent) => this._onDragStart(e, frontWine, row, col) : nothing}
+        @dragend=${frontWine ? (e: DragEvent) => this._onDragEnd(e) : nothing}
+        @dragover=${(e: DragEvent) => this._onDragOver(e, cellKey)}
+        @dragleave=${(e: DragEvent) => this._onDragLeave(e)}
+        @drop=${(e: DragEvent) => this._onDrop(e, row, col)}
+        title=${frontWine
+          ? `${frontWine.name} (${frontWine.vintage || "NV"})${frontWine.rating ? ` ★${frontWine.rating}` : ""}${wineCount > 1 ? ` [${wineCount}/${cabinetDepth} deep]` : ""}`
+          : `Empty - Row ${row + 1}, Col ${col + 1}`}
+      >
+        ${frontWine
+          ? html`
+              ${frontWine.image_url ? html`<img class="wine-thumb" src="${frontWine.image_url}" alt="" />` : nothing}
+              <span class="bottle-label">${frontWine.vintage || "NV"}</span>
+              ${dispClass ? html`<span class="disposition ${dispClass}">${disp}</span>` : nothing}
+              ${ratingDisplay ? html`<span class="rating-badge">★${ratingDisplay}</span>` : nothing}
+              ${wineCount > 1 ? html`<span class="depth-badge">${wineCount}</span>` : nothing}
+              ${cabinetDepth >= 2
+                ? html`
+                    <span class="depth-dots">
+                      ${Array.from({ length: cabinetDepth }, (_, d) => {
+                        const wineAtDepth = wines.find((w) => (w.depth || 0) === d);
+                        const dotColor = wineAtDepth
+                          ? WINE_TYPE_COLORS[wineAtDepth.type as WineType] || WINE_TYPE_COLORS.red
+                          : "";
+                        return html`<span
+                          class="depth-dot ${wineAtDepth ? "" : "empty"}"
+                          style=${wineAtDepth ? `background: ${dotColor}` : ""}
+                        ></span>`;
+                      })}
+                    </span>
+                  `
+                : nothing}
+            `
+          : cabinetDepth >= 2 && wineCount === 0
+            ? html`
+                <span class="depth-dots">
+                  ${Array.from({ length: cabinetDepth }, () =>
+                    html`<span class="depth-dot empty"></span>`
+                  )}
+                </span>
+              `
+            : nothing}
+      </div>
+    `;
+  }
+
+  private _renderGridHorizontal(rows: number, cols: number, storageRows: Set<number>) {
+    // Collect storage rows to render after the transposed grid
+    const storageRowNumbers: number[] = [];
+    const gridRowNumbers: number[] = [];
+    for (let r = 0; r < rows; r++) {
+      if (storageRows.has(r)) {
+        storageRowNumbers.push(r);
+      } else {
+        gridRowNumbers.push(r);
+      }
+    }
+
+    return html`
+      <!-- Transposed grid: cols become visual rows, rows become visual columns -->
+      ${Array.from({ length: cols }, (_, col) => html`
+        <div class="row">
+          ${gridRowNumbers.map((row) => this._renderCell(row, col))}
+        </div>
+      `)}
+      <!-- Storage rows render normally below -->
+      ${storageRowNumbers.map((row) => this._renderStorageZone(row))}
+    `;
+  }
+
   render() {
     const { rows, cols } = this.cabinet;
     const storageRows = this._getStorageRowSet();
+    const isHorizontal = this.cabinet.orientation === "horizontal";
 
     return html`
       <div class="cabinet">
-        <div class="cabinet-name">${this.cabinet.name}</div>
+        <div class="cabinet-name">${this.cabinet.name}${isHorizontal ? " ↔" : ""}</div>
         <div class="grid-inner">
-          ${Array.from({ length: rows }, (_, row) =>
-            storageRows.has(row)
-              ? this._renderStorageZone(row)
-              : this._renderGridRow(row, cols)
-          )}
+          ${isHorizontal
+            ? this._renderGridHorizontal(rows, cols, storageRows)
+            : Array.from({ length: rows }, (_, row) =>
+                storageRows.has(row)
+                  ? this._renderStorageZone(row)
+                  : this._renderGridRow(row, cols)
+              )
+          }
         </div>
         ${this.cabinet.has_bottom_zone
           ? html`

@@ -68,12 +68,21 @@ class WineCellarStorage:
                     cab["storage_rows"] = []
                 if "depth" not in cab:
                     cab["depth"] = 1
+                # Migrate: orientation field
+                if "orientation" not in cab:
+                    cab["orientation"] = "vertical"
                 # Migrate storage rows to include type and capacity
                 for sr in cab.get("storage_rows", []):
                     if "type" not in sr:
                         sr["type"] = "bulk"
                     if "capacity" not in sr:
                         sr["capacity"] = 20
+                    # Migrate horizontal → bulk
+                    if sr.get("type") == "horizontal":
+                        sr["type"] = "bulk"
+                    # Migrate box rows: add boxes array
+                    if sr.get("type") == "box" and "boxes" not in sr:
+                        sr["boxes"] = [sr.get("capacity", 12)]
             # Ensure all wines have retail_price and depth fields
             for wine in self._data.get(CONF_WINES, []):
                 if "retail_price" not in wine:
@@ -185,6 +194,7 @@ class WineCellarStorage:
             "bottom_zone_name": cabinet_data.get("bottom_zone_name", "Storage"),
             "storage_rows": cabinet_data.get("storage_rows", []),
             "order": cabinet_data.get("order", len(self.cabinets)),
+            "orientation": cabinet_data.get("orientation", "vertical"),
         }
         self._data[CONF_CABINETS].append(cabinet)
         return cabinet

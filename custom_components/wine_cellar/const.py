@@ -24,7 +24,8 @@ DEFAULT_CABINETS = [
         "depth": 1,
         "has_bottom_zone": False,
         "bottom_zone_name": "",
-        "storage_rows": [{"row": 9, "name": "Box Storage"}],
+        "storage_rows": [{"row": 9, "name": "Box Storage", "type": "bulk", "capacity": 20}],
+        "orientation": "vertical",
         "order": 0,
     },
     {
@@ -36,7 +37,8 @@ DEFAULT_CABINETS = [
         "depth": 1,
         "has_bottom_zone": False,
         "bottom_zone_name": "",
-        "storage_rows": [{"row": 9, "name": "Box Storage"}],
+        "storage_rows": [{"row": 9, "name": "Box Storage", "type": "bulk", "capacity": 20}],
+        "orientation": "vertical",
         "order": 1,
     },
     {
@@ -48,7 +50,8 @@ DEFAULT_CABINETS = [
         "depth": 1,
         "has_bottom_zone": False,
         "bottom_zone_name": "",
-        "storage_rows": [{"row": 9, "name": "Box Storage"}],
+        "storage_rows": [{"row": 9, "name": "Box Storage", "type": "bulk", "capacity": 20}],
+        "orientation": "vertical",
         "order": 2,
     },
 ]
@@ -63,4 +66,4 @@ CONF_GEMINI_API_KEY = "gemini_api_key"
 ATTR_TOTAL_BOTTLES = "total_bottles"
 ATTR_TOTAL_CAPACITY = "total_capacity"
 
-FRONTEND_VERSION = "20260307l"
+FRONTEND_VERSION = "20260307m"
