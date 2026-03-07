@@ -27,6 +27,8 @@ export class InventoryDialog extends LitElement {
   @state() private _confirmRestore = false;
   @state() private _restoreData: any = null;
   @state() private _statusMsg = "";
+  @state() private _syncing = false;
+  @state() private _confirmSyncLoad = false;
 
   static styles = [
     sharedStyles,
@@ -437,6 +439,7 @@ export class InventoryDialog extends LitElement {
       this._detailWine = null;
       this._statusMsg = "";
       this._confirmRestore = false;
+      this._confirmSyncLoad = false;
       this._restoreData = null;
     }
   }
@@ -455,6 +458,13 @@ export class InventoryDialog extends LitElement {
 
     if (this._searchQuery) {
       const q = this._searchQuery.toLowerCase();
+      // Map disposition search terms to codes
+      const dispMap: Record<string, string> = {
+        drink: "D", "drink now": "D",
+        hold: "H",
+        past: "P", "past peak": "P", "past-peak": "P",
+      };
+      const dispCode = dispMap[q];
       wines = wines.filter(
         (w) =>
           w.name.toLowerCase().includes(q) ||
@@ -466,7 +476,9 @@ export class InventoryDialog extends LitElement {
           (w.notes || "").toLowerCase().includes(q) ||
           (w.description || "").toLowerCase().includes(q) ||
           String(w.vintage || "").includes(q) ||
-          (w.barcode || "").includes(q)
+          (w.barcode || "").includes(q) ||
+          (dispCode && w.disposition === dispCode) ||
+          (w.drink_window || "").toLowerCase().includes(q)
       );
     }
 
@@ -802,6 +814,42 @@ export class InventoryDialog extends LitElement {
     this._restoreData = null;
   }
 
+  // ── Cloud Sync (Google Drive / file system) ──────────────────
+
+  private async _syncSave() {
+    this._syncing = true;
+    this._statusMsg = "";
+    try {
+      const result = await this.hass.callWS({ type: "wine_cellar/sync_save" });
+      if (result.error) {
+        this._statusMsg = `Sync save failed: ${result.error}`;
+      } else {
+        this._statusMsg = `☁️ Saved to server — ${result.wines} wines, ${result.cabinets} racks. Sync this file with Google Drive: ${result.path}`;
+      }
+    } catch (err: any) {
+      this._statusMsg = `Sync save failed: ${err.message || err}`;
+    }
+    this._syncing = false;
+  }
+
+  private async _syncLoad() {
+    this._confirmSyncLoad = false;
+    this._syncing = true;
+    this._statusMsg = "";
+    try {
+      const result = await this.hass.callWS({ type: "wine_cellar/sync_load" });
+      if (result.error) {
+        this._statusMsg = `Sync load failed: ${result.error}`;
+      } else {
+        this._statusMsg = `☁️ Loaded from server — ${result.wines} wines, ${result.cabinets} racks${result.timestamp ? ` (backup from ${new Date(result.timestamp).toLocaleString()})` : ""}`;
+        this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+      }
+    } catch (err: any) {
+      this._statusMsg = `Sync load failed: ${err.message || err}`;
+    }
+    this._syncing = false;
+  }
+
   // ── Helpers ───────────────────────────────────────────────────
 
   private _downloadFile(content: string, filename: string, mimeType: string) {
@@ -901,7 +949,7 @@ export class InventoryDialog extends LitElement {
       { id: "dessert", label: "Dessert" },
     ];
 
-    const busy = this._importing || this._restoring || this._backingUp;
+    const busy = this._importing || this._restoring || this._backingUp || this._syncing;
 
     return html`
       <div class="dialog-overlay" @click=${this._close}>
@@ -1012,11 +1060,27 @@ export class InventoryDialog extends LitElement {
             <div class="inv-footer-btns">
               <button
                 class="inv-btn"
+                @click=${this._syncSave}
+                ?disabled=${busy}
+                title="Save backup to HA server for Google Drive sync"
+              >
+                ${this._syncing ? "Syncing…" : "☁️ Sync Save"}
+              </button>
+              <button
+                class="inv-btn"
+                @click=${() => (this._confirmSyncLoad = true)}
+                ?disabled=${busy}
+                title="Load backup from HA server sync file"
+              >
+                ☁️ Sync Load
+              </button>
+              <button
+                class="inv-btn"
                 @click=${this._triggerImportCSV}
                 ?disabled=${busy}
                 title="Import wines from a CSV file"
               >
-                ${this._importing ? "Importing…" : "📄 Import CSV"}
+                ${this._importing ? "Importing…" : "📄 Import"}
               </button>
               <button
                 class="inv-btn"
@@ -1039,7 +1103,7 @@ export class InventoryDialog extends LitElement {
                 @click=${this._exportCSV}
                 ?disabled=${busy}
               >
-                📥 Export CSV
+                📥 Export
               </button>
             </div>
             ${this._statusMsg
@@ -1062,6 +1126,29 @@ export class InventoryDialog extends LitElement {
             style="display:none"
             @change=${this._handleRestoreFile}
           />
+
+          <!-- Sync Load Confirmation Overlay -->
+          ${this._confirmSyncLoad
+            ? html`
+                <div class="inv-confirm-overlay" @click=${() => (this._confirmSyncLoad = false)}>
+                  <div class="inv-confirm-box" @click=${(e: Event) => e.stopPropagation()}>
+                    <h3>☁️ Load from Server?</h3>
+                    <p>
+                      This will <strong>replace</strong> all your current cellar data with the server sync file.
+                      This action cannot be undone.
+                    </p>
+                    <div class="inv-confirm-btns">
+                      <button class="inv-confirm-cancel" @click=${() => (this._confirmSyncLoad = false)}>
+                        Cancel
+                      </button>
+                      <button class="inv-confirm-go" @click=${this._syncLoad}>
+                        Load Now
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              `
+            : nothing}
 
           <!-- Restore Confirmation Overlay -->
           ${this._confirmRestore && this._restoreData
