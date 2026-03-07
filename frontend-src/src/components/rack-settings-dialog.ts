@@ -858,6 +858,14 @@ export class RackSettingsDialog extends LitElement {
           <!-- Stepper controls -->
           <div class="stepper-row">
             <div class="stepper-wrap">
+              <div class="stepper-label">Rows</div>
+              <div class="stepper">
+                <button class="stepper-btn" @click=${this._removeRow} ?disabled=${numRows <= 1}>−</button>
+                <span class="stepper-value">${numRows}</span>
+                <button class="stepper-btn" @click=${this._addRow} ?disabled=${numRows >= 20}>+</button>
+              </div>
+            </div>
+            <div class="stepper-wrap">
               <div class="stepper-label">Columns</div>
               <div class="stepper">
                 <button class="stepper-btn" @click=${this._removeCol} ?disabled=${numCols <= 1}>−</button>
@@ -1017,25 +1025,12 @@ export class RackSettingsDialog extends LitElement {
                               </div>
                             `}
                       `
-                    : html`<span class="row-type-info">${numCols} slots${numDepth > 1 ? ` × ${numDepth} deep` : ""}</span>`}
+                    : html`<span class="row-type-info">${numCols} col${numCols !== 1 ? "s" : ""}${numDepth > 1 ? ` × ${numDepth} deep` : ""}</span>`}
                 </div>
               `;
             })}
           </div>
-          <div class="row-controls">
-            <button
-              class="row-ctrl-btn danger"
-              @click=${this._removeRow}
-              ?disabled=${numRows <= 1}
-              title="Remove last row"
-            >− Remove Row</button>
-            <button
-              class="row-ctrl-btn"
-              @click=${this._addRow}
-              ?disabled=${numRows >= 20}
-              title="Add a row"
-            >+ Add Row</button>
-          </div>
+          <!-- Use the Rows stepper above to add/remove rows -->
         </div>
 
         ${oobCount > 0
