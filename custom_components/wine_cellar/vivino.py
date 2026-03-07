@@ -70,7 +70,8 @@ class VivinoClient:
         if results:
             return results
 
-        # Fall back to HTML scraping
+        # Fall back to HTML scraping (no price data — only explore API has prices)
+        _LOGGER.debug("Vivino explore API returned no results for '%s', falling back to HTML scrape", query)
         result = await self._search_vivino_html(query)
         if result:
             return [result]
@@ -494,30 +495,11 @@ def _parse_vivino_html(html: str) -> dict[str, Any] | None:
         if alc_match:
             alcohol = f"{alc_match.group(1)}%"
 
-        # Extract price from Vivino
-        # Strategy: collect all price candidates, filter boilerplate, pick the best
+        # NOTE: Do NOT extract price from HTML scraping — the page contains
+        # boilerplate/template prices that are the same for every search query,
+        # leading to every wine getting the same price (e.g. $47.90).
+        # Only the Vivino Explore API returns reliable per-wine pricing.
         price = None
-        price_candidates: list[float] = []
-        for price_pattern in [
-            r'"price":\{[^}]*"amount":([\d.]+)',
-            r'"median":\{[^}]*"amount":([\d.]+)',
-        ]:
-            for match_val in re.findall(price_pattern, decoded):
-                try:
-                    val = float(match_val)
-                    # Filter unrealistic prices
-                    if 6.0 <= val <= 50000.0:
-                        price_candidates.append(val)
-                except ValueError:
-                    pass
-
-        if price_candidates:
-            # If multiple candidates, skip the first (often boilerplate/template)
-            # and use the second one which is more likely the actual wine price
-            if len(price_candidates) > 1:
-                price = round(price_candidates[1], 2)
-            else:
-                price = round(price_candidates[0], 2)
 
         return {
             "name": wine_name,
