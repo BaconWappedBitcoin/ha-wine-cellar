@@ -14,7 +14,8 @@ A custom Home Assistant integration for managing your wine collection. Track bot
 - **Interactive Cabinet Grid** — Color-coded bottles by type (red, white, rosé, sparkling, dessert) with thumbnail images, disposition badges (Drink/Hold/Past Peak), and Vivino ratings
 - **Deep Rack Support** — Racks can be 1-6 bottles deep; click any deep cell to open the depth side panel showing every bottle stacked front-to-back
 - **Depth Side Panel** — Slide-out panel reveals all bottles in a deep cell, click any wine for its detail or tap an empty slot to add a bottle at that specific depth
-- **Visual Rack Editor** — Create and edit racks with a live grid preview, stepper controls for columns and depth, and per-row type selectors
+- **Rack Orientation** — Each rack can be set to vertical (standard) or horizontal (transposed grid where columns become visual rows)
+- **Visual Rack Editor** — Create and edit racks with a live grid preview, stepper controls for rows/columns/depth, orientation toggle, and per-row type selectors
 - **Drag & Drop** — Rearrange bottles by dragging on desktop; long-press to move on mobile
 - **Move & Swap** — Move button in wine detail or long-press on mobile; bottles swap automatically if the target cell is occupied
 - **Copy & Paste** — Duplicate wines across your cellar for multi-bottle purchases
@@ -26,10 +27,9 @@ A custom Home Assistant integration for managing your wine collection. Track bot
 
 ### Storage Zone Types
 - **Bulk Bins** — Open storage for loosely grouped bottles (e.g., daily drinkers, pending sort). Shows individual wine squares with configurable capacity.
-- **Wine Boxes** — Fixed-size containers (1, 3, 6, 12, or 24 pack) like wooden crates. Shows fill-dot indicators and numbered slot positions in the side panel.
-- **Horizontal Display Racks** — Wall-mount style racks with vertical column positions labeled Top through Bottom. Configurable capacity.
+- **Wine Boxes** — Multi-box rows with configurable box sizes (e.g., [6, 12, 3]). Absolute depth indexing across boxes with visual dividers and fill-dot indicators.
 - **Zone Side Panel** — Click any storage zone container to open a slide-out panel (same UX as the depth panel) showing all wines in that zone with add/remove capability.
-- **Per-Row Type Selector** — Each rack row can be independently set to Slots (grid), Bulk Bin, Wine Box, or Horizontal via the rack settings dialog.
+- **Per-Row Type Selector** — Each rack row can be independently set to Slots (grid), Bulk Bin, or Wine Box via the rack settings dialog.
 
 ### Inventory Browser
 - **Full Inventory Dialog** — Browse, search, sort, and export your entire cellar collection from the 📦 Inventory button
@@ -37,7 +37,12 @@ A custom Home Assistant integration for managing your wine collection. Track bot
 - **Sort Options** — Sort by name, winery, vintage, type, rating, price, date added, or cabinet location (ascending/descending)
 - **Type Filter Chips** — Quick-filter by wine type (All / Red / White / Rosé / Sparkling / Dessert)
 - **Summary Stats** — Total bottles, estimated collection value, and type breakdown with colored indicators
+- **Disposition Search** — Search by "Drink", "Hold", or "Past Peak" to filter by disposition; also searches drink window field
 - **CSV Export** — Download your filtered/sorted inventory as a date-stamped CSV file with 26 data columns
+- **Server Backup** — Save timestamped backups to the HA server (config/wine_cellar_backups/) with one click
+- **Server Restore** — Browse and restore from any previous server backup with a date/size picker
+- **Download/Upload** — Download the full cellar as JSON or upload a JSON backup to restore
+- **CSV Import** — Import wines from a CSV file
 - **Click to Detail** — Tap any wine in the inventory to open the full detail dialog with edit, move, and action capabilities
 
 ### Unassigned Wines
@@ -56,7 +61,7 @@ A custom Home Assistant integration for managing your wine collection. Track bot
 ### AI-Powered Wine Intelligence
 - **One-Scan Label Recognition** — Snap a photo of a wine label and Google Gemini identifies the wine and provides a full sommelier assessment in one call: name, winery, vintage, type, region, grape variety, disposition, drink window, tasting description, estimated price, and critic rating estimates (Wine Spectator, Robert Parker, James Dunnuck, Antonio Galloni)
 - **AI Batch Scan** — One-click full AI analysis on your entire cellar: disposition, drink windows, descriptions, pricing, and ratings for every bottle
-- **Wine List / Receipt Scanner** — Photograph a restaurant wine list or store receipt and get every wine extracted with AI-powered analysis in a single call: critic scores, disposition, drink window, description, retail price estimates, and markup percentages. Highlights best-value picks and lets you add any wine to your cellar or buy list with one tap. Optionally enrich with Vivino ratings and images.
+- **Wine List / Receipt Scanner** — Photograph a restaurant wine list or store receipt and get every wine extracted with AI-powered analysis in a single call: critic scores, disposition, drink window, description, retail price estimates, and markup percentages. Highlights best-value picks and lets you add any wine to your cellar or buy list with one tap. Shows "IN CELLAR" badge and your personal score when a scanned wine matches one already in your collection. Optionally enrich with Vivino ratings and images. Supports long lists (up to 3 minute timeout).
 - **Gemini Price Fallback** — When Vivino has no pricing data, Gemini AI provides estimated retail prices as a fallback for single wine refresh and batch scans
 - **Auto-Enrich on Add** — When you add a wine, Vivino data (rating, price, description, food pairings) is automatically fetched in the background
 
@@ -123,7 +128,7 @@ To enable label recognition, AI analysis, wine list scanning, and batch AI scann
 
 ## Default Cabinet Layout
 
-The integration ships with 3 cabinet sections, each with 10 rows and 9 columns (90 slots per section, 270 total). The bottom row of each section defaults to a "Box Storage" bulk bin zone. Rack dimensions, names, depth (1-6 bottles deep), and per-row storage types (Slots, Bulk Bin, Wine Box, Horizontal) can all be customized through the **Manage Racks** button in the tab bar.
+The integration ships with 3 cabinet sections, each with 10 rows and 9 columns (90 slots per section, 270 total). The bottom row of each section defaults to a bulk bin storage zone. Rack dimensions, names, depth (1-6 bottles deep), orientation (vertical/horizontal), and per-row storage types (Slots, Bulk Bin, Wine Box) can all be customized through the **Manage Racks** button in the tab bar.
 
 ## Data Sources
 
