@@ -62,14 +62,18 @@ class WineCellarStorage:
             await self.async_save()
         else:
             self._data = data
-            # Migrate: ensure all cabinets have storage_rows field
+            # Migrate: ensure all cabinets have storage_rows and depth fields
             for cab in self._data.get(CONF_CABINETS, []):
                 if "storage_rows" not in cab:
                     cab["storage_rows"] = []
-            # Ensure all wines have retail_price field
+                if "depth" not in cab:
+                    cab["depth"] = 1
+            # Ensure all wines have retail_price and depth fields
             for wine in self._data.get(CONF_WINES, []):
                 if "retail_price" not in wine:
                     wine["retail_price"] = None
+                if "depth" not in wine:
+                    wine["depth"] = 0
             # Migrate: ensure buy_list exists
             if CONF_BUY_LIST not in self._data:
                 self._data[CONF_BUY_LIST] = []
@@ -104,6 +108,7 @@ class WineCellarStorage:
             "cabinet_id": wine_data.get("cabinet_id", ""),
             "row": wine_data.get("row"),
             "col": wine_data.get("col"),
+            "depth": wine_data.get("depth", 0),
             "zone": wine_data.get("zone", ""),
             "user_rating": wine_data.get("user_rating"),
             "tasting_notes": wine_data.get("tasting_notes"),
@@ -135,11 +140,12 @@ class WineCellarStorage:
         return None
 
     def move_wine(
-        self, wine_id: str, cabinet_id: str, row: int | None = None, col: int | None = None, zone: str = ""
+        self, wine_id: str, cabinet_id: str, row: int | None = None, col: int | None = None,
+        zone: str = "", depth: int = 0
     ) -> dict[str, Any] | None:
         """Move a wine to a new location."""
         return self.update_wine(
-            wine_id, {"cabinet_id": cabinet_id, "row": row, "col": col, "zone": zone}
+            wine_id, {"cabinet_id": cabinet_id, "row": row, "col": col, "zone": zone, "depth": depth}
         )
 
     def get_wine(self, wine_id: str) -> dict[str, Any] | None:
@@ -168,6 +174,7 @@ class WineCellarStorage:
             "type": cabinet_data.get("type", "grid"),
             "rows": cabinet_data.get("rows", 8),
             "cols": cabinet_data.get("cols", 8),
+            "depth": cabinet_data.get("depth", 1),
             "has_bottom_zone": cabinet_data.get("has_bottom_zone", False),
             "bottom_zone_name": cabinet_data.get("bottom_zone_name", "Storage"),
             "storage_rows": cabinet_data.get("storage_rows", []),
@@ -209,7 +216,7 @@ class WineCellarStorage:
             if c.get("type") == "grid":
                 storage_row_count = len(c.get("storage_rows", []))
                 grid_rows = c.get("rows", 0) - storage_row_count
-                total_capacity += max(0, grid_rows) * c.get("cols", 0)
+                total_capacity += max(0, grid_rows) * c.get("cols", 0) * c.get("depth", 1)
         by_type: dict[str, int] = {}
         by_cabinet: dict[str, int] = {}
         total_value = 0.0

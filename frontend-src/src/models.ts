@@ -29,6 +29,7 @@ export interface Wine {
   cabinet_id: string;
   row: number | null;
   col: number | null;
+  depth: number;
   zone: string;
   user_rating: number | null;
   tasting_notes: TastingNotes | null;
@@ -49,6 +50,7 @@ export interface Cabinet {
   type: "grid" | "zone";
   rows: number;
   cols: number;
+  depth: number;
   has_bottom_zone: boolean;
   bottom_zone_name: string;
   storage_rows: StorageRow[];

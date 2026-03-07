@@ -258,6 +258,7 @@ async def ws_update_wine(
         vol.Optional("row"): int,
         vol.Optional("col"): int,
         vol.Optional("zone", default=""): str,
+        vol.Optional("depth", default=0): int,
     }
 )
 @websocket_api.async_response
@@ -274,6 +275,7 @@ async def ws_move_wine(
         msg.get("row"),
         msg.get("col"),
         msg.get("zone", ""),
+        msg.get("depth", 0),
     )
     if wine:
         await storage.async_save()
@@ -1012,6 +1014,7 @@ async def ws_remove_from_buy_list(
         vol.Optional("row"): int,
         vol.Optional("col"): int,
         vol.Optional("zone", default=""): str,
+        vol.Optional("depth", default=0): int,
     }
 )
 @websocket_api.async_response
@@ -1034,6 +1037,7 @@ async def ws_move_to_cellar(
     wine_data["row"] = msg.get("row")
     wine_data["col"] = msg.get("col")
     wine_data["zone"] = msg.get("zone", "")
+    wine_data["depth"] = msg.get("depth", 0)
 
     wine = storage.add_wine(wine_data)
     storage.remove_buy_list_item(msg["item_id"])

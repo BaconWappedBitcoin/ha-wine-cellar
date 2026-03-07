@@ -29,7 +29,7 @@ export class WineCellarCard extends LitElement {
   @state() private _selectedWine: Wine | null = null;
   @state() private _showDetail = false;
   @state() private _showAddDialog = false;
-  @state() private _addPreselect = { cabinet: "", row: null as number | null, col: null as number | null, zone: "" };
+  @state() private _addPreselect = { cabinet: "", row: null as number | null, col: null as number | null, zone: "", depth: 0 };
   @state() private _loading = true;
   @state() private _showRackSettings = false;
   @state() private _copiedWine: Wine | null = null;
@@ -434,23 +434,25 @@ export class WineCellarCard extends LitElement {
 
   // --- Copy/Paste wine ---
   private _onCellClick(e: CustomEvent) {
-    const { wine, cabinet, row, col } = e.detail;
+    const { wine, cabinet, row, col, wineCount = 0, cabinetDepth = 1 } = e.detail;
+    const hasRoom = wineCount < cabinetDepth;
+    const nextDepth = wineCount;
 
-    // If we have a copied wine and clicked an empty cell, paste it
-    if (this._copiedWine && !wine) {
-      this._pasteWine(cabinet.id, row, col);
+    // If we have a copied wine and cell has room, paste it
+    if (this._copiedWine && hasRoom) {
+      this._pasteWine(cabinet.id, row, col, nextDepth);
       return;
     }
 
-    // If we're moving a wine, place it here
-    if (this._movingWine) {
-      this._executeMoveWine(cabinet.id, row, col, "");
+    // If we're moving a wine and cell has room, place it here
+    if (this._movingWine && hasRoom) {
+      this._executeMoveWine(cabinet.id, row, col, "", nextDepth);
       return;
     }
 
-    // If we're placing a buy list item, move it to cellar
-    if (this._movingBuyListItem && !wine) {
-      this._executeMoveTocellar(cabinet.id, row, col, "");
+    // If we're placing a buy list item and cell has room, move it to cellar
+    if (this._movingBuyListItem && hasRoom) {
+      this._executeMoveTocellar(cabinet.id, row, col, "", nextDepth);
       return;
     }
 
@@ -458,7 +460,7 @@ export class WineCellarCard extends LitElement {
       this._selectedWine = wine;
       this._showDetail = true;
     } else {
-      this._addPreselect = { cabinet: cabinet.id, row, col, zone: "" };
+      this._addPreselect = { cabinet: cabinet.id, row, col, zone: "", depth: 0 };
       this._showAddDialog = true;
     }
   }
@@ -482,12 +484,12 @@ export class WineCellarCard extends LitElement {
       this._selectedWine = wine;
       this._showDetail = true;
     } else {
-      this._addPreselect = { cabinet: cabinet.id, row: null, col: null, zone: zone || "bottom" };
+      this._addPreselect = { cabinet: cabinet.id, row: null, col: null, zone: zone || "bottom", depth: 0 };
       this._showAddDialog = true;
     }
   }
 
-  private async _executeMoveWine(cabinetId: string, row: number | null, col: number | null, zone: string) {
+  private async _executeMoveWine(cabinetId: string, row: number | null, col: number | null, zone: string, depth = 0) {
     if (!this._movingWine) return;
     try {
       await this.hass.callWS({
@@ -497,6 +499,7 @@ export class WineCellarCard extends LitElement {
         row,
         col,
         zone,
+        depth,
       });
       this._showToast(`Moved "${this._movingWine.name}"`);
       this._movingWine = null;
@@ -557,7 +560,7 @@ export class WineCellarCard extends LitElement {
     this._showDetail = false;
   }
 
-  private async _pasteWine(cabinetId: string, row: number, col: number) {
+  private async _pasteWine(cabinetId: string, row: number, col: number, depth = 0) {
     if (!this._copiedWine) return;
     try {
       await this.hass.callWS({
@@ -583,6 +586,7 @@ export class WineCellarCard extends LitElement {
           cabinet_id: cabinetId,
           row,
           col,
+          depth,
           zone: "",
           user_rating: this._copiedWine.user_rating,
           disposition: this._copiedWine.disposition,
@@ -660,7 +664,7 @@ export class WineCellarCard extends LitElement {
     this._showToast(`Tap a cell to place "${item.name}"`);
   }
 
-  private async _executeMoveTocellar(cabinetId: string, row: number | null, col: number | null, zone: string) {
+  private async _executeMoveTocellar(cabinetId: string, row: number | null, col: number | null, zone: string, depth = 0) {
     if (!this._movingBuyListItem) return;
     try {
       await this.hass.callWS({
@@ -670,6 +674,7 @@ export class WineCellarCard extends LitElement {
         row,
         col,
         zone,
+        depth,
       });
       this._showToast(`Moved "${this._movingBuyListItem.name}" to cellar`);
       this._movingBuyListItem = null;
@@ -759,13 +764,6 @@ export class WineCellarCard extends LitElement {
               </button>
             ` : nothing}
             <button
-              class="btn btn-icon"
-              @click=${() => (this._showRackSettings = true)}
-              title="Manage Racks"
-            >
-              ⚙️
-            </button>
-            <button
               class="btn btn-primary"
               style="background: #e65100;"
               @click=${() => { this._addToBuyListMode = true; this._showAddDialog = true; }}
@@ -775,7 +773,7 @@ export class WineCellarCard extends LitElement {
             <button
               class="btn btn-primary"
               @click=${() => {
-                this._addPreselect = { cabinet: "", row: null, col: null, zone: "" };
+                this._addPreselect = { cabinet: "", row: null, col: null, zone: "", depth: 0 };
                 this._showAddDialog = true;
               }}
             >
@@ -870,6 +868,14 @@ export class WineCellarCard extends LitElement {
             style="${this._activeTab === "buy-list" ? "border-color: #e65100; color: #e65100;" : ""}"
           >
             Buy List (${this._buyList.length})
+          </button>
+          <button
+            class="tab"
+            @click=${() => (this._showRackSettings = true)}
+            title="Manage Racks"
+            style="border-color: transparent; padding: 6px 10px;"
+          >
+            ⚙️
           </button>
         </div>
 
@@ -1076,6 +1082,7 @@ export class WineCellarCard extends LitElement {
           .preselectedRow=${this._addPreselect.row}
           .preselectedCol=${this._addPreselect.col}
           .preselectedZone=${this._addPreselect.zone}
+          .preselectedDepth=${this._addPreselect.depth || 0}
           .buyListMode=${this._addToBuyListMode}
           @close=${() => { this._showAddDialog = false; this._addToBuyListMode = false; }}
           @wine-added=${this._onWineAdded}

@@ -25,6 +25,7 @@ export class AddWineDialog extends LitElement {
   @property({ attribute: false }) preselectedRow: number | null = null;
   @property({ attribute: false }) preselectedCol: number | null = null;
   @property({ attribute: false }) preselectedZone: string = "";
+  @property({ attribute: false }) preselectedDepth: number = 0;
   @property({ type: Boolean }) buyListMode = false;
 
   @state() private _step: Step = "scan";
@@ -372,6 +373,7 @@ export class AddWineDialog extends LitElement {
           cabinet_id: this.preselectedCabinet || "",
           row: this.preselectedRow,
           col: this.preselectedCol,
+          depth: this.preselectedDepth || 0,
           zone: this.preselectedZone || "",
         };
         this._checkCapabilities();

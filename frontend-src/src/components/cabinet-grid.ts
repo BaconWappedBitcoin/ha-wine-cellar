@@ -196,6 +196,26 @@ export class CabinetGrid extends LitElement {
         display: block;
       }
 
+      .cell .depth-badge {
+        position: absolute;
+        top: -2px;
+        left: -2px;
+        font-size: 7px;
+        font-weight: 700;
+        color: #fff;
+        background: rgba(30, 136, 229, 0.85);
+        border-radius: 50%;
+        width: 14px;
+        height: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 3;
+        pointer-events: none;
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+      }
+
       .bottom-zone {
         margin-top: 8px;
         background: linear-gradient(135deg, #6b5010 0%, #8b6914 100%);
@@ -324,8 +344,8 @@ export class CabinetGrid extends LitElement {
     `,
   ];
 
-  private _getWineAt(row: number, col: number): Wine | undefined {
-    return this.wines.find(
+  private _getWinesAt(row: number, col: number): Wine[] {
+    return this.wines.filter(
       (w) =>
         w.cabinet_id === this.cabinet.id && w.row === row && w.col === col
     );
@@ -354,7 +374,7 @@ export class CabinetGrid extends LitElement {
     );
   }
 
-  private _onCellClick(row: number, col: number, wine?: Wine) {
+  private _onCellClick(row: number, col: number, wine?: Wine, wineCount = 0, cabinetDepth = 1) {
     this.dispatchEvent(
       new CustomEvent("cell-click", {
         detail: {
@@ -362,6 +382,8 @@ export class CabinetGrid extends LitElement {
           row,
           col,
           wine,
+          wineCount,
+          cabinetDepth,
         },
         bubbles: true,
         composed: true,
@@ -514,41 +536,49 @@ export class CabinetGrid extends LitElement {
   }
 
   private _renderGridRow(row: number, cols: number) {
+    const cabinetDepth = (this.cabinet as any).depth || 1;
     return html`
       <div class="row">
         ${Array.from({ length: cols }, (_, col) => {
-          const wine = this._getWineAt(row, col);
-          const bgColor = wine
-            ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red
+          const wines = this._getWinesAt(row, col);
+          const wineCount = wines.length;
+          const frontWine = wines.length > 0
+            ? wines.sort((a, b) => (a.depth || 0) - (b.depth || 0))[0]
+            : undefined;
+          const bgColor = frontWine
+            ? WINE_TYPE_COLORS[frontWine.type as WineType] || WINE_TYPE_COLORS.red
             : "transparent";
-          const disp = wine?.disposition || "";
+          const disp = frontWine?.disposition || "";
           const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
-          const ratingDisplay = wine?.rating ? wine.rating.toFixed(1) : "";
-          const ringColor = wine ? this._brightenColor(bgColor) : "";
+          const ratingDisplay = frontWine?.rating ? frontWine.rating.toFixed(1) : "";
+          const ringColor = frontWine ? this._brightenColor(bgColor) : "";
           const cellKey = `${row}-${col}`;
           const isDragOver = this._dragOverCell === cellKey;
           return html`
             <div
-              class="cell ${wine ? "filled" : "empty"} ${isDragOver ? "drag-over" : ""}"
-              style=${wine ? `background: ${bgColor}; --bottle-type-color: ${ringColor}` : ""}
-              draggable=${wine ? "true" : "false"}
-              @click=${() => this._onCellClick(row, col, wine)}
-              @touchstart=${wine ? () => this._onTouchStart(wine) : nothing}
-              @touchend=${wine ? () => this._onTouchEnd() : nothing}
-              @touchmove=${wine ? () => this._onTouchMove() : nothing}
-              @dragstart=${wine ? (e: DragEvent) => this._onDragStart(e, wine, row, col) : nothing}
-              @dragend=${wine ? (e: DragEvent) => this._onDragEnd(e) : nothing}
+              class="cell ${frontWine ? "filled" : "empty"} ${isDragOver ? "drag-over" : ""}"
+              style=${frontWine ? `background: ${bgColor}; --bottle-type-color: ${ringColor}` : ""}
+              draggable=${frontWine ? "true" : "false"}
+              @click=${() => this._onCellClick(row, col, frontWine, wineCount, cabinetDepth)}
+              @touchstart=${frontWine ? () => this._onTouchStart(frontWine) : nothing}
+              @touchend=${frontWine ? () => this._onTouchEnd() : nothing}
+              @touchmove=${frontWine ? () => this._onTouchMove() : nothing}
+              @dragstart=${frontWine ? (e: DragEvent) => this._onDragStart(e, frontWine, row, col) : nothing}
+              @dragend=${frontWine ? (e: DragEvent) => this._onDragEnd(e) : nothing}
               @dragover=${(e: DragEvent) => this._onDragOver(e, cellKey)}
               @dragleave=${(e: DragEvent) => this._onDragLeave(e)}
               @drop=${(e: DragEvent) => this._onDrop(e, row, col)}
-              title=${wine ? `${wine.name} (${wine.vintage || "NV"})${wine.rating ? ` ★${wine.rating}` : ""}` : `Empty - Row ${row + 1}, Col ${col + 1}`}
+              title=${frontWine
+                ? `${frontWine.name} (${frontWine.vintage || "NV"})${frontWine.rating ? ` ★${frontWine.rating}` : ""}${wineCount > 1 ? ` [${wineCount}/${cabinetDepth} deep]` : ""}`
+                : `Empty - Row ${row + 1}, Col ${col + 1}`}
             >
-              ${wine
+              ${frontWine
                 ? html`
-                    ${wine.image_url ? html`<img class="wine-thumb" src="${wine.image_url}" alt="" />` : nothing}
-                    <span class="bottle-label">${wine.vintage || "NV"}</span>
+                    ${frontWine.image_url ? html`<img class="wine-thumb" src="${frontWine.image_url}" alt="" />` : nothing}
+                    <span class="bottle-label">${frontWine.vintage || "NV"}</span>
                     ${dispClass ? html`<span class="disposition ${dispClass}">${disp}</span>` : nothing}
                     ${ratingDisplay ? html`<span class="rating-badge">★${ratingDisplay}</span>` : nothing}
+                    ${wineCount > 1 ? html`<span class="depth-badge">${wineCount}</span>` : nothing}
                   `
                 : nothing}
             </div>

@@ -344,8 +344,8 @@ let CabinetGrid = class CabinetGrid extends i {
         // --- Long press (mobile move) ---
         this._longPressTimer = null;
     }
-    _getWineAt(row, col) {
-        return this.wines.find((w) => w.cabinet_id === this.cabinet.id && w.row === row && w.col === col);
+    _getWinesAt(row, col) {
+        return this.wines.filter((w) => w.cabinet_id === this.cabinet.id && w.row === row && w.col === col);
     }
     _getStorageRowSet() {
         const rows = this.cabinet.storage_rows;
@@ -362,13 +362,15 @@ let CabinetGrid = class CabinetGrid extends i {
     _getStorageRowWines(row) {
         return this.wines.filter((w) => w.cabinet_id === this.cabinet.id && w.zone === `storage-${row}`);
     }
-    _onCellClick(row, col, wine) {
+    _onCellClick(row, col, wine, wineCount = 0, cabinetDepth = 1) {
         this.dispatchEvent(new CustomEvent("cell-click", {
             detail: {
                 cabinet: this.cabinet,
                 row,
                 col,
                 wine,
+                wineCount,
+                cabinetDepth,
             },
             bubbles: true,
             composed: true,
@@ -503,41 +505,49 @@ let CabinetGrid = class CabinetGrid extends i {
     `;
     }
     _renderGridRow(row, cols) {
+        const cabinetDepth = this.cabinet.depth || 1;
         return b `
       <div class="row">
         ${Array.from({ length: cols }, (_, col) => {
-            const wine = this._getWineAt(row, col);
-            const bgColor = wine
-                ? WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red
+            const wines = this._getWinesAt(row, col);
+            const wineCount = wines.length;
+            const frontWine = wines.length > 0
+                ? wines.sort((a, b) => (a.depth || 0) - (b.depth || 0))[0]
+                : undefined;
+            const bgColor = frontWine
+                ? WINE_TYPE_COLORS[frontWine.type] || WINE_TYPE_COLORS.red
                 : "transparent";
-            const disp = wine?.disposition || "";
+            const disp = frontWine?.disposition || "";
             const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
-            const ratingDisplay = wine?.rating ? wine.rating.toFixed(1) : "";
-            const ringColor = wine ? this._brightenColor(bgColor) : "";
+            const ratingDisplay = frontWine?.rating ? frontWine.rating.toFixed(1) : "";
+            const ringColor = frontWine ? this._brightenColor(bgColor) : "";
             const cellKey = `${row}-${col}`;
             const isDragOver = this._dragOverCell === cellKey;
             return b `
             <div
-              class="cell ${wine ? "filled" : "empty"} ${isDragOver ? "drag-over" : ""}"
-              style=${wine ? `background: ${bgColor}; --bottle-type-color: ${ringColor}` : ""}
-              draggable=${wine ? "true" : "false"}
-              @click=${() => this._onCellClick(row, col, wine)}
-              @touchstart=${wine ? () => this._onTouchStart(wine) : A}
-              @touchend=${wine ? () => this._onTouchEnd() : A}
-              @touchmove=${wine ? () => this._onTouchMove() : A}
-              @dragstart=${wine ? (e) => this._onDragStart(e, wine, row, col) : A}
-              @dragend=${wine ? (e) => this._onDragEnd(e) : A}
+              class="cell ${frontWine ? "filled" : "empty"} ${isDragOver ? "drag-over" : ""}"
+              style=${frontWine ? `background: ${bgColor}; --bottle-type-color: ${ringColor}` : ""}
+              draggable=${frontWine ? "true" : "false"}
+              @click=${() => this._onCellClick(row, col, frontWine, wineCount, cabinetDepth)}
+              @touchstart=${frontWine ? () => this._onTouchStart(frontWine) : A}
+              @touchend=${frontWine ? () => this._onTouchEnd() : A}
+              @touchmove=${frontWine ? () => this._onTouchMove() : A}
+              @dragstart=${frontWine ? (e) => this._onDragStart(e, frontWine, row, col) : A}
+              @dragend=${frontWine ? (e) => this._onDragEnd(e) : A}
               @dragover=${(e) => this._onDragOver(e, cellKey)}
               @dragleave=${(e) => this._onDragLeave(e)}
               @drop=${(e) => this._onDrop(e, row, col)}
-              title=${wine ? `${wine.name} (${wine.vintage || "NV"})${wine.rating ? ` ★${wine.rating}` : ""}` : `Empty - Row ${row + 1}, Col ${col + 1}`}
+              title=${frontWine
+                ? `${frontWine.name} (${frontWine.vintage || "NV"})${frontWine.rating ? ` ★${frontWine.rating}` : ""}${wineCount > 1 ? ` [${wineCount}/${cabinetDepth} deep]` : ""}`
+                : `Empty - Row ${row + 1}, Col ${col + 1}`}
             >
-              ${wine
+              ${frontWine
                 ? b `
-                    ${wine.image_url ? b `<img class="wine-thumb" src="${wine.image_url}" alt="" />` : A}
-                    <span class="bottle-label">${wine.vintage || "NV"}</span>
+                    ${frontWine.image_url ? b `<img class="wine-thumb" src="${frontWine.image_url}" alt="" />` : A}
+                    <span class="bottle-label">${frontWine.vintage || "NV"}</span>
                     ${dispClass ? b `<span class="disposition ${dispClass}">${disp}</span>` : A}
                     ${ratingDisplay ? b `<span class="rating-badge">★${ratingDisplay}</span>` : A}
+                    ${wineCount > 1 ? b `<span class="depth-badge">${wineCount}</span>` : A}
                   `
                 : A}
             </div>
@@ -774,6 +784,26 @@ CabinetGrid.styles = [
 
       .cell.filled:hover .rating-badge {
         display: block;
+      }
+
+      .cell .depth-badge {
+        position: absolute;
+        top: -2px;
+        left: -2px;
+        font-size: 7px;
+        font-weight: 700;
+        color: #fff;
+        background: rgba(30, 136, 229, 0.85);
+        border-radius: 50%;
+        width: 14px;
+        height: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 3;
+        pointer-events: none;
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
       }
 
       .bottom-zone {
@@ -2614,6 +2644,7 @@ let AddWineDialog = class AddWineDialog extends i {
         this.preselectedRow = null;
         this.preselectedCol = null;
         this.preselectedZone = "";
+        this.preselectedDepth = 0;
         this.buyListMode = false;
         this._step = "scan";
         this._scanMode = "idle";
@@ -2682,6 +2713,7 @@ let AddWineDialog = class AddWineDialog extends i {
                     cabinet_id: this.preselectedCabinet || "",
                     row: this.preselectedRow,
                     col: this.preselectedCol,
+                    depth: this.preselectedDepth || 0,
                     zone: this.preselectedZone || "",
                 };
                 this._checkCapabilities();
@@ -3619,6 +3651,9 @@ __decorate([
     n({ attribute: false })
 ], AddWineDialog.prototype, "preselectedZone", void 0);
 __decorate([
+    n({ attribute: false })
+], AddWineDialog.prototype, "preselectedDepth", void 0);
+__decorate([
     n({ type: Boolean })
 ], AddWineDialog.prototype, "buyListMode", void 0);
 __decorate([
@@ -3836,6 +3871,7 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
             name: "",
             rows: 8,
             cols: 8,
+            depth: 1,
             has_bottom_zone: false,
             bottom_zone_name: "",
         };
@@ -3878,6 +3914,7 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
                     name: this._editCabinet.name || "New Rack",
                     rows: this._editCabinet.rows || 8,
                     cols: this._editCabinet.cols || 8,
+                    depth: this._editCabinet.depth || 1,
                     has_bottom_zone: false,
                     bottom_zone_name: "",
                     storage_rows: this._editStorageRows,
@@ -3908,6 +3945,7 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
                     name: this._editCabinet.name,
                     rows: newRows,
                     cols: newCols,
+                    depth: this._editCabinet.depth || 1,
                     has_bottom_zone: false,
                     bottom_zone_name: "",
                     storage_rows: validStorageRows,
@@ -4005,7 +4043,7 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
                   <div class="rack-info">
                     <div class="rack-name">${cab.name}</div>
                     <div class="rack-meta">
-                      ${cab.rows} rows × ${cab.cols} cols
+                      ${cab.rows} rows × ${cab.cols} cols${(cab.depth || 1) > 1 ? ` × ${cab.depth} deep` : ""}
                       · ${this._winesInCabinet(cab.id)} bottles
                       ${storageCount > 0 ? ` · ${storageCount} storage row${storageCount > 1 ? "s" : ""}` : ""}
                       ${cab.has_bottom_zone ? " · + bottom zone" : ""}
@@ -4104,6 +4142,21 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
             cols: parseInt(e.target.value) || 1,
         })}
             />
+          </div>
+          <div class="form-group">
+            <label>Depth</label>
+            <select
+              .value=${(this._editCabinet.depth || 1).toString()}
+              @change=${(e) => (this._editCabinet = {
+            ...this._editCabinet,
+            depth: parseInt(e.target.value) || 1,
+        })}
+              style="padding: 8px; border: 1px solid var(--wc-border); border-radius: 8px; background: var(--wc-bg); color: var(--wc-text); font-size: 1em;"
+            >
+              <option value="1">1 deep</option>
+              <option value="2">2 deep</option>
+              <option value="3">3 deep</option>
+            </select>
           </div>
         </div>
 
@@ -5338,7 +5391,7 @@ let WineCellarCard = class WineCellarCard extends i {
         this._selectedWine = null;
         this._showDetail = false;
         this._showAddDialog = false;
-        this._addPreselect = { cabinet: "", row: null, col: null, zone: "" };
+        this._addPreselect = { cabinet: "", row: null, col: null, zone: "", depth: 0 };
         this._loading = true;
         this._showRackSettings = false;
         this._copiedWine = null;
@@ -5428,20 +5481,22 @@ let WineCellarCard = class WineCellarCard extends i {
     }
     // --- Copy/Paste wine ---
     _onCellClick(e) {
-        const { wine, cabinet, row, col } = e.detail;
-        // If we have a copied wine and clicked an empty cell, paste it
-        if (this._copiedWine && !wine) {
-            this._pasteWine(cabinet.id, row, col);
+        const { wine, cabinet, row, col, wineCount = 0, cabinetDepth = 1 } = e.detail;
+        const hasRoom = wineCount < cabinetDepth;
+        const nextDepth = wineCount;
+        // If we have a copied wine and cell has room, paste it
+        if (this._copiedWine && hasRoom) {
+            this._pasteWine(cabinet.id, row, col, nextDepth);
             return;
         }
-        // If we're moving a wine, place it here
-        if (this._movingWine) {
-            this._executeMoveWine(cabinet.id, row, col, "");
+        // If we're moving a wine and cell has room, place it here
+        if (this._movingWine && hasRoom) {
+            this._executeMoveWine(cabinet.id, row, col, "", nextDepth);
             return;
         }
-        // If we're placing a buy list item, move it to cellar
-        if (this._movingBuyListItem && !wine) {
-            this._executeMoveTocellar(cabinet.id, row, col, "");
+        // If we're placing a buy list item and cell has room, move it to cellar
+        if (this._movingBuyListItem && hasRoom) {
+            this._executeMoveTocellar(cabinet.id, row, col, "", nextDepth);
             return;
         }
         if (wine) {
@@ -5449,7 +5504,7 @@ let WineCellarCard = class WineCellarCard extends i {
             this._showDetail = true;
         }
         else {
-            this._addPreselect = { cabinet: cabinet.id, row, col, zone: "" };
+            this._addPreselect = { cabinet: cabinet.id, row, col, zone: "", depth: 0 };
             this._showAddDialog = true;
         }
     }
@@ -5470,11 +5525,11 @@ let WineCellarCard = class WineCellarCard extends i {
             this._showDetail = true;
         }
         else {
-            this._addPreselect = { cabinet: cabinet.id, row: null, col: null, zone: zone || "bottom" };
+            this._addPreselect = { cabinet: cabinet.id, row: null, col: null, zone: zone || "bottom", depth: 0 };
             this._showAddDialog = true;
         }
     }
-    async _executeMoveWine(cabinetId, row, col, zone) {
+    async _executeMoveWine(cabinetId, row, col, zone, depth = 0) {
         if (!this._movingWine)
             return;
         try {
@@ -5485,6 +5540,7 @@ let WineCellarCard = class WineCellarCard extends i {
                 row,
                 col,
                 zone,
+                depth,
             });
             this._showToast(`Moved "${this._movingWine.name}"`);
             this._movingWine = null;
@@ -5539,7 +5595,7 @@ let WineCellarCard = class WineCellarCard extends i {
         this._showToast(`Copied "${wine.name}" — tap empty cells to paste`);
         this._showDetail = false;
     }
-    async _pasteWine(cabinetId, row, col) {
+    async _pasteWine(cabinetId, row, col, depth = 0) {
         if (!this._copiedWine)
             return;
         try {
@@ -5566,6 +5622,7 @@ let WineCellarCard = class WineCellarCard extends i {
                     cabinet_id: cabinetId,
                     row,
                     col,
+                    depth,
                     zone: "",
                     user_rating: this._copiedWine.user_rating,
                     disposition: this._copiedWine.disposition,
@@ -5646,7 +5703,7 @@ let WineCellarCard = class WineCellarCard extends i {
         this._activeTab = "all";
         this._showToast(`Tap a cell to place "${item.name}"`);
     }
-    async _executeMoveTocellar(cabinetId, row, col, zone) {
+    async _executeMoveTocellar(cabinetId, row, col, zone, depth = 0) {
         if (!this._movingBuyListItem)
             return;
         try {
@@ -5657,6 +5714,7 @@ let WineCellarCard = class WineCellarCard extends i {
                 row,
                 col,
                 zone,
+                depth,
             });
             this._showToast(`Moved "${this._movingBuyListItem.name}" to cellar`);
             this._movingBuyListItem = null;
@@ -5741,13 +5799,6 @@ let WineCellarCard = class WineCellarCard extends i {
               </button>
             ` : A}
             <button
-              class="btn btn-icon"
-              @click=${() => (this._showRackSettings = true)}
-              title="Manage Racks"
-            >
-              ⚙️
-            </button>
-            <button
               class="btn btn-primary"
               style="background: #e65100;"
               @click=${() => { this._addToBuyListMode = true; this._showAddDialog = true; }}
@@ -5757,7 +5808,7 @@ let WineCellarCard = class WineCellarCard extends i {
             <button
               class="btn btn-primary"
               @click=${() => {
-            this._addPreselect = { cabinet: "", row: null, col: null, zone: "" };
+            this._addPreselect = { cabinet: "", row: null, col: null, zone: "", depth: 0 };
             this._showAddDialog = true;
         }}
             >
@@ -5850,6 +5901,14 @@ let WineCellarCard = class WineCellarCard extends i {
             style="${this._activeTab === "buy-list" ? "border-color: #e65100; color: #e65100;" : ""}"
           >
             Buy List (${this._buyList.length})
+          </button>
+          <button
+            class="tab"
+            @click=${() => (this._showRackSettings = true)}
+            title="Manage Racks"
+            style="border-color: transparent; padding: 6px 10px;"
+          >
+            ⚙️
           </button>
         </div>
 
@@ -6044,6 +6103,7 @@ let WineCellarCard = class WineCellarCard extends i {
           .preselectedRow=${this._addPreselect.row}
           .preselectedCol=${this._addPreselect.col}
           .preselectedZone=${this._addPreselect.zone}
+          .preselectedDepth=${this._addPreselect.depth || 0}
           .buyListMode=${this._addToBuyListMode}
           @close=${() => { this._showAddDialog = false; this._addToBuyListMode = false; }}
           @wine-added=${this._onWineAdded}

@@ -279,6 +279,7 @@ export class RackSettingsDialog extends LitElement {
       name: "",
       rows: 8,
       cols: 8,
+      depth: 1,
       has_bottom_zone: false,
       bottom_zone_name: "",
     };
@@ -328,6 +329,7 @@ export class RackSettingsDialog extends LitElement {
           name: this._editCabinet.name || "New Rack",
           rows: this._editCabinet.rows || 8,
           cols: this._editCabinet.cols || 8,
+          depth: this._editCabinet.depth || 1,
           has_bottom_zone: false,
           bottom_zone_name: "",
           storage_rows: this._editStorageRows,
@@ -360,6 +362,7 @@ export class RackSettingsDialog extends LitElement {
           name: this._editCabinet.name,
           rows: newRows,
           cols: newCols,
+          depth: this._editCabinet.depth || 1,
           has_bottom_zone: false,
           bottom_zone_name: "",
           storage_rows: validStorageRows,
@@ -462,7 +465,7 @@ export class RackSettingsDialog extends LitElement {
                   <div class="rack-info">
                     <div class="rack-name">${cab.name}</div>
                     <div class="rack-meta">
-                      ${cab.rows} rows × ${cab.cols} cols
+                      ${cab.rows} rows × ${cab.cols} cols${(cab.depth || 1) > 1 ? ` × ${cab.depth} deep` : ""}
                       · ${this._winesInCabinet(cab.id)} bottles
                       ${storageCount > 0 ? ` · ${storageCount} storage row${storageCount > 1 ? "s" : ""}` : ""}
                       ${cab.has_bottom_zone ? " · + bottom zone" : ""}
@@ -571,6 +574,22 @@ export class RackSettingsDialog extends LitElement {
                   cols: parseInt((e.target as HTMLInputElement).value) || 1,
                 })}
             />
+          </div>
+          <div class="form-group">
+            <label>Depth</label>
+            <select
+              .value=${((this._editCabinet as any).depth || 1).toString()}
+              @change=${(e: Event) =>
+                (this._editCabinet = {
+                  ...this._editCabinet,
+                  depth: parseInt((e.target as HTMLSelectElement).value) || 1,
+                })}
+              style="padding: 8px; border: 1px solid var(--wc-border); border-radius: 8px; background: var(--wc-bg); color: var(--wc-text); font-size: 1em;"
+            >
+              <option value="1">1 deep</option>
+              <option value="2">2 deep</option>
+              <option value="3">3 deep</option>
+            </select>
           </div>
         </div>
 

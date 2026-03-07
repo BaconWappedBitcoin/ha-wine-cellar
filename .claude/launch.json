@@ -7,6 +7,13 @@
       "runtimeArgs": ["run", "dev"],
       "port": 5050,
       "cwd": "frontend-src"
+    },
+    {
+      "name": "preview-server",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "5051"],
+      "port": 5051,
+      "cwd": "custom_components/wine_cellar/frontend"
     }
   ]
 }
