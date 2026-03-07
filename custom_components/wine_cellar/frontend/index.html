@@ -190,10 +190,16 @@
                 { name: "Barolo Monfortino 2016", winery: "Giacomo Conterno", region: "Piedmont", country: "Italy", vintage: 2016, type: "red", grape_variety: "Nebbiolo", price: 450 },
               ],
             };
-          case "wine_cellar/sync_save":
-            return { success: true, path: "/config/wine_cellar_backup.json", wines: mockWines.length, cabinets: mockCabinets.length };
-          case "wine_cellar/sync_load":
-            return { success: true, wines: mockWines.length, cabinets: mockCabinets.length, timestamp: new Date().toISOString() };
+          case "wine_cellar/server_backup_save":
+            return { success: true, filename: "wine_cellar_" + new Date().toISOString().replace(/[:.]/g, "").slice(0, 15) + ".json", wines: mockWines.length, cabinets: mockCabinets.length, buy_list: mockBuyList.length, timestamp: new Date().toISOString() };
+          case "wine_cellar/server_backup_list":
+            return { backups: [
+              { filename: "wine_cellar_20260307_150000.json", timestamp: "2026-03-07T15:00:00Z", wines: 19, cabinets: 3, buy_list: 4, size: 12500 },
+              { filename: "wine_cellar_20260306_120000.json", timestamp: "2026-03-06T12:00:00Z", wines: 17, cabinets: 3, buy_list: 3, size: 11200 },
+              { filename: "wine_cellar_20260305_090000.json", timestamp: "2026-03-05T09:00:00Z", wines: 15, cabinets: 3, buy_list: 2, size: 9800 },
+            ]};
+          case "wine_cellar/server_backup_restore":
+            return { success: true, filename: msg.filename, wines: mockWines.length, cabinets: mockCabinets.length, buy_list: mockBuyList.length, timestamp: new Date().toISOString() };
           case "wine_cellar/backup_data":
             return { wines: mockWines, cabinets: mockCabinets, buy_list: mockBuyList };
           case "wine_cellar/vivino_enrich":

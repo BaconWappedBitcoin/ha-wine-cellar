@@ -147,8 +147,9 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_backup)
     websocket_api.async_register_command(hass, ws_restore_backup)
     websocket_api.async_register_command(hass, ws_import_wines)
-    websocket_api.async_register_command(hass, ws_sync_save)
-    websocket_api.async_register_command(hass, ws_sync_load)
+    websocket_api.async_register_command(hass, ws_server_backup_save)
+    websocket_api.async_register_command(hass, ws_server_backup_list)
+    websocket_api.async_register_command(hass, ws_server_backup_restore)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "wine_cellar/get_wines"})
@@ -1188,62 +1189,110 @@ import json
 from pathlib import Path
 
 
-def _get_sync_path(hass: HomeAssistant) -> Path:
-    """Return the sync backup file path in HA config directory."""
-    return Path(hass.config.config_dir) / "wine_cellar_backup.json"
+def _get_server_backup_dir(hass: HomeAssistant) -> Path:
+    """Return the server backup directory in HA config directory."""
+    d = Path(hass.config.config_dir) / "wine_cellar_backups"
+    d.mkdir(exist_ok=True)
+    return d
 
 
-@websocket_api.websocket_command({vol.Required("type"): "wine_cellar/sync_save"})
+@websocket_api.websocket_command({vol.Required("type"): "wine_cellar/server_backup_save"})
 @websocket_api.async_response
-async def ws_sync_save(
+async def ws_server_backup_save(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Save cellar backup to a file on the HA server for cloud sync."""
+    """Save a timestamped cellar backup to the HA server."""
     storage = hass.data[DOMAIN]["storage"]
     backup = storage.get_backup_data()
     backup["version"] = "1.0"
-    backup["timestamp"] = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    backup["timestamp"] = now.isoformat()
 
-    sync_path = _get_sync_path(hass)
+    filename = f"wine_cellar_{now.strftime('%Y%m%d_%H%M%S')}.json"
+    backup_dir = _get_server_backup_dir(hass)
+    backup_path = backup_dir / filename
+
     try:
         await hass.async_add_executor_job(
-            sync_path.write_text, json.dumps(backup, indent=2), "utf-8"
+            backup_path.write_text, json.dumps(backup, indent=2), "utf-8"
         )
-        _LOGGER.info("Sync backup saved to %s", sync_path)
+        _LOGGER.info("Server backup saved to %s", backup_path)
         connection.send_result(msg["id"], {
             "success": True,
-            "path": str(sync_path),
+            "filename": filename,
             "wines": len(backup.get("wines", [])),
             "cabinets": len(backup.get("cabinets", [])),
             "buy_list": len(backup.get("buy_list", [])),
             "timestamp": backup["timestamp"],
         })
     except Exception as err:
-        _LOGGER.error("Failed to save sync backup: %s", err)
+        _LOGGER.error("Failed to save server backup: %s", err)
         connection.send_result(msg["id"], {"error": str(err)})
 
 
-@websocket_api.websocket_command({vol.Required("type"): "wine_cellar/sync_load"})
+@websocket_api.websocket_command({vol.Required("type"): "wine_cellar/server_backup_list"})
 @websocket_api.async_response
-async def ws_sync_load(
+async def ws_server_backup_list(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Load cellar backup from the sync file on the HA server."""
-    sync_path = _get_sync_path(hass)
+    """List available server backups."""
+    backup_dir = _get_server_backup_dir(hass)
 
-    if not sync_path.exists():
-        connection.send_result(msg["id"], {
-            "error": "No sync file found. Save a backup first.",
-            "path": str(sync_path),
-        })
+    def _list_backups() -> list[dict]:
+        files = sorted(backup_dir.glob("wine_cellar_*.json"), reverse=True)
+        result = []
+        for f in files[:20]:  # limit to 20 most recent
+            try:
+                data = json.loads(f.read_text("utf-8"))
+                result.append({
+                    "filename": f.name,
+                    "timestamp": data.get("timestamp", ""),
+                    "wines": len(data.get("wines", [])),
+                    "cabinets": len(data.get("cabinets", [])),
+                    "buy_list": len(data.get("buy_list", [])),
+                    "size": f.stat().st_size,
+                })
+            except Exception:
+                result.append({"filename": f.name, "error": "unreadable"})
+        return result
+
+    try:
+        backups = await hass.async_add_executor_job(_list_backups)
+        connection.send_result(msg["id"], {"backups": backups})
+    except Exception as err:
+        _LOGGER.error("Failed to list server backups: %s", err)
+        connection.send_result(msg["id"], {"error": str(err)})
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "wine_cellar/server_backup_restore",
+    vol.Required("filename"): str,
+})
+@websocket_api.async_response
+async def ws_server_backup_restore(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Restore cellar from a server backup file."""
+    backup_dir = _get_server_backup_dir(hass)
+    backup_path = backup_dir / msg["filename"]
+
+    # Prevent path traversal
+    if not backup_path.resolve().parent == backup_dir.resolve():
+        connection.send_result(msg["id"], {"error": "Invalid filename."})
+        return
+
+    if not backup_path.exists():
+        connection.send_result(msg["id"], {"error": f"Backup not found: {msg['filename']}"})
         return
 
     try:
-        text = await hass.async_add_executor_job(sync_path.read_text, "utf-8")
+        text = await hass.async_add_executor_job(backup_path.read_text, "utf-8")
         data = json.loads(text)
 
         wines = data.get("wines", [])
@@ -1251,9 +1300,7 @@ async def ws_sync_load(
         buy_list = data.get("buy_list", [])
 
         if not isinstance(wines, list) or not isinstance(cabinets, list):
-            connection.send_result(msg["id"], {
-                "error": "Invalid sync file format.",
-            })
+            connection.send_result(msg["id"], {"error": "Invalid backup file format."})
             return
 
         storage = hass.data[DOMAIN]["storage"]
@@ -1262,14 +1309,15 @@ async def ws_sync_load(
         hass.bus.async_fire(f"{DOMAIN}_updated")
 
         _LOGGER.info(
-            "Sync restore from %s: %d wines, %d cabinets, %d buy list items",
-            sync_path, counts["wines"], counts["cabinets"], counts["buy_list"],
+            "Server restore from %s: %d wines, %d cabinets, %d buy list items",
+            backup_path, counts["wines"], counts["cabinets"], counts["buy_list"],
         )
         connection.send_result(msg["id"], {
             "success": True,
+            "filename": msg["filename"],
             "timestamp": data.get("timestamp", ""),
             **counts,
         })
     except Exception as err:
-        _LOGGER.error("Failed to load sync backup: %s", err)
+        _LOGGER.error("Failed to restore server backup: %s", err)
         connection.send_result(msg["id"], {"error": str(err)})

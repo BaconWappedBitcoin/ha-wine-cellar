@@ -6458,10 +6458,11 @@ let InventoryDialog = class InventoryDialog extends i {
         this._confirmRestore = false;
         this._restoreData = null;
         this._statusMsg = "";
-        this._syncing = false;
-        this._confirmSyncLoad = false;
-        // ── Cloud Sync (Google Drive / file system) ──────────────────
-        this._syncSaveLabel = "";
+        this._serverBackingUp = false;
+        this._serverBackupLabel = "";
+        this._showServerRestore = false;
+        this._serverBackups = [];
+        this._serverRestoring = false;
     }
     updated(changedProps) {
         if (changedProps.has("open") && this.open) {
@@ -6473,7 +6474,7 @@ let InventoryDialog = class InventoryDialog extends i {
             this._detailWine = null;
             this._statusMsg = "";
             this._confirmRestore = false;
-            this._confirmSyncLoad = false;
+            this._showServerRestore = false;
             this._restoreData = null;
         }
     }
@@ -6809,46 +6810,59 @@ let InventoryDialog = class InventoryDialog extends i {
         this._restoring = false;
         this._restoreData = null;
     }
-    async _syncSave() {
-        this._syncing = true;
-        this._syncSaveLabel = "Saving…";
+    // ── Cloud Sync (Google Drive / file system) ──────────────────
+    async _serverBackupSave() {
+        this._serverBackingUp = true;
+        this._serverBackupLabel = "Saving…";
         this._statusMsg = "";
         try {
-            const result = await this.hass.callWS({ type: "wine_cellar/sync_save" });
+            const result = await this.hass.callWS({ type: "wine_cellar/server_backup_save" });
             if (result && result.error) {
-                this._statusMsg = `Sync save failed: ${result.error}`;
-                this._syncSaveLabel = "";
+                this._statusMsg = `Server backup failed: ${result.error}`;
+                this._serverBackupLabel = "";
             }
             else {
-                this._statusMsg = `☁️ Saved — ${result?.wines ?? "?"} wines, ${result?.cabinets ?? "?"} racks`;
-                this._syncSaveLabel = "✅ Saved!";
-                setTimeout(() => { this._syncSaveLabel = ""; }, 4000);
+                this._statusMsg = `Saved ${result?.wines ?? "?"} wines, ${result?.cabinets ?? "?"} racks to server`;
+                this._serverBackupLabel = "✅ Saved!";
+                setTimeout(() => { this._serverBackupLabel = ""; }, 4000);
             }
         }
         catch (err) {
-            this._statusMsg = `Sync save failed: ${err.message || err}`;
-            this._syncSaveLabel = "";
+            this._statusMsg = `Server backup failed: ${err.message || err}`;
+            this._serverBackupLabel = "";
         }
-        this._syncing = false;
+        this._serverBackingUp = false;
     }
-    async _syncLoad() {
-        this._confirmSyncLoad = false;
-        this._syncing = true;
+    async _serverBackupShowRestore() {
+        this._showServerRestore = true;
         this._statusMsg = "";
         try {
-            const result = await this.hass.callWS({ type: "wine_cellar/sync_load" });
+            const result = await this.hass.callWS({ type: "wine_cellar/server_backup_list" });
+            this._serverBackups = result?.backups || [];
+        }
+        catch (err) {
+            this._statusMsg = `Failed to list backups: ${err.message || err}`;
+            this._serverBackups = [];
+        }
+    }
+    async _serverBackupRestore(filename) {
+        this._showServerRestore = false;
+        this._serverRestoring = true;
+        this._statusMsg = "";
+        try {
+            const result = await this.hass.callWS({ type: "wine_cellar/server_backup_restore", filename });
             if (result.error) {
-                this._statusMsg = `Sync load failed: ${result.error}`;
+                this._statusMsg = `Restore failed: ${result.error}`;
             }
             else {
-                this._statusMsg = `☁️ Loaded from server — ${result.wines} wines, ${result.cabinets} racks${result.timestamp ? ` (backup from ${new Date(result.timestamp).toLocaleString()})` : ""}`;
+                this._statusMsg = `Restored ${result.wines} wines, ${result.cabinets} racks from ${filename}`;
                 this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
             }
         }
         catch (err) {
-            this._statusMsg = `Sync load failed: ${err.message || err}`;
+            this._statusMsg = `Restore failed: ${err.message || err}`;
         }
-        this._syncing = false;
+        this._serverRestoring = false;
     }
     // ── Helpers ───────────────────────────────────────────────────
     _downloadFile(content, filename, mimeType) {
@@ -6943,7 +6957,7 @@ let InventoryDialog = class InventoryDialog extends i {
             { id: "sparkling", label: "Sparkling" },
             { id: "dessert", label: "Dessert" },
         ];
-        const busy = this._importing || this._restoring || this._backingUp || this._syncing;
+        const busy = this._importing || this._restoring || this._backingUp || this._serverBackingUp || this._serverRestoring;
         return b `
       <div class="dialog-overlay" @click=${this._close}>
         <div class="dialog" style="max-width:800px;position:relative" @click=${(e) => e.stopPropagation()}>
@@ -7049,27 +7063,19 @@ let InventoryDialog = class InventoryDialog extends i {
             <div class="inv-footer-btns">
               <button
                 class="inv-btn"
-                @click=${this._syncSave}
+                @click=${this._serverBackupSave}
                 ?disabled=${busy}
-                title="Save backup to HA server for Google Drive sync"
+                title="Save timestamped backup to HA server"
               >
-                ${this._syncSaveLabel || "☁️ Sync Save"}
+                ${this._serverBackupLabel || "Server Backup"}
               </button>
               <button
                 class="inv-btn"
-                @click=${() => (this._confirmSyncLoad = true)}
+                @click=${this._serverBackupShowRestore}
                 ?disabled=${busy}
-                title="Load backup from HA server sync file"
+                title="Restore from a server backup"
               >
-                ☁️ Sync Load
-              </button>
-              <button
-                class="inv-btn"
-                @click=${this._triggerImportCSV}
-                ?disabled=${busy}
-                title="Import wines from a CSV file"
-              >
-                ${this._importing ? "Importing…" : "📄 Import"}
+                ${this._serverRestoring ? "Restoring…" : "Server Restore"}
               </button>
               <button
                 class="inv-btn"
@@ -7077,22 +7083,31 @@ let InventoryDialog = class InventoryDialog extends i {
                 ?disabled=${busy}
                 title="Download full cellar backup as JSON"
               >
-                ${this._backingUp ? "Saving…" : "💾 Backup"}
+                ${this._backingUp ? "Saving…" : "Download"}
               </button>
               <button
                 class="inv-btn"
                 @click=${this._triggerRestore}
                 ?disabled=${busy}
-                title="Restore cellar from a JSON backup"
+                title="Restore cellar from a JSON backup file"
               >
-                ${this._restoring ? "Restoring…" : "🔄 Restore"}
+                ${this._restoring ? "Restoring…" : "Upload"}
               </button>
               <button
-                class="inv-btn inv-btn-primary"
+                class="inv-btn"
+                @click=${this._triggerImportCSV}
+                ?disabled=${busy}
+                title="Import wines from a CSV file"
+              >
+                ${this._importing ? "Importing…" : "Import CSV"}
+              </button>
+              <button
+                class="inv-btn"
                 @click=${this._exportCSV}
                 ?disabled=${busy}
+                title="Export wines as CSV"
               >
-                📥 Export
+                Export CSV
               </button>
             </div>
           </div>
@@ -7113,22 +7128,32 @@ let InventoryDialog = class InventoryDialog extends i {
             @change=${this._handleRestoreFile}
           />
 
-          <!-- Sync Load Confirmation Overlay -->
-          ${this._confirmSyncLoad
+          <!-- Server Restore Picker Overlay -->
+          ${this._showServerRestore
             ? b `
-                <div class="inv-confirm-overlay" @click=${() => (this._confirmSyncLoad = false)}>
-                  <div class="inv-confirm-box" @click=${(e) => e.stopPropagation()}>
-                    <h3>☁️ Load from Server?</h3>
-                    <p>
-                      This will <strong>replace</strong> all your current cellar data with the server sync file.
-                      This action cannot be undone.
-                    </p>
+                <div class="inv-confirm-overlay" @click=${() => (this._showServerRestore = false)}>
+                  <div class="inv-confirm-box" style="max-width:420px" @click=${(e) => e.stopPropagation()}>
+                    <h3>Restore from Server</h3>
+                    ${this._serverBackups.length === 0
+                ? b `<p>No server backups found. Use "Server Backup" to create one.</p>`
+                : b `
+                        <p>Select a backup to restore. This will <strong>replace</strong> all current data.</p>
+                        <div style="max-height:250px;overflow-y:auto;margin:8px 0;">
+                          ${this._serverBackups.map((b$1) => b `
+                              <button
+                                class="inv-btn"
+                                style="width:100%;margin-bottom:4px;text-align:left;font-size:0.82em;padding:8px 12px;"
+                                @click=${() => this._serverBackupRestore(b$1.filename)}
+                              >
+                                <div>${b$1.timestamp ? new Date(b$1.timestamp).toLocaleString() : b$1.filename}</div>
+                                <div style="font-size:0.85em;color:var(--wc-text-secondary);">${b$1.wines} wines, ${b$1.cabinets} racks</div>
+                              </button>
+                            `)}
+                        </div>
+                      `}
                     <div class="inv-confirm-btns">
-                      <button class="inv-confirm-cancel" @click=${() => (this._confirmSyncLoad = false)}>
+                      <button class="inv-confirm-cancel" @click=${() => (this._showServerRestore = false)}>
                         Cancel
-                      </button>
-                      <button class="inv-confirm-go" @click=${this._syncLoad}>
-                        Load Now
                       </button>
                     </div>
                   </div>
@@ -7471,16 +7496,6 @@ InventoryDialog.styles = [
         cursor: not-allowed;
       }
 
-      .inv-btn-primary {
-        background: #2e7d32;
-        color: #fff;
-        border-color: #2e7d32;
-      }
-
-      .inv-btn-primary:hover {
-        background: #256d29;
-      }
-
       .inv-status {
         width: 100%;
         text-align: center;
@@ -7636,13 +7651,19 @@ __decorate([
 ], InventoryDialog.prototype, "_statusMsg", void 0);
 __decorate([
     r()
-], InventoryDialog.prototype, "_syncing", void 0);
+], InventoryDialog.prototype, "_serverBackingUp", void 0);
 __decorate([
     r()
-], InventoryDialog.prototype, "_confirmSyncLoad", void 0);
+], InventoryDialog.prototype, "_serverBackupLabel", void 0);
 __decorate([
     r()
-], InventoryDialog.prototype, "_syncSaveLabel", void 0);
+], InventoryDialog.prototype, "_showServerRestore", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_serverBackups", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_serverRestoring", void 0);
 InventoryDialog = __decorate([
     t("inventory-dialog")
 ], InventoryDialog);
