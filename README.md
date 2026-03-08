@@ -11,7 +11,7 @@ A custom Home Assistant integration for managing your wine collection. Track bot
 ## Features
 
 ### Visual Cellar Management
-- **Interactive Cabinet Grid** — Color-coded bottles by type (red, white, rosé, sparkling, dessert) with thumbnail images, disposition badges (Drink/Hold/Past Peak), and Vivino ratings
+- **Interactive Cabinet Grid** — Color-coded bottles by type (red, white, rosé, sparkling, dessert) with thumbnail images, scalable disposition badges (Drink/Hold/Past Peak), and Vivino ratings
 - **Deep Rack Support** — Racks can be 1-6 bottles deep; click any deep cell to open the depth side panel showing every bottle stacked front-to-back
 - **Depth Side Panel** — Slide-out panel reveals all bottles in a deep cell, click any wine for its detail or tap an empty slot to add a bottle at that specific depth
 - **Visual Rack Editor** — Create and edit racks with a live grid preview, stepper controls for rows/columns/depth, and per-row type selectors. Racks can be any size up to 20×20.
@@ -26,12 +26,13 @@ A custom Home Assistant integration for managing your wine collection. Track bot
 
 ### Storage Zone Types
 - **Bulk Bins** — Open storage for loosely grouped bottles (e.g., daily drinkers, pending sort). Shows individual wine squares with configurable capacity.
-- **Wine Boxes** — Multi-box rows with configurable box sizes (e.g., [6, 12, 3]). Absolute depth indexing across boxes with visual dividers and fill-dot indicators.
+- **Wine Boxes** — Multi-box rows with configurable box sizes (e.g., [6, 12, 3]). CSS-drawn box shapes with wine count displayed inside each box (e.g., "2/6") and pack size labels.
 - **Zone Side Panel** — Click any storage zone container to open a slide-out panel (same UX as the depth panel) showing all wines in that zone with add/remove capability.
 - **Per-Row Type Selector** — Each rack row can be independently set to Slots (grid), Bulk Bin, or Wine Box via the rack settings dialog.
 
-### Inventory Browser
+### Inventory Browser & Wine History
 - **Full Inventory Dialog** — Browse, search, sort, and export your entire cellar collection from the 📦 Inventory button
+- **Wine History** — Track removed bottles with reason (Drank, Gifted, Sold, Broken, Spoiled, Other). Switch between Inventory and History tabs to see your consumption log sorted by date.
 - **Multi-Field Search** — Search across name, winery, region, country, grape variety, vintage, barcode, notes, and description
 - **Sort Options** — Sort by name, winery, vintage, type, rating, price, date added, or cabinet location (ascending/descending)
 - **Type Filter Chips** — Quick-filter by wine type (All / Red / White / Rosé / Sparkling / Dessert)
@@ -143,7 +144,7 @@ The integration ships with 3 cabinet sections, each with 10 rows and 9 columns (
 | Service | Description |
 |---|---|
 | `wine_cellar.add_wine` | Add a wine bottle to your collection |
-| `wine_cellar.remove_wine` | Remove a wine bottle |
+| `wine_cellar.remove_wine` | Remove a wine bottle (optional reason: drank, gifted, sold, broken, spoiled, other) |
 | `wine_cellar.move_wine` | Move a wine to a different cabinet/position |
 | `wine_cellar.scan_barcode` | Look up a barcode and fire a result event |
 
