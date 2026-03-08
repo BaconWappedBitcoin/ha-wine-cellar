@@ -7903,7 +7903,9 @@ let WineCellarCard = class WineCellarCard extends i {
             setTimeout(() => this._loadData(), 500);
             return;
         }
-        this._loading = true;
+        const isInitialLoad = this._wines.length === 0 && this._cabinets.length === 0;
+        if (isInitialLoad)
+            this._loading = true;
         try {
             const [winesResult, cabinetsResult, statsResult, capResult, buyListResult] = await Promise.all([
                 this.hass.callWS({ type: "wine_cellar/get_wines" }),
