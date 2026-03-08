@@ -89,6 +89,7 @@ export class CabinetGrid extends LitElement {
         position: relative;
         min-width: 0;
         z-index: 1;
+        container-type: inline-size;
       }
 
       .cell.empty {
@@ -148,10 +149,10 @@ export class CabinetGrid extends LitElement {
         top: 50%;
         left: 50%;
         transform: translate(-50%, -50%);
-        width: 20px;
-        height: 20px;
+        width: 65%;
+        height: 65%;
         border-radius: 50%;
-        font-size: 11px;
+        font-size: clamp(7px, 30cqi, 14px);
         font-weight: 700;
         display: flex;
         align-items: center;
@@ -344,6 +345,53 @@ export class CabinetGrid extends LitElement {
 
       .zone-box-row:hover {
         background: linear-gradient(135deg, #7a5a12 0%, #9a7820 100%);
+      }
+
+      .zone-box-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        padding: 4px 0;
+      }
+
+      .zone-box-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        min-width: 40px;
+      }
+
+      .zone-box-shape {
+        font-size: 1.3em;
+        line-height: 1;
+      }
+
+      .zone-box-count {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.7em;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.4);
+        background: rgba(255, 255, 255, 0.08);
+        border: 1.5px solid rgba(255, 255, 255, 0.2);
+      }
+
+      .zone-box-count.filled {
+        color: #fff;
+        background: var(--wc-primary, #722F37);
+        border-color: rgba(255, 255, 255, 0.5);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+      }
+
+      .zone-box-size {
+        font-size: 0.55em;
+        color: rgba(255, 255, 255, 0.5);
       }
 
       /* Phone: tighter spacing, smaller elements */
@@ -629,7 +677,11 @@ export class CabinetGrid extends LitElement {
     const boxSegments = boxes.map((boxSize) => {
       const start = offset;
       offset += boxSize;
-      return { size: boxSize, start };
+      const boxWines = wines.filter((w) => {
+        const d = w.depth || 0;
+        return d >= start && d < start + boxSize;
+      });
+      return { size: boxSize, start, wineCount: boxWines.length };
     });
 
     return html`
@@ -639,15 +691,13 @@ export class CabinetGrid extends LitElement {
         @dragleave=${(e: DragEvent) => this._onDragLeave(e)}
         @drop=${(e: DragEvent) => this._onDrop(e, undefined, undefined, zoneId)}>
         <div class="bottom-zone-label">📦 ${name} <span class="zone-count">${wines.length}/${capacity}</span></div>
-        <div class="zone-fill-dots">
-          ${boxSegments.map((seg, bi) => html`
-            ${bi > 0 ? html`<span style="width:2px;height:14px;background:rgba(255,255,255,0.3);border-radius:1px;flex-shrink:0;margin:0 2px;"></span>` : nothing}
-            ${Array.from({ length: seg.size }, (_, i) => {
-              const depthIdx = seg.start + i;
-              const wine = wines.find((w) => (w.depth || 0) === depthIdx);
-              const color = wine ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red : "";
-              return html`<span class="zone-fill-dot ${wine ? "filled" : "empty"}" style=${wine ? `background: ${color}` : ""}></span>`;
-            })}
+        <div class="zone-box-grid">
+          ${boxSegments.map((seg) => html`
+            <div class="zone-box-item ${seg.wineCount > 0 ? "has-wine" : ""}">
+              <div class="zone-box-shape">📦</div>
+              <div class="zone-box-count ${seg.wineCount > 0 ? "filled" : ""}">${seg.wineCount}</div>
+              <div class="zone-box-size">${seg.size}-pk</div>
+            </div>
           `)}
         </div>
       </div>
