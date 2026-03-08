@@ -848,6 +848,7 @@ export class WineCellarCard extends LitElement {
       await this.hass.callWS({
         type: "wine_cellar/remove_wine",
         wine_id: e.detail.wine_id,
+        reason: e.detail.reason || "other",
       });
       await this._loadData();
     } catch (err) {

@@ -13,6 +13,7 @@ from .const import (
     CONF_BARCODE_CACHE,
     CONF_BUY_LIST,
     CONF_CABINETS,
+    CONF_WINE_HISTORY,
     CONF_WINES,
     DEFAULT_CABINETS,
     STORAGE_KEY,
@@ -49,6 +50,11 @@ class WineCellarStorage:
         """Return all buy list items."""
         return self._data.get(CONF_BUY_LIST, [])
 
+    @property
+    def wine_history(self) -> list[dict[str, Any]]:
+        """Return wine removal history."""
+        return self._data.get(CONF_WINE_HISTORY, [])
+
     async def async_load(self) -> None:
         """Load data from storage."""
         data = await self._store.async_load()
@@ -58,6 +64,7 @@ class WineCellarStorage:
                 CONF_CABINETS: [dict(c) for c in DEFAULT_CABINETS],
                 CONF_BARCODE_CACHE: {},
                 CONF_BUY_LIST: [],
+                CONF_WINE_HISTORY: [],
             }
             await self.async_save()
         else:
@@ -97,6 +104,9 @@ class WineCellarStorage:
             # Migrate: ensure buy_list exists
             if CONF_BUY_LIST not in self._data:
                 self._data[CONF_BUY_LIST] = []
+            # Migrate: ensure wine_history exists
+            if CONF_WINE_HISTORY not in self._data:
+                self._data[CONF_WINE_HISTORY] = []
 
     async def async_save(self) -> None:
         """Save data to storage."""
@@ -140,11 +150,30 @@ class WineCellarStorage:
         self._data[CONF_WINES].append(wine)
         return wine
 
-    def remove_wine(self, wine_id: str) -> bool:
-        """Remove a wine bottle by ID."""
+    def remove_wine(self, wine_id: str, reason: str = "other") -> bool:
+        """Remove a wine bottle by ID and archive it to history."""
         wines = self._data[CONF_WINES]
         for i, wine in enumerate(wines):
             if wine["id"] == wine_id:
+                # Archive to history before removing
+                history_entry = {
+                    "id": str(uuid.uuid4()),
+                    "original_id": wine["id"],
+                    "name": wine.get("name", ""),
+                    "winery": wine.get("winery", ""),
+                    "vintage": wine.get("vintage"),
+                    "type": wine.get("type", ""),
+                    "region": wine.get("region", ""),
+                    "country": wine.get("country", ""),
+                    "grape_variety": wine.get("grape_variety", ""),
+                    "rating": wine.get("rating"),
+                    "price": wine.get("price"),
+                    "image_url": wine.get("image_url", ""),
+                    "added_at": wine.get("added_at", ""),
+                    "removed_at": datetime.now(timezone.utc).isoformat(),
+                    "reason": reason,
+                }
+                self._data[CONF_WINE_HISTORY].append(history_entry)
                 wines.pop(i)
                 return True
         return False
@@ -343,6 +372,7 @@ class WineCellarStorage:
             CONF_WINES: list(self.wines),
             CONF_CABINETS: list(self.cabinets),
             CONF_BUY_LIST: list(self.buy_list),
+            CONF_WINE_HISTORY: list(self.wine_history),
         }
 
     def restore_data(
@@ -350,15 +380,18 @@ class WineCellarStorage:
         wines: list[dict[str, Any]],
         cabinets: list[dict[str, Any]],
         buy_list: list[dict[str, Any]],
+        wine_history: list[dict[str, Any]] | None = None,
     ) -> dict[str, int]:
         """Replace all cellar data with backup data. Returns counts."""
         self._data[CONF_WINES] = wines
         self._data[CONF_CABINETS] = cabinets
         self._data[CONF_BUY_LIST] = buy_list
+        self._data[CONF_WINE_HISTORY] = wine_history or []
         return {
             "wines": len(wines),
             "cabinets": len(cabinets),
             "buy_list": len(buy_list),
+            "wine_history": len(self._data[CONF_WINE_HISTORY]),
         }
 
     def import_wines(self, wines_data: list[dict[str, Any]]) -> int:

@@ -1,6 +1,6 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { Wine, Cabinet, WineType, WINE_TYPE_COLORS, WINE_TYPE_LABELS } from "../models";
+import { Wine, Cabinet, WineType, WINE_TYPE_COLORS, WINE_TYPE_LABELS, WineHistoryItem } from "../models";
 import { sharedStyles } from "../styles";
 import "./wine-detail-dialog";
 
@@ -32,6 +32,9 @@ export class InventoryDialog extends LitElement {
   @state() private _showServerRestore = false;
   @state() private _serverBackups: any[] = [];
   @state() private _serverRestoring = false;
+  @state() private _viewMode: "inventory" | "history" = "inventory";
+  @state() private _historyItems: WineHistoryItem[] = [];
+  @state() private _historyLoading = false;
 
   static styles = [
     sharedStyles,
@@ -396,6 +399,53 @@ export class InventoryDialog extends LitElement {
         color: #fff;
       }
 
+      .inv-toggle {
+        display: flex;
+        margin: 0 16px 8px;
+        border: 1px solid var(--wc-border);
+        border-radius: 20px;
+        overflow: hidden;
+      }
+
+      .inv-toggle button {
+        flex: 1;
+        padding: 6px 0;
+        border: none;
+        background: transparent;
+        color: var(--wc-text-secondary);
+        font-size: 0.82em;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .inv-toggle button.active {
+        background: var(--wc-primary);
+        color: #fff;
+      }
+
+      .inv-history-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--wc-border);
+      }
+
+      .inv-history-item:last-child {
+        border-bottom: none;
+      }
+
+      .inv-reason-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 0.72em;
+        font-weight: 500;
+        background: rgba(114, 47, 55, 0.12);
+        color: var(--wc-primary);
+      }
+
       @media (max-width: 599px) {
         .inv-controls {
           flex-direction: column;
@@ -434,6 +484,8 @@ export class InventoryDialog extends LitElement {
       this._confirmRestore = false;
       this._showServerRestore = false;
       this._restoreData = null;
+      this._viewMode = "inventory";
+      this._historyItems = [];
     }
   }
 
@@ -518,6 +570,94 @@ export class InventoryDialog extends LitElement {
     }
 
     return { count, totalValue, byType };
+  }
+
+  // ── History ──────────────────────────────────────────────────
+
+  private async _switchToHistory() {
+    this._viewMode = "history";
+    this._historyLoading = true;
+    try {
+      const result = await this.hass.callWS({ type: "wine_cellar/get_wine_history" });
+      this._historyItems = (result?.history || []).sort(
+        (a: WineHistoryItem, b: WineHistoryItem) =>
+          (b.removed_at || "").localeCompare(a.removed_at || "")
+      );
+    } catch (err) {
+      console.error("Failed to load wine history", err);
+      this._historyItems = [];
+    }
+    this._historyLoading = false;
+  }
+
+  private async _clearHistory() {
+    try {
+      await this.hass.callWS({ type: "wine_cellar/clear_wine_history" });
+      this._historyItems = [];
+      this._statusMsg = "History cleared";
+    } catch (err) {
+      console.error("Failed to clear history", err);
+    }
+  }
+
+  private _formatReason(reason: string): string {
+    const map: Record<string, string> = {
+      drank: "Drank", gifted: "Gifted", sold: "Sold",
+      broken: "Broken", spoiled: "Spoiled", other: "Other",
+    };
+    return map[reason] || reason;
+  }
+
+  private _formatDate(iso: string): string {
+    if (!iso) return "";
+    try {
+      return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    } catch { return iso; }
+  }
+
+  private _renderHistory() {
+    if (this._historyLoading) {
+      return html`<div class="inv-empty">Loading history...</div>`;
+    }
+    if (this._historyItems.length === 0) {
+      return html`
+        <div class="inv-empty">No removal history yet</div>
+        <div class="inv-footer">
+          <span class="inv-count">0 wines removed</span>
+        </div>
+      `;
+    }
+    return html`
+      <div class="inv-list">
+        ${this._historyItems.map(item => html`
+          <div class="inv-history-item">
+            ${item.image_url
+              ? html`<img class="inv-thumb" src="${item.image_url}" alt="" loading="lazy" />`
+              : html`<div class="inv-dot" style="background:${WINE_TYPE_COLORS[item.type as WineType] || "#999"}"></div>`}
+            <div class="inv-info">
+              <div class="inv-name">${item.name}</div>
+              <div class="inv-meta">
+                ${item.winery}${item.vintage ? ` · ${item.vintage}` : ""}
+                · <span class="inv-reason-badge">${this._formatReason(item.reason)}</span>
+              </div>
+            </div>
+            <div class="inv-right">
+              ${item.price ? html`<div class="inv-price">$${item.price.toFixed(0)}</div>` : nothing}
+              <div class="inv-location">${this._formatDate(item.removed_at)}</div>
+            </div>
+          </div>
+        `)}
+      </div>
+      <div class="inv-footer">
+        <span class="inv-count">${this._historyItems.length} wines removed</span>
+        ${this._statusMsg
+          ? html`<div class="inv-status">${this._statusMsg}</div>`
+          : nothing}
+        <div class="inv-footer-btns">
+          <button class="inv-btn" @click=${this._clearHistory}>Clear History</button>
+        </div>
+      </div>
+    `;
   }
 
   // ── Export CSV ─────────────────────────────────────────────────
@@ -970,6 +1110,19 @@ export class InventoryDialog extends LitElement {
             <button class="inv-close" @click=${this._close}>✕</button>
           </div>
 
+          <!-- Inventory / History Toggle -->
+          <div class="inv-toggle">
+            <button
+              class="${this._viewMode === "inventory" ? "active" : ""}"
+              @click=${() => { this._viewMode = "inventory"; }}
+            >Inventory</button>
+            <button
+              class="${this._viewMode === "history" ? "active" : ""}"
+              @click=${() => this._switchToHistory()}
+            >History</button>
+          </div>
+
+          ${this._viewMode === "history" ? this._renderHistory() : html`
           <!-- Summary Stats -->
           <div class="inv-stats">
             <div class="stat">
@@ -1121,6 +1274,8 @@ export class InventoryDialog extends LitElement {
               </button>
             </div>
           </div>
+
+          `}
 
           <!-- Hidden file inputs -->
           <input

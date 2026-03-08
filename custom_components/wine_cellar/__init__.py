@@ -208,7 +208,8 @@ async def _async_register_services(
     async def handle_remove_wine(call: ServiceCall) -> None:
         """Handle remove wine service call."""
         wine_id = call.data["wine_id"]
-        if storage.remove_wine(wine_id):
+        reason = call.data.get("reason", "other")
+        if storage.remove_wine(wine_id, reason=reason):
             await storage.async_save()
             hass.bus.async_fire(f"{DOMAIN}_updated")
 
@@ -267,7 +268,10 @@ async def _async_register_services(
         DOMAIN,
         "remove_wine",
         handle_remove_wine,
-        schema=vol.Schema({vol.Required("wine_id"): cv.string}),
+        schema=vol.Schema({
+            vol.Required("wine_id"): cv.string,
+            vol.Optional("reason", default="other"): cv.string,
+        }),
     )
 
     hass.services.async_register(

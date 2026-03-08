@@ -74,6 +74,12 @@
       { id: "bl-4", name: "Penfolds Bin 389 2020", winery: "Penfolds", region: "South Australia", country: "Australia", vintage: 2020, type: "red", grape_variety: "Cabernet/Shiraz", rating: 4.2, ratings_count: 3400, image_url: "https://images.vivino.com/thumbs/Erl91FhwTMadO2v2NR1PzA_375x500.jpg", price: null, retail_price: 55, notes: "", description: "Baby Grange. Dark fruit, chocolate, and spice.", food_pairings: "Beef, BBQ, Game", alcohol: "14.5%", disposition: "D", drink_window: "2024-2032", ai_ratings: { rating_ws: 91 }, added_at: "2026-03-04T10:00:00Z" },
     ];
 
+    const mockWineHistory = [
+      { id: "h-1", original_id: "old-1", name: "Penfolds Grange 2016", winery: "Penfolds", vintage: 2016, type: "red", region: "South Australia", country: "Australia", grape_variety: "Shiraz", rating: 4.7, price: 750, image_url: "https://images.vivino.com/thumbs/KVQJznT6T2u7ggCzLaFLvQ_375x500.jpg", added_at: "2023-06-01T10:00:00Z", removed_at: "2026-02-14T19:30:00Z", reason: "drank" },
+      { id: "h-2", original_id: "old-2", name: "Sassicaia 2019", winery: "Tenuta San Guido", vintage: 2019, type: "red", region: "Tuscany", country: "Italy", grape_variety: "Cabernet Sauvignon", rating: 4.6, price: 280, image_url: "", added_at: "2024-01-10T10:00:00Z", removed_at: "2026-01-20T20:00:00Z", reason: "gifted" },
+      { id: "h-3", original_id: "old-3", name: "Veuve Clicquot Yellow Label NV", winery: "Veuve Clicquot", vintage: null, type: "sparkling", region: "Champagne", country: "France", grape_variety: "Pinot Noir/Chardonnay", rating: 4.1, price: 55, image_url: "https://images.vivino.com/thumbs/GUOWATSjTXKDQiVnOVB-Bw_375x500.jpg", added_at: "2025-12-25T10:00:00Z", removed_at: "2026-01-01T00:05:00Z", reason: "drank" },
+    ];
+
     const mockStats = {
       total_bottles: mockWines.length,
       total_capacity: 81 + 162 + 90, // s1: 9*9*1, s2: 9*9*2, s3: 10*9*1
@@ -117,7 +123,24 @@
             return { wine: mockWines[mockWines.length - 1] };
           case "wine_cellar/remove_wine":
             const idx = mockWines.findIndex(w => w.id === msg.wine_id);
-            if (idx >= 0) mockWines.splice(idx, 1);
+            if (idx >= 0) {
+              const removed = mockWines[idx];
+              mockWineHistory.unshift({
+                id: "h-" + Date.now(), original_id: removed.id,
+                name: removed.name, winery: removed.winery, vintage: removed.vintage,
+                type: removed.type, region: removed.region || "", country: removed.country || "",
+                grape_variety: removed.grape_variety || "", rating: removed.rating,
+                price: removed.price, image_url: removed.image_url || "",
+                added_at: removed.added_at || "", removed_at: new Date().toISOString(),
+                reason: msg.reason || "other",
+              });
+              mockWines.splice(idx, 1);
+            }
+            return { success: true };
+          case "wine_cellar/get_wine_history":
+            return { history: mockWineHistory };
+          case "wine_cellar/clear_wine_history":
+            mockWineHistory.length = 0;
             return { success: true };
           case "wine_cellar/update_wine":
             const wine = mockWines.find(w => w.id === msg.wine_id);

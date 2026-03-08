@@ -57,10 +57,11 @@ CONF_CABINETS = "cabinets"
 CONF_WINES = "wines"
 CONF_BARCODE_CACHE = "barcode_cache"
 CONF_BUY_LIST = "buy_list"
+CONF_WINE_HISTORY = "wine_history"
 
 CONF_GEMINI_API_KEY = "gemini_api_key"
 
 ATTR_TOTAL_BOTTLES = "total_bottles"
 ATTR_TOTAL_CAPACITY = "total_capacity"
 
-FRONTEND_VERSION = "20260307w"
+FRONTEND_VERSION = "20260307x"

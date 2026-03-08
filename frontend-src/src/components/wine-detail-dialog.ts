@@ -1,6 +1,6 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { Wine, TastingNotes, WINE_TYPE_LABELS, WINE_TYPE_COLORS, WineType } from "../models";
+import { Wine, TastingNotes, WINE_TYPE_LABELS, WINE_TYPE_COLORS, WineType, REMOVAL_REASONS } from "../models";
 import { sharedStyles } from "../styles";
 import "./star-rating";
 
@@ -21,6 +21,7 @@ export class WineDetailDialog extends LitElement {
   @state() private _saving = false;
   @state() private _refreshing = false;
   @state() private _analyzing = false;
+  @state() private _showRemoveConfirm = false;
   @property({ type: Boolean }) hasGemini = false;
 
   static styles = [
@@ -535,26 +536,33 @@ export class WineDetailDialog extends LitElement {
   }
 
   private _onRemove() {
-    if (this.wine) {
-      if (this.mode === "buylist") {
-        this.dispatchEvent(
-          new CustomEvent("remove-buy-list-item", {
-            detail: { item_id: this.wine.id },
-            bubbles: true,
-            composed: true,
-          })
-        );
-      } else {
-        this.dispatchEvent(
-          new CustomEvent("remove-wine", {
-            detail: { wine_id: this.wine.id },
-            bubbles: true,
-            composed: true,
-          })
-        );
-      }
+    if (!this.wine) return;
+    if (this.mode === "buylist") {
+      this.dispatchEvent(
+        new CustomEvent("remove-buy-list-item", {
+          detail: { item_id: this.wine.id },
+          bubbles: true,
+          composed: true,
+        })
+      );
       this._close();
+    } else {
+      // Show reason prompt for cellar wines
+      this._showRemoveConfirm = true;
     }
+  }
+
+  private _confirmRemove(reason: string) {
+    if (!this.wine) return;
+    this.dispatchEvent(
+      new CustomEvent("remove-wine", {
+        detail: { wine_id: this.wine.id, reason },
+        bubbles: true,
+        composed: true,
+      })
+    );
+    this._showRemoveConfirm = false;
+    this._close();
   }
 
   private _onMove() {
@@ -794,7 +802,7 @@ export class WineDetailDialog extends LitElement {
 
     return html`
       <div class="dialog-overlay" @click=${this._close}>
-        <div class="dialog" @click=${(e: Event) => e.stopPropagation()}>
+        <div class="dialog" style="position:relative" @click=${(e: Event) => e.stopPropagation()}>
           <div class="dialog-top-bar">
             ${this.mode !== "winelist"
               ? html`<button class="icon-btn" title="Edit" @click=${this._startEditingFields}>✏️</button>`
@@ -1069,6 +1077,26 @@ export class WineDetailDialog extends LitElement {
                 </div>
                 ` : nothing}
               `}
+          ${this._showRemoveConfirm ? html`
+            <div style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px">
+              <div style="background:var(--wc-bg);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center" @click=${(e: Event) => e.stopPropagation()}>
+                <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">Remove Wine</h3>
+                <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">Why are you removing this bottle?</p>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center">
+                  ${REMOVAL_REASONS.map(r => html`
+                    <button
+                      style="padding:8px 16px;border-radius:20px;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text);cursor:pointer;font-size:0.85em;transition:all 0.15s"
+                      @click=${() => this._confirmRemove(r.id)}
+                    >${r.label}</button>
+                  `)}
+                </div>
+                <button
+                  style="margin-top:12px;padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.8em"
+                  @click=${() => (this._showRemoveConfirm = false)}
+                >Cancel</button>
+              </div>
+            </div>
+          ` : nothing}
         </div>
       </div>
     `;

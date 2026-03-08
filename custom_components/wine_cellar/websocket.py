@@ -144,6 +144,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_update_buy_list_item)
     websocket_api.async_register_command(hass, ws_remove_from_buy_list)
     websocket_api.async_register_command(hass, ws_move_to_cellar)
+    websocket_api.async_register_command(hass, ws_get_wine_history)
+    websocket_api.async_register_command(hass, ws_clear_wine_history)
     websocket_api.async_register_command(hass, ws_get_backup)
     websocket_api.async_register_command(hass, ws_restore_backup)
     websocket_api.async_register_command(hass, ws_import_wines)
@@ -203,6 +205,7 @@ async def ws_add_wine(
     {
         vol.Required("type"): "wine_cellar/remove_wine",
         vol.Required("wine_id"): str,
+        vol.Optional("reason", default="other"): str,
     }
 )
 @websocket_api.async_response
@@ -211,9 +214,9 @@ async def ws_remove_wine(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Remove a wine by ID."""
+    """Remove a wine by ID, archiving to history."""
     storage = hass.data[DOMAIN]["storage"]
-    success = storage.remove_wine(msg["wine_id"])
+    success = storage.remove_wine(msg["wine_id"], reason=msg.get("reason", "other"))
     if success:
         await storage.async_save()
         hass.bus.async_fire(f"{DOMAIN}_updated")
@@ -1104,6 +1107,35 @@ async def ws_move_to_cellar(
     connection.send_result(msg["id"], {"wine": wine})
 
 
+# ── Wine History ─────────────────────────────────────────────────────
+
+
+@websocket_api.websocket_command({vol.Required("type"): "wine_cellar/get_wine_history"})
+@callback
+def ws_get_wine_history(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return wine removal history."""
+    storage = hass.data[DOMAIN]["storage"]
+    connection.send_result(msg["id"], {"history": storage.wine_history})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "wine_cellar/clear_wine_history"})
+@websocket_api.async_response
+async def ws_clear_wine_history(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Clear all wine removal history."""
+    storage = hass.data[DOMAIN]["storage"]
+    storage._data["wine_history"] = []
+    await storage.async_save()
+    connection.send_result(msg["id"], {"success": True})
+
+
 # ── Backup / Restore / Import ────────────────────────────────────────
 
 
@@ -1141,6 +1173,7 @@ async def ws_restore_backup(
     wines = backup.get("wines", [])
     cabinets = backup.get("cabinets", [])
     buy_list = backup.get("buy_list", [])
+    wine_history = backup.get("wine_history", [])
 
     if not isinstance(wines, list) or not isinstance(cabinets, list):
         connection.send_result(
@@ -1149,7 +1182,7 @@ async def ws_restore_backup(
         )
         return
 
-    counts = storage.restore_data(wines, cabinets, buy_list)
+    counts = storage.restore_data(wines, cabinets, buy_list, wine_history)
     await storage.async_save()
     hass.bus.async_fire(f"{DOMAIN}_updated")
 

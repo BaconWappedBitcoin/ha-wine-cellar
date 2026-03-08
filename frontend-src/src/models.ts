@@ -122,6 +122,33 @@ export interface WineListItem {
   ai_status: "pending" | "loading" | "done" | "error" | "skipped";
 }
 
+export interface WineHistoryItem {
+  id: string;
+  original_id: string;
+  name: string;
+  winery: string;
+  vintage: number | null;
+  type: string;
+  region: string;
+  country: string;
+  grape_variety: string;
+  rating: number | null;
+  price: number | null;
+  image_url: string;
+  added_at: string;
+  removed_at: string;
+  reason: string;
+}
+
+export const REMOVAL_REASONS = [
+  { id: "drank", label: "Drank" },
+  { id: "gifted", label: "Gifted" },
+  { id: "sold", label: "Sold" },
+  { id: "broken", label: "Broken" },
+  { id: "spoiled", label: "Spoiled" },
+  { id: "other", label: "Other" },
+] as const;
+
 export type WineType = "red" | "white" | "rosé" | "sparkling" | "dessert";
 
 export const WINE_TYPE_COLORS: Record<WineType, string> = {

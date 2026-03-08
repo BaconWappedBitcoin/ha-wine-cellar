@@ -516,6 +516,14 @@ const STORAGE_ROW_TYPE_LABELS = {
     box: "Wine Box",
 };
 const BOX_SIZES = [1, 3, 6, 12, 24];
+const REMOVAL_REASONS = [
+    { id: "drank", label: "Drank" },
+    { id: "gifted", label: "Gifted" },
+    { id: "sold", label: "Sold" },
+    { id: "broken", label: "Broken" },
+    { id: "spoiled", label: "Spoiled" },
+    { id: "other", label: "Other" },
+];
 const WINE_TYPE_COLORS = {
     red: "#722F37",
     white: "#F5E6CA",
@@ -1480,6 +1488,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._saving = false;
         this._refreshing = false;
         this._analyzing = false;
+        this._showRemoveConfirm = false;
         this.hasGemini = false;
     }
     updated(changedProps) {
@@ -1573,23 +1582,31 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._saving = false;
     }
     _onRemove() {
-        if (this.wine) {
-            if (this.mode === "buylist") {
-                this.dispatchEvent(new CustomEvent("remove-buy-list-item", {
-                    detail: { item_id: this.wine.id },
-                    bubbles: true,
-                    composed: true,
-                }));
-            }
-            else {
-                this.dispatchEvent(new CustomEvent("remove-wine", {
-                    detail: { wine_id: this.wine.id },
-                    bubbles: true,
-                    composed: true,
-                }));
-            }
+        if (!this.wine)
+            return;
+        if (this.mode === "buylist") {
+            this.dispatchEvent(new CustomEvent("remove-buy-list-item", {
+                detail: { item_id: this.wine.id },
+                bubbles: true,
+                composed: true,
+            }));
             this._close();
         }
+        else {
+            // Show reason prompt for cellar wines
+            this._showRemoveConfirm = true;
+        }
+    }
+    _confirmRemove(reason) {
+        if (!this.wine)
+            return;
+        this.dispatchEvent(new CustomEvent("remove-wine", {
+            detail: { wine_id: this.wine.id, reason },
+            bubbles: true,
+            composed: true,
+        }));
+        this._showRemoveConfirm = false;
+        this._close();
     }
     _onMove() {
         if (this.wine) {
@@ -1825,7 +1842,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
         const typeLabel = WINE_TYPE_LABELS[wine.type] || wine.type;
         return b `
       <div class="dialog-overlay" @click=${this._close}>
-        <div class="dialog" @click=${(e) => e.stopPropagation()}>
+        <div class="dialog" style="position:relative" @click=${(e) => e.stopPropagation()}>
           <div class="dialog-top-bar">
             ${this.mode !== "winelist"
             ? b `<button class="icon-btn" title="Edit" @click=${this._startEditingFields}>✏️</button>`
@@ -2093,6 +2110,26 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 </div>
                 ` : A}
               `}
+          ${this._showRemoveConfirm ? b `
+            <div style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px">
+              <div style="background:var(--wc-bg);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center" @click=${(e) => e.stopPropagation()}>
+                <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">Remove Wine</h3>
+                <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">Why are you removing this bottle?</p>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center">
+                  ${REMOVAL_REASONS.map(r => b `
+                    <button
+                      style="padding:8px 16px;border-radius:20px;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text);cursor:pointer;font-size:0.85em;transition:all 0.15s"
+                      @click=${() => this._confirmRemove(r.id)}
+                    >${r.label}</button>
+                  `)}
+                </div>
+                <button
+                  style="margin-top:12px;padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.8em"
+                  @click=${() => (this._showRemoveConfirm = false)}
+                >Cancel</button>
+              </div>
+            </div>
+          ` : A}
         </div>
       </div>
     `;
@@ -2557,6 +2594,9 @@ __decorate([
 __decorate([
     r()
 ], WineDetailDialog.prototype, "_analyzing", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_showRemoveConfirm", void 0);
 __decorate([
     n({ type: Boolean })
 ], WineDetailDialog.prototype, "hasGemini", void 0);
@@ -6371,6 +6411,9 @@ let InventoryDialog = class InventoryDialog extends i {
         this._showServerRestore = false;
         this._serverBackups = [];
         this._serverRestoring = false;
+        this._viewMode = "inventory";
+        this._historyItems = [];
+        this._historyLoading = false;
     }
     updated(changedProps) {
         if (changedProps.has("open") && this.open) {
@@ -6384,6 +6427,8 @@ let InventoryDialog = class InventoryDialog extends i {
             this._confirmRestore = false;
             this._showServerRestore = false;
             this._restoreData = null;
+            this._viewMode = "inventory";
+            this._historyItems = [];
         }
     }
     _close() {
@@ -6458,6 +6503,91 @@ let InventoryDialog = class InventoryDialog extends i {
             byType[t] = (byType[t] || 0) + 1;
         }
         return { count, totalValue, byType };
+    }
+    // ── History ──────────────────────────────────────────────────
+    async _switchToHistory() {
+        this._viewMode = "history";
+        this._historyLoading = true;
+        try {
+            const result = await this.hass.callWS({ type: "wine_cellar/get_wine_history" });
+            this._historyItems = (result?.history || []).sort((a, b) => (b.removed_at || "").localeCompare(a.removed_at || ""));
+        }
+        catch (err) {
+            console.error("Failed to load wine history", err);
+            this._historyItems = [];
+        }
+        this._historyLoading = false;
+    }
+    async _clearHistory() {
+        try {
+            await this.hass.callWS({ type: "wine_cellar/clear_wine_history" });
+            this._historyItems = [];
+            this._statusMsg = "History cleared";
+        }
+        catch (err) {
+            console.error("Failed to clear history", err);
+        }
+    }
+    _formatReason(reason) {
+        const map = {
+            drank: "Drank", gifted: "Gifted", sold: "Sold",
+            broken: "Broken", spoiled: "Spoiled", other: "Other",
+        };
+        return map[reason] || reason;
+    }
+    _formatDate(iso) {
+        if (!iso)
+            return "";
+        try {
+            return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+        }
+        catch {
+            return iso;
+        }
+    }
+    _renderHistory() {
+        if (this._historyLoading) {
+            return b `<div class="inv-empty">Loading history...</div>`;
+        }
+        if (this._historyItems.length === 0) {
+            return b `
+        <div class="inv-empty">No removal history yet</div>
+        <div class="inv-footer">
+          <span class="inv-count">0 wines removed</span>
+        </div>
+      `;
+        }
+        return b `
+      <div class="inv-list">
+        ${this._historyItems.map(item => b `
+          <div class="inv-history-item">
+            ${item.image_url
+            ? b `<img class="inv-thumb" src="${item.image_url}" alt="" loading="lazy" />`
+            : b `<div class="inv-dot" style="background:${WINE_TYPE_COLORS[item.type] || "#999"}"></div>`}
+            <div class="inv-info">
+              <div class="inv-name">${item.name}</div>
+              <div class="inv-meta">
+                ${item.winery}${item.vintage ? ` · ${item.vintage}` : ""}
+                · <span class="inv-reason-badge">${this._formatReason(item.reason)}</span>
+              </div>
+            </div>
+            <div class="inv-right">
+              ${item.price ? b `<div class="inv-price">$${item.price.toFixed(0)}</div>` : A}
+              <div class="inv-location">${this._formatDate(item.removed_at)}</div>
+            </div>
+          </div>
+        `)}
+      </div>
+      <div class="inv-footer">
+        <span class="inv-count">${this._historyItems.length} wines removed</span>
+        ${this._statusMsg
+            ? b `<div class="inv-status">${this._statusMsg}</div>`
+            : A}
+        <div class="inv-footer-btns">
+          <button class="inv-btn" @click=${this._clearHistory}>Clear History</button>
+        </div>
+      </div>
+    `;
     }
     // ── Export CSV ─────────────────────────────────────────────────
     _exportCSV() {
@@ -6875,6 +7005,19 @@ let InventoryDialog = class InventoryDialog extends i {
             <button class="inv-close" @click=${this._close}>✕</button>
           </div>
 
+          <!-- Inventory / History Toggle -->
+          <div class="inv-toggle">
+            <button
+              class="${this._viewMode === "inventory" ? "active" : ""}"
+              @click=${() => { this._viewMode = "inventory"; }}
+            >Inventory</button>
+            <button
+              class="${this._viewMode === "history" ? "active" : ""}"
+              @click=${() => this._switchToHistory()}
+            >History</button>
+          </div>
+
+          ${this._viewMode === "history" ? this._renderHistory() : b `
           <!-- Summary Stats -->
           <div class="inv-stats">
             <div class="stat">
@@ -7019,6 +7162,8 @@ let InventoryDialog = class InventoryDialog extends i {
               </button>
             </div>
           </div>
+
+          `}
 
           <!-- Hidden file inputs -->
           <input
@@ -7481,6 +7626,53 @@ InventoryDialog.styles = [
         color: #fff;
       }
 
+      .inv-toggle {
+        display: flex;
+        margin: 0 16px 8px;
+        border: 1px solid var(--wc-border);
+        border-radius: 20px;
+        overflow: hidden;
+      }
+
+      .inv-toggle button {
+        flex: 1;
+        padding: 6px 0;
+        border: none;
+        background: transparent;
+        color: var(--wc-text-secondary);
+        font-size: 0.82em;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .inv-toggle button.active {
+        background: var(--wc-primary);
+        color: #fff;
+      }
+
+      .inv-history-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--wc-border);
+      }
+
+      .inv-history-item:last-child {
+        border-bottom: none;
+      }
+
+      .inv-reason-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 0.72em;
+        font-weight: 500;
+        background: rgba(114, 47, 55, 0.12);
+        color: var(--wc-primary);
+      }
+
       @media (max-width: 599px) {
         .inv-controls {
           flex-direction: column;
@@ -7572,6 +7764,15 @@ __decorate([
 __decorate([
     r()
 ], InventoryDialog.prototype, "_serverRestoring", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_viewMode", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_historyItems", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_historyLoading", void 0);
 InventoryDialog = __decorate([
     t("inventory-dialog")
 ], InventoryDialog);
@@ -8067,6 +8268,7 @@ let WineCellarCard = class WineCellarCard extends i {
             await this.hass.callWS({
                 type: "wine_cellar/remove_wine",
                 wine_id: e.detail.wine_id,
+                reason: e.detail.reason || "other",
             });
             await this._loadData();
         }
