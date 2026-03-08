@@ -1283,6 +1283,8 @@ CabinetGrid.styles = [
         cursor: pointer;
         padding: 4px 8px;
         min-height: 0;
+        flex-direction: column;
+        align-items: center;
       }
 
       .zone-box-row:hover {
@@ -1294,7 +1296,8 @@ CabinetGrid.styles = [
         gap: 8px;
         align-items: flex-end;
         justify-content: center;
-        padding: 2px 8px;
+        padding: 2px 0;
+        width: 100%;
       }
 
       .zone-box-item {
