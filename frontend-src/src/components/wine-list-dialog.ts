@@ -132,10 +132,10 @@ export class WineListDialog extends LitElement {
         display: flex;
         align-items: flex-start;
         gap: 8px;
-        padding: 6px 10px;
+        padding: 5px 10px;
         border: 1px solid var(--wc-border);
         border-radius: 8px;
-        margin-bottom: 4px;
+        margin-bottom: 3px;
         transition: background 0.2s;
         cursor: pointer;
       }
@@ -216,9 +216,9 @@ export class WineListDialog extends LitElement {
 
       .wl-price-row {
         display: flex;
-        gap: 6px;
+        gap: 4px;
         align-items: center;
-        margin-top: 2px;
+        margin-top: 1px;
         font-size: 0.78em;
         flex-wrap: wrap;
       }
@@ -247,13 +247,6 @@ export class WineListDialog extends LitElement {
         padding: 1px 5px;
         border-radius: 6px;
         color: #fff;
-      }
-
-      .wl-ai-chips {
-        display: flex;
-        gap: 3px;
-        flex-wrap: wrap;
-        margin-top: 2px;
       }
 
       .wl-ai-chip {
@@ -684,19 +677,11 @@ export class WineListDialog extends LitElement {
             ${cellarMatch?.user_rating
               ? html`<span class="wl-user-score">\uD83C\uDF77 ${cellarMatch.user_rating}/100</span>`
               : nothing}
+            ${wine.ai_ratings?.rating_ws ? html`<span class="wl-ai-chip">WS ${wine.ai_ratings.rating_ws}</span>` : nothing}
+            ${wine.ai_ratings?.rating_rp ? html`<span class="wl-ai-chip">RP ${wine.ai_ratings.rating_rp}</span>` : nothing}
+            ${wine.ai_ratings?.rating_jd ? html`<span class="wl-ai-chip">JD ${wine.ai_ratings.rating_jd}</span>` : nothing}
+            ${wine.ai_ratings?.rating_ag ? html`<span class="wl-ai-chip">AG ${wine.ai_ratings.rating_ag}</span>` : nothing}
           </div>
-
-          <!-- AI Critic chips -->
-          ${wine.ai_ratings
-            ? html`
-                <div class="wl-ai-chips">
-                  ${wine.ai_ratings.rating_ws ? html`<span class="wl-ai-chip">WS ${wine.ai_ratings.rating_ws}</span>` : nothing}
-                  ${wine.ai_ratings.rating_rp ? html`<span class="wl-ai-chip">RP ${wine.ai_ratings.rating_rp}</span>` : nothing}
-                  ${wine.ai_ratings.rating_jd ? html`<span class="wl-ai-chip">JD ${wine.ai_ratings.rating_jd}</span>` : nothing}
-                  ${wine.ai_ratings.rating_ag ? html`<span class="wl-ai-chip">AG ${wine.ai_ratings.rating_ag}</span>` : nothing}
-                </div>
-              `
-            : nothing}
 
           <!-- Expanded details -->
           ${expanded

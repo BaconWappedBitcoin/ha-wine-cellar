@@ -341,6 +341,8 @@ export class CabinetGrid extends LitElement {
 
       .zone-box-row {
         cursor: pointer;
+        padding: 4px 8px;
+        min-height: 0;
       }
 
       .zone-box-row:hover {
@@ -349,44 +351,62 @@ export class CabinetGrid extends LitElement {
 
       .zone-box-grid {
         display: flex;
-        flex-wrap: wrap;
         gap: 8px;
-        align-items: center;
-        padding: 4px 0;
+        align-items: flex-end;
+        justify-content: center;
+        padding: 2px 8px;
       }
 
       .zone-box-item {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 2px;
-        min-width: 40px;
+        gap: 1px;
       }
 
       .zone-box-shape {
-        font-size: 1.3em;
-        line-height: 1;
+        width: 56px;
+        height: 36px;
+        position: relative;
       }
 
-      .zone-box-count {
-        width: 22px;
-        height: 22px;
-        border-radius: 50%;
+      .zone-box-shape .box-lid {
+        position: absolute;
+        top: 0;
+        left: -2px;
+        right: -2px;
+        height: 28%;
+        background: linear-gradient(180deg, #a08040 0%, #7a6020 100%);
+        border-radius: 2px 2px 0 0;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-bottom: none;
+      }
+
+      .zone-box-shape .box-body {
+        position: absolute;
+        top: 28%;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(180deg, #8b6914 0%, #6b5010 100%);
+        border-radius: 0 0 2px 2px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-top: 1px solid rgba(0, 0, 0, 0.3);
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 0.7em;
-        font-weight: 700;
-        color: rgba(255, 255, 255, 0.4);
-        background: rgba(255, 255, 255, 0.08);
-        border: 1.5px solid rgba(255, 255, 255, 0.2);
       }
 
-      .zone-box-count.filled {
+      .zone-box-shape .box-count {
+        font-size: 0.7em;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.5);
+        line-height: 1;
+      }
+
+      .zone-box-item.has-wine .box-count {
         color: #fff;
-        background: var(--wc-primary, #722F37);
-        border-color: rgba(255, 255, 255, 0.5);
-        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
       }
 
       .zone-box-size {
@@ -694,8 +714,10 @@ export class CabinetGrid extends LitElement {
         <div class="zone-box-grid">
           ${boxSegments.map((seg) => html`
             <div class="zone-box-item ${seg.wineCount > 0 ? "has-wine" : ""}">
-              <div class="zone-box-shape">📦</div>
-              <div class="zone-box-count ${seg.wineCount > 0 ? "filled" : ""}">${seg.wineCount}</div>
+              <div class="zone-box-shape">
+                <div class="box-lid"></div>
+                <div class="box-body"><span class="box-count">${seg.wineCount}/${seg.size}</span></div>
+              </div>
               <div class="zone-box-size">${seg.size}-pk</div>
             </div>
           `)}
