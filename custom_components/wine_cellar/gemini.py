@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Any
 
@@ -14,10 +15,86 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 _LOGGER = logging.getLogger(__name__)
 
-GEMINI_API_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-2.5-flash:generateContent"
-)
+DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
+
+
+def build_gemini_api_url(model: str = DEFAULT_GEMINI_MODEL) -> str:
+    """Build the Gemini generateContent endpoint for the requested model."""
+    return (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model}:generateContent"
+    )
+
+
+def parse_json_response(raw_text: str) -> Any:
+    """Parse Gemini JSON responses even when they include markdown fences or extra prose."""
+    text = raw_text.strip()
+    if not text:
+        raise json.JSONDecodeError("empty response", raw_text, 0)
+
+    if text.startswith("```"):
+        lines = [line for line in text.splitlines() if line.strip()]
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    if text.startswith("json") and "\n" in text:
+        text = text.split("\n", 1)[1].strip()
+
+    # Try direct parse first.
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Try to extract the first balanced JSON object/array from the text.
+    start = min(
+        [idx for idx in (text.find("{"), text.find("[")) if idx != -1],
+        default=-1,
+    )
+    if start != -1:
+        end = None
+        brace_depth = 0
+        in_string = False
+        escaped = False
+        for idx in range(start, len(text)):
+            char = text[idx]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                brace_depth += 1
+            elif char == "}":
+                brace_depth -= 1
+                if brace_depth == 0:
+                    end = idx + 1
+                    break
+
+        bounded = text[start:end] if end is not None else text[start:]
+        try:
+            return json.loads(bounded)
+        except json.JSONDecodeError:
+            pass
+
+        # Fallback: try to remove trailing commas before parsing.
+        candidate = re.sub(r",(\s*[}\]])", r"\1", bounded)
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+    # If the response is still invalid, fail with a helpful error.
+    raise json.JSONDecodeError("Unable to parse Gemini response", raw_text, 0)
+
 
 LABEL_PROMPT = """You are a master sommelier and wine label recognition expert. The current year is {current_year}. Analyze this wine label image, identify the wine, and provide a full assessment. Return ONLY a JSON object with these exact fields:
 
@@ -137,6 +214,7 @@ class GeminiVisionClient:
         """Initialize the client."""
         self._hass = hass
         self._api_key = api_key
+        self._api_url = build_gemini_api_url()
 
     async def recognize_label(self, image_base64: str) -> dict[str, Any]:
         """Send image to Gemini Vision and get structured wine data.
@@ -173,10 +251,12 @@ class GeminiVisionClient:
             },
         }
 
+        candidates: list[Any] = []
+        text = ""
         try:
             timeout = aiohttp.ClientTimeout(total=45)
             async with session.post(
-                GEMINI_API_URL,
+                self._api_url,
                 params={"key": self._api_key},
                 json=body,
                 timeout=timeout,
@@ -227,7 +307,7 @@ class GeminiVisionClient:
 
                 text = parts[0].get("text", "")
                 _LOGGER.debug("Gemini raw response: %s", text[:500])
-                result = json.loads(text)
+                result = parse_json_response(text)
 
                 # Check for error response from Gemini
                 if "error" in result:
@@ -297,7 +377,13 @@ class GeminiVisionClient:
                 }
 
         except json.JSONDecodeError as err:
-            _LOGGER.error("Failed to parse Gemini response: %s", err)
+            finish_reason = candidates[0].get("finishReason") if candidates else None
+            _LOGGER.error(
+                "Failed to parse Gemini response (finishReason=%s): %s\nRaw text: %s",
+                finish_reason,
+                err,
+                text[:2000],
+            )
             return {"error": f"Failed to parse Gemini response: {err}"}
         except aiohttp.ClientError as err:
             _LOGGER.error("Network error calling Gemini: %s", err)
@@ -352,7 +438,7 @@ class GeminiVisionClient:
         try:
             timeout = aiohttp.ClientTimeout(total=180)
             async with session.post(
-                GEMINI_API_URL,
+                self._api_url,
                 params={"key": self._api_key},
                 json=body,
                 timeout=timeout,
@@ -375,7 +461,7 @@ class GeminiVisionClient:
                     .get("parts", [{}])[0]
                     .get("text", "")
                 )
-                result = json.loads(text)
+                result = parse_json_response(text)
 
                 if "error" in result:
                     return {"error": f"Not a wine list: {result['error']}"}
@@ -581,7 +667,7 @@ Rules:
         try:
             timeout = aiohttp.ClientTimeout(total=45)
             async with session.post(
-                GEMINI_API_URL,
+                self._api_url,
                 params={"key": self._api_key},
                 json=body,
                 timeout=timeout,
@@ -597,7 +683,7 @@ Rules:
                     return {"error": "Gemini returned no results"}
 
                 text = candidates[0]["content"]["parts"][0]["text"]
-                result = json.loads(text)
+                result = parse_json_response(text)
 
                 # Validate disposition
                 disp = result.get("disposition", "D")
@@ -690,7 +776,7 @@ Wines:
         try:
             timeout = aiohttp.ClientTimeout(total=180)
             async with session.post(
-                GEMINI_API_URL,
+                self._api_url,
                 params={"key": self._api_key},
                 json=body,
                 timeout=timeout,
@@ -706,7 +792,7 @@ Wines:
                     return {"error": "Gemini returned no results"}
 
                 text = candidates[0]["content"]["parts"][0]["text"]
-                dispositions = json.loads(text)
+                dispositions = parse_json_response(text)
 
                 # Validate dispositions
                 valid = {"D", "H", "P"}
