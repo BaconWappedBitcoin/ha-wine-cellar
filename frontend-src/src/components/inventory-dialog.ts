@@ -1368,6 +1368,18 @@ export class InventoryDialog extends LitElement {
           this._showDetail = false;
           this.dispatchEvent(new CustomEvent("locate-wine", { detail: e.detail, bubbles: true, composed: true }));
         }}
+        @copy-wine=${(e: CustomEvent) => {
+          this._showDetail = false;
+          this.dispatchEvent(new CustomEvent("copy-wine", { detail: e.detail, bubbles: true, composed: true }));
+        }}
+        @move-wine=${(e: CustomEvent) => {
+          this._showDetail = false;
+          this.dispatchEvent(new CustomEvent("move-wine", { detail: e.detail, bubbles: true, composed: true }));
+        }}
+        @remove-wine=${(e: CustomEvent) => {
+          this._showDetail = false;
+          this.dispatchEvent(new CustomEvent("remove-wine", { detail: e.detail, bubbles: true, composed: true }));
+        }}
       ></wine-detail-dialog>
     `;
   }

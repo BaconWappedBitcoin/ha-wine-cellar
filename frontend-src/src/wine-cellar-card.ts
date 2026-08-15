@@ -1893,6 +1893,20 @@ export class WineCellarCard extends LitElement {
             this._showInventory = false;
             this._locateWine(e.detail.wine);
           }}
+          @copy-wine=${(e: CustomEvent) => {
+            this._showInventory = false;
+            this._copyWine(e.detail.wine);
+          }}
+          @move-wine=${(e: CustomEvent) => {
+            this._showInventory = false;
+            this._zonePanelOpen = false;
+            this._rackPanelOpen = false;
+            this._depthPanelOpen = false;
+            this._activeTab = "all";
+            this._movingWine = e.detail.wine;
+            this._showToast(`Tap a cell to move "${e.detail.wine.name}"`);
+          }}
+          @remove-wine=${this._onRemoveWine}
         ></inventory-dialog>
 
         <!-- Rack Settings Dialog -->
