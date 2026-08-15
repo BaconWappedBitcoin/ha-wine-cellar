@@ -349,6 +349,12 @@ const sharedStyles = i$3 `
     animation: fadeIn 0.2s ease;
   }
 
+  /* While dragging a wine out of the panel, let the backdrop pass drag/drop
+     events through to the racks behind it instead of swallowing them. */
+  .depth-panel-backdrop.drag-through {
+    pointer-events: none;
+  }
+
   .depth-panel {
     position: fixed;
     right: 0;
@@ -415,6 +421,7 @@ const sharedStyles = i$3 `
   }
 
   .depth-slot {
+    position: relative;
     border-radius: 10px;
     cursor: pointer;
     transition: background 0.15s, box-shadow 0.15s;
@@ -422,6 +429,56 @@ const sharedStyles = i$3 `
 
   .depth-slot:hover {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+
+  .depth-slot.drag-over {
+    box-shadow: 0 0 0 2px rgba(66, 165, 245, 0.8);
+    background: rgba(66, 165, 245, 0.15);
+  }
+
+  .depth-slot-delete {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8em;
+    line-height: 1;
+    color: var(--wc-text-secondary, #888);
+    background: rgba(0, 0, 0, 0.06);
+    z-index: 3;
+  }
+
+  .depth-slot-delete:hover {
+    background: #c62828;
+    color: #fff;
+  }
+
+  .depth-panel-add-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .depth-panel-add-box select {
+    flex: 1;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--wc-border, #ddd);
+    background: var(--wc-bg);
+    color: var(--wc-text, #333);
+    font-size: 0.85em;
+  }
+
+  .depth-panel-add-box .depth-panel-grow {
+    flex-shrink: 0;
+    padding: 8px 14px;
+    margin-top: 0;
   }
 
   .depth-slot-label {
@@ -443,6 +500,11 @@ const sharedStyles = i$3 `
     border-radius: 10px;
   }
 
+  .depth-slot-avatar {
+    position: relative;
+    flex-shrink: 0;
+  }
+
   .depth-slot-thumb {
     width: 32px;
     height: 44px;
@@ -456,6 +518,36 @@ const sharedStyles = i$3 `
     height: 12px;
     border-radius: 50%;
     flex-shrink: 0;
+  }
+
+  .depth-slot-disposition {
+    position: absolute;
+    bottom: -3px;
+    right: -4px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    font-size: 8px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    border: 1.5px solid var(--wc-bg, #fff);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    line-height: 1;
+  }
+
+  .depth-slot-disposition.drink {
+    background: #2e7d32;
+  }
+
+  .depth-slot-disposition.hold {
+    background: #1565c0;
+  }
+
+  .depth-slot-disposition.past {
+    background: #c62828;
   }
 
   .depth-slot-info {
@@ -508,6 +600,27 @@ const sharedStyles = i$3 `
 
   .depth-slot.empty:hover .depth-slot-plus {
     background: rgba(196, 139, 145, 0.2);
+  }
+
+  .depth-panel-grow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px;
+    margin-top: 4px;
+    border-radius: 10px;
+    border: 1px dashed var(--wc-border, #ddd);
+    color: var(--wc-text-secondary, #888);
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 600;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .depth-panel-grow:hover {
+    border-color: var(--wc-primary-text);
+    color: var(--wc-primary-text);
   }
 `;
 
@@ -565,7 +678,9 @@ let CabinetGrid = class CabinetGrid extends i {
         return this.wines.filter((w) => w.cabinet_id === this.cabinet.id && w.zone === "bottom");
     }
     _getStorageRowWines(row) {
-        return this.wines.filter((w) => w.cabinet_id === this.cabinet.id && w.zone === `storage-${row}`);
+        return this.wines
+            .filter((w) => w.cabinet_id === this.cabinet.id && w.zone === `storage-${row}`)
+            .sort((a, b) => (a.depth || 0) - (b.depth || 0));
     }
     _onCellClick(row, col, wine, wineCount = 0, cabinetDepth = 1, wines = []) {
         this.dispatchEvent(new CustomEvent("cell-click", {
@@ -664,7 +779,7 @@ let CabinetGrid = class CabinetGrid extends i {
     _onDragLeave(_e) {
         this._dragOverCell = null;
     }
-    _onDrop(e, targetRow, targetCol, targetZone) {
+    _onDrop(e, targetRow, targetCol, targetZone, targetWine) {
         e.preventDefault();
         this._dragOverCell = null;
         if (!e.dataTransfer)
@@ -682,6 +797,11 @@ let CabinetGrid = class CabinetGrid extends i {
                     targetRow: targetRow ?? null,
                     targetCol: targetCol ?? null,
                     targetZone: targetZone || "",
+                    // When dropping directly on another bottle within the same bulk
+                    // zone, carry its id/depth so the card can swap the two instead
+                    // of treating it as a same-zone no-op.
+                    targetWineId: targetWine?.id ?? null,
+                    targetDepth: targetWine ? (targetWine.depth ?? 0) : null,
                 },
                 bubbles: true,
                 composed: true,
@@ -712,22 +832,34 @@ let CabinetGrid = class CabinetGrid extends i {
         @dragleave=${(e) => this._onDragLeave(e)}
         @drop=${(e) => this._onDrop(e, undefined, undefined, zoneId)}>
         <div class="bottom-zone-label">◇ ${name} <span class="zone-count">${wines.length}/${capacity}</span></div>
-        ${wines.map((wine) => b `
+        ${wines.map((wine) => {
+            const disp = wine.disposition || "";
+            const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
+            const bottleKey = `${zoneKey}-${wine.id}`;
+            return b `
             <div
-              class="zone-bottle"
+              class="zone-bottle ${this._dragOverCell === bottleKey ? "drag-over" : ""}"
               style="background: ${WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red}"
               draggable="true"
               @click=${(e) => {
-            e.stopPropagation();
-            this._onZoneClick(wine, zoneId);
-        }}
+                e.stopPropagation();
+                this._onZoneClick(wine, zoneId);
+            }}
               @dragstart=${(e) => { e.stopPropagation(); this._onDragStart(e, wine, undefined, undefined, zoneId); }}
               @dragend=${(e) => this._onDragEnd(e)}
-              title="${wine.name}"
+              @dragover=${(e) => { e.stopPropagation(); this._onDragOver(e, bottleKey); }}
+              @dragleave=${(e) => { e.stopPropagation(); this._onDragLeave(e); }}
+              @drop=${(e) => { e.stopPropagation(); this._onDrop(e, undefined, undefined, zoneId, wine); }}
+              @touchstart=${(e) => { e.stopPropagation(); this._onTouchStart(wine); }}
+              @touchend=${() => this._onTouchEnd()}
+              @touchmove=${() => this._onTouchMove()}
+              title="${wine.name} (${wine.vintage || "NV"})"
             >
               ${(wine.vintage || "NV").toString().slice(-2)}
+              ${dispClass ? b `<span class="disposition ${dispClass}">${disp}</span>` : A}
             </div>
-          `)}
+          `;
+        })}
       </div>
     `;
     }
@@ -906,12 +1038,24 @@ let CabinetGrid = class CabinetGrid extends i {
       </div>
     `;
     }
+    _onRackClick() {
+        this.dispatchEvent(new CustomEvent("rack-click", {
+            detail: { cabinet: this.cabinet },
+            bubbles: true,
+            composed: true,
+        }));
+    }
     render() {
         const { rows, cols } = this.cabinet;
         const storageRows = this._getStorageRowSet();
+        const hasGridRows = Array.from({ length: rows }, (_, row) => row).some((row) => !storageRows.has(row));
         return b `
       <div class="cabinet">
-        <div class="cabinet-name">${this.cabinet.name}</div>
+        <div
+          class="cabinet-name ${hasGridRows ? "clickable" : ""}"
+          @click=${hasGridRows ? () => this._onRackClick() : A}
+          title=${hasGridRows ? "Tap to view and reorder this rack" : ""}
+        >${this.cabinet.name}</div>
         <div class="grid-inner">
           ${Array.from({ length: rows }, (_, row) => storageRows.has(row)
             ? this._renderStorageZone(row)
@@ -972,6 +1116,15 @@ CabinetGrid.styles = [
         font-weight: 600;
         padding: 4px 0;
         text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+      }
+
+      .cabinet-name.clickable {
+        cursor: pointer;
+        border-radius: 6px;
+      }
+
+      .cabinet-name.clickable:hover {
+        background: rgba(255, 255, 255, 0.08);
       }
 
       .grid-inner {
@@ -1105,15 +1258,18 @@ CabinetGrid.styles = [
         box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
       }
 
-      .cell .disposition.drink {
+      .cell .disposition.drink,
+      .zone-bottle .disposition.drink {
         background: #2e7d32;
       }
 
-      .cell .disposition.hold {
+      .cell .disposition.hold,
+      .zone-bottle .disposition.hold {
         background: #1565c0;
       }
 
-      .cell .disposition.past {
+      .cell .disposition.past,
+      .zone-bottle .disposition.past {
         background: #c62828;
       }
 
@@ -1204,6 +1360,7 @@ CabinetGrid.styles = [
       }
 
       .zone-bottle {
+        position: relative;
         width: 28px;
         height: 28px;
         border-radius: 4px;
@@ -1216,6 +1373,27 @@ CabinetGrid.styles = [
         cursor: pointer;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
         transition: transform 0.2s;
+      }
+
+      .zone-bottle .disposition {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 68%;
+        height: 68%;
+        border-radius: 50%;
+        font-size: 9px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        z-index: 2;
+        pointer-events: none;
+        line-height: 1;
+        border: 1.5px solid rgba(255, 255, 255, 0.5);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
       }
 
       .zone-bottle:hover {
@@ -7880,6 +8058,15 @@ let WineCellarCard = class WineCellarCard extends i {
         this._zonePanelName = "";
         this._zonePanelWines = [];
         this._zonePanelStorageRow = null;
+        this._zonePanelDragWineId = null;
+        this._zonePanelDragOverKey = null;
+        this._zonePanelNewBoxSize = 6;
+        // Rack panel (grid-slot cabinets: list + reorder)
+        this._rackPanelOpen = false;
+        this._rackPanelCabinet = null;
+        this._rackPanelWines = [];
+        this._rackPanelDragWineId = null;
+        this._rackPanelDragOverKey = null;
     }
     setConfig(config) {
         this._config = config;
@@ -7929,6 +8116,8 @@ let WineCellarCard = class WineCellarCard extends i {
             this._refreshDepthPanel();
             // Refresh zone panel if open
             this._refreshZonePanel();
+            // Refresh rack panel if open
+            this._refreshRackPanel();
         }
         catch (err) {
             console.error("Cork Dork: Failed to load data", err);
@@ -8037,6 +8226,12 @@ let WineCellarCard = class WineCellarCard extends i {
     }
     _onZoneClick(e) {
         const { wine, cabinet, zone } = e.detail;
+        // If we have a copied wine and clicked empty zone space, paste it here
+        if (this._copiedWine && !wine) {
+            const nextDepth = this._wines.filter((w) => w.cabinet_id === cabinet.id && w.zone === (zone || "bottom")).length;
+            this._pasteWine(cabinet.id, null, null, nextDepth, zone || "bottom");
+            return;
+        }
         // If we're moving a wine, place it in this zone
         if (this._movingWine && !wine) {
             this._executeMoveWine(cabinet.id, null, null, zone || "bottom");
@@ -8060,6 +8255,12 @@ let WineCellarCard = class WineCellarCard extends i {
     // --- Zone side panel (boxes, bulk bins) ---
     _onZoneContainerClick(e) {
         const { cabinet, zone, storageRow } = e.detail;
+        // If we have a copied wine, paste it in this zone instead of opening panel
+        if (this._copiedWine) {
+            const nextDepth = this._wines.filter((w) => w.cabinet_id === cabinet.id && w.zone === zone).length;
+            this._pasteWine(cabinet.id, null, null, nextDepth, zone);
+            return;
+        }
         // If moving wine, drop it in this zone instead of opening panel
         if (this._movingWine) {
             this._executeMoveWine(cabinet.id, null, null, zone);
@@ -8089,40 +8290,434 @@ let WineCellarCard = class WineCellarCard extends i {
     _refreshZonePanel() {
         if (!this._zonePanelOpen || !this._zonePanelCabinet)
             return;
+        // Re-derive from the freshly loaded cabinet so capacity/box changes show up.
+        const freshCabinet = this._cabinets.find((c) => c.id === this._zonePanelCabinet.id);
+        if (freshCabinet) {
+            this._zonePanelCabinet = freshCabinet;
+            const rowIdx = parseInt(this._zonePanelZone.replace("storage-", ""), 10);
+            const sr = (freshCabinet.storage_rows || []).find((s) => s.row === rowIdx);
+            if (sr) {
+                this._zonePanelType = sr.type || "bulk";
+                this._zonePanelCapacity = sr.capacity || 20;
+                this._zonePanelName = sr.name || "Storage";
+                this._zonePanelStorageRow = sr;
+            }
+        }
         this._zonePanelWines = this._wines
             .filter((w) => w.cabinet_id === this._zonePanelCabinet.id && w.zone === this._zonePanelZone)
             .sort((a, b) => (a.depth || 0) - (b.depth || 0));
+    }
+    // Grow a bulk/box zone's capacity by editing its StorageRow entry.
+    async _updateStorageRow(updates) {
+        if (!this._zonePanelCabinet || !this._zonePanelStorageRow)
+            return;
+        const newStorageRows = (this._zonePanelCabinet.storage_rows || []).map((sr) => sr.row === this._zonePanelStorageRow.row ? { ...sr, ...updates } : sr);
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/update_cabinet",
+                cabinet_id: this._zonePanelCabinet.id,
+                updates: { storage_rows: newStorageRows },
+            });
+            await this._loadData();
+        }
+        catch (err) {
+            console.error("Failed to resize zone:", err);
+            this._showToast("Failed to resize zone");
+        }
+    }
+    _addBulkSlot() {
+        if (!this._zonePanelStorageRow)
+            return;
+        this._updateStorageRow({ capacity: (this._zonePanelStorageRow.capacity || 0) + 1 });
+    }
+    _addBoxSlot() {
+        if (!this._zonePanelStorageRow)
+            return;
+        // Append a whole new box of the chosen preset size, so box sizes always
+        // stay one of BOX_SIZES (1/3/6/12/24) — the Manage Racks dialog's size
+        // dropdown can only display values from that list.
+        const boxes = [...(this._zonePanelStorageRow.boxes || [this._zonePanelStorageRow.capacity || 0]), this._zonePanelNewBoxSize];
+        this._updateStorageRow({ boxes, capacity: boxes.reduce((sum, b) => sum + b, 0) });
+    }
+    // Delete a single bulk/box slot: unassign its wine (if any) rather than
+    // deleting it, shift every later slot down to close the gap, and shrink
+    // the zone's capacity (or the specific box, for box mode) by one.
+    async _deleteZoneSlot(slotIndex) {
+        if (!this._zonePanelCabinet || !this._zonePanelStorageRow)
+            return;
+        const wineAtSlot = this._zonePanelWines[slotIndex];
+        const warning = wineAtSlot
+            ? `Delete Slot ${slotIndex + 1}? "${wineAtSlot.name}" will be moved to Unassigned.`
+            : `Delete Slot ${slotIndex + 1}?`;
+        if (!window.confirm(warning))
+            return;
+        try {
+            if (wineAtSlot) {
+                await this.hass.callWS({
+                    type: "wine_cellar/update_wine",
+                    wine_id: wineAtSlot.id,
+                    updates: { cabinet_id: "", row: null, col: null, zone: "", depth: 0 },
+                });
+            }
+            for (let i = slotIndex + 1; i < this._zonePanelWines.length; i++) {
+                await this.hass.callWS({
+                    type: "wine_cellar/move_wine",
+                    wine_id: this._zonePanelWines[i].id,
+                    cabinet_id: this._zonePanelCabinet.id,
+                    zone: this._zonePanelZone,
+                    depth: i - 1,
+                });
+            }
+            if (this._zonePanelType === "box") {
+                const boxes = [...(this._zonePanelStorageRow.boxes || [this._zonePanelStorageRow.capacity || 0])];
+                let offset = 0;
+                for (let i = 0; i < boxes.length; i++) {
+                    if (slotIndex < offset + boxes[i]) {
+                        boxes[i] -= 1;
+                        if (boxes[i] <= 0)
+                            boxes.splice(i, 1);
+                        break;
+                    }
+                    offset += boxes[i];
+                }
+                await this._updateStorageRow({ boxes, capacity: boxes.reduce((sum, b) => sum + b, 0) });
+            }
+            else {
+                await this._updateStorageRow({ capacity: Math.max(0, (this._zonePanelStorageRow.capacity || 1) - 1) });
+            }
+            this._showToast(wineAtSlot ? "Slot deleted, wine unassigned" : "Slot deleted");
+        }
+        catch (err) {
+            console.error("Failed to delete slot:", err);
+            this._showToast("Failed to delete slot");
+        }
     }
     _onZonePanelSlotClick(slotIndex, wine) {
         if (wine) {
             this._selectedWine = wine;
             this._detailMode = "cellar";
             this._showDetail = true;
+            return;
         }
-        else {
-            this._addPreselect = {
-                cabinet: this._zonePanelCabinet.id,
-                row: null,
-                col: null,
-                zone: this._zonePanelZone,
-                depth: slotIndex,
-            };
-            this._showAddDialog = true;
+        if (this._copiedWine) {
+            this._pasteWine(this._zonePanelCabinet.id, null, null, slotIndex, this._zonePanelZone);
+            return;
         }
-    }
-    _onZonePanelBulkAdd() {
-        const nextDepth = this._zonePanelWines.length;
+        if (this._movingWine) {
+            this._executeMoveWine(this._zonePanelCabinet.id, null, null, this._zonePanelZone, slotIndex);
+            return;
+        }
         this._addPreselect = {
             cabinet: this._zonePanelCabinet.id,
             row: null,
             col: null,
             zone: this._zonePanelZone,
-            depth: nextDepth,
+            depth: slotIndex,
         };
         this._showAddDialog = true;
     }
+    // --- Zone side panel: drag-to-reorder ---
+    _onZonePanelDragStart(e, wine) {
+        this._zonePanelDragWineId = wine.id;
+        if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+            // Same payload shape cabinet-grid's _onDrop expects, so dragging out
+            // of the panel onto any rack/zone in the main grid works too.
+            e.dataTransfer.setData("text/plain", JSON.stringify({
+                wineId: wine.id,
+                cabinetId: wine.cabinet_id,
+                row: wine.row ?? null,
+                col: wine.col ?? null,
+                zone: wine.zone || "",
+            }));
+        }
+    }
+    _onZonePanelDragEnd() {
+        this._zonePanelDragWineId = null;
+        this._zonePanelDragOverKey = null;
+    }
+    _onZonePanelDragOver(e, key) {
+        e.preventDefault();
+        if (e.dataTransfer)
+            e.dataTransfer.dropEffect = "move";
+        this._zonePanelDragOverKey = key;
+    }
+    // Bulk mode: reflow to sequential depths matching the new visual order.
+    async _onZonePanelBulkReorder(e, targetIndex) {
+        e.preventDefault();
+        this._zonePanelDragOverKey = null;
+        const draggedId = this._zonePanelDragWineId;
+        this._zonePanelDragWineId = null;
+        if (!draggedId || !this._zonePanelCabinet)
+            return;
+        const wines = [...this._zonePanelWines];
+        const fromIndex = wines.findIndex((w) => w.id === draggedId);
+        if (fromIndex === -1 || fromIndex === targetIndex)
+            return;
+        const [moved] = wines.splice(fromIndex, 1);
+        wines.splice(targetIndex, 0, moved);
+        try {
+            for (let i = 0; i < wines.length; i++) {
+                if ((wines[i].depth || 0) !== i) {
+                    await this.hass.callWS({
+                        type: "wine_cellar/move_wine",
+                        wine_id: wines[i].id,
+                        cabinet_id: this._zonePanelCabinet.id,
+                        zone: this._zonePanelZone,
+                        depth: i,
+                    });
+                }
+            }
+            this._showToast("Wine reordered");
+            await this._loadData();
+        }
+        catch (err) {
+            console.error("Failed to reorder wine:", err);
+            this._showToast("Failed to reorder wine");
+        }
+    }
+    // Box mode: move/swap into a specific slot depth.
+    async _onZonePanelBoxReorder(e, targetDepth, targetWine) {
+        e.preventDefault();
+        this._zonePanelDragOverKey = null;
+        const draggedId = this._zonePanelDragWineId;
+        this._zonePanelDragWineId = null;
+        if (!draggedId || !this._zonePanelCabinet || draggedId === targetWine?.id)
+            return;
+        const draggedWine = this._zonePanelWines.find((w) => w.id === draggedId);
+        if (!draggedWine)
+            return;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/move_wine",
+                wine_id: draggedWine.id,
+                cabinet_id: this._zonePanelCabinet.id,
+                zone: this._zonePanelZone,
+                depth: targetDepth,
+            });
+            if (targetWine) {
+                await this.hass.callWS({
+                    type: "wine_cellar/move_wine",
+                    wine_id: targetWine.id,
+                    cabinet_id: this._zonePanelCabinet.id,
+                    zone: this._zonePanelZone,
+                    depth: draggedWine.depth || 0,
+                });
+            }
+            this._showToast("Wine reordered");
+            await this._loadData();
+        }
+        catch (err) {
+            console.error("Failed to reorder wine:", err);
+            this._showToast("Failed to reorder wine");
+        }
+    }
     _getZoneSlotLabel(_type, index) {
         return `Slot ${index + 1}`;
+    }
+    // --- Rack panel (grid-slot cabinets: list + reorder) ---
+    _onRackClick(e) {
+        this._openRackPanel(e.detail.cabinet);
+    }
+    _openRackPanel(cabinet) {
+        this._rackPanelCabinet = cabinet;
+        this._rackPanelWines = this._wines.filter((w) => w.cabinet_id === cabinet.id && w.row !== null && w.col !== null);
+        this._rackPanelOpen = true;
+    }
+    _closeRackPanel() {
+        this._rackPanelOpen = false;
+    }
+    _refreshRackPanel() {
+        if (!this._rackPanelOpen || !this._rackPanelCabinet)
+            return;
+        const fresh = this._cabinets.find((c) => c.id === this._rackPanelCabinet.id);
+        if (fresh)
+            this._rackPanelCabinet = fresh;
+        this._rackPanelWines = this._wines.filter((w) => w.cabinet_id === this._rackPanelCabinet.id && w.row !== null && w.col !== null);
+    }
+    // Every physical (row, col) slot in the rack, skipping bulk/box storage rows.
+    _getRackSlots() {
+        if (!this._rackPanelCabinet)
+            return [];
+        const { rows, cols, storage_rows } = this._rackPanelCabinet;
+        const storageRowSet = new Set((storage_rows || []).map((sr) => sr.row));
+        const slots = [];
+        for (let r = 0; r < rows; r++) {
+            if (storageRowSet.has(r))
+                continue;
+            for (let c = 0; c < cols; c++)
+                slots.push({ row: r, col: c });
+        }
+        return slots;
+    }
+    // Adds exactly one new slot. A rack is a strict rows×cols rectangle, so
+    // growing either axis by 1 adds that many slots (all of the other axis).
+    // Grow whichever axis is smaller to add as few slots as possible — for the
+    // common single-row rack (rows=1) this always adds exactly 1 slot.
+    _addRackSlot() {
+        if (!this._rackPanelCabinet)
+            return;
+        const { rows, cols } = this._rackPanelCabinet;
+        if (rows <= cols) {
+            this._resizeRack({ cols: cols + 1 });
+        }
+        else {
+            this._resizeRack({ rows: rows + 1 });
+        }
+    }
+    async _resizeRack(updates) {
+        if (!this._rackPanelCabinet)
+            return;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/update_cabinet",
+                cabinet_id: this._rackPanelCabinet.id,
+                updates,
+            });
+            await this._loadData();
+        }
+        catch (err) {
+            console.error("Failed to resize rack:", err);
+            this._showToast("Failed to resize rack");
+        }
+    }
+    // A rack is a strict rows×cols rectangle, so only the trailing slot can be
+    // removed without leaving a hole the grid can't represent.
+    _isLastRackSlot(row, col) {
+        const slots = this._getRackSlots();
+        if (slots.length === 0)
+            return false;
+        const last = slots[slots.length - 1];
+        return last.row === row && last.col === col;
+    }
+    async _deleteRackSlot(row, col) {
+        if (!this._rackPanelCabinet)
+            return;
+        const { rows, cols } = this._rackPanelCabinet;
+        if (rows <= 1 && cols <= 1) {
+            this._showToast("Rack can't get any smaller");
+            return;
+        }
+        const wine = this._rackPanelWines.find((w) => w.row === row && w.col === col);
+        const warning = wine
+            ? `Delete this slot? "${wine.name}" will be moved to Unassigned.`
+            : "Delete this slot?";
+        if (!window.confirm(warning))
+            return;
+        try {
+            if (wine) {
+                await this.hass.callWS({
+                    type: "wine_cellar/update_wine",
+                    wine_id: wine.id,
+                    updates: { cabinet_id: "", row: null, col: null, zone: "", depth: 0 },
+                });
+            }
+            if (cols >= rows && cols > 1) {
+                await this._resizeRack({ cols: cols - 1 });
+            }
+            else {
+                await this._resizeRack({ rows: rows - 1 });
+            }
+            this._showToast(wine ? "Slot deleted, wine unassigned" : "Slot deleted");
+        }
+        catch (err) {
+            console.error("Failed to delete slot:", err);
+            this._showToast("Failed to delete slot");
+        }
+    }
+    _onRackPanelSlotClick(row, col, wine) {
+        const cabinet = this._rackPanelCabinet;
+        if (!cabinet)
+            return;
+        const cabinetDepth = cabinet.depth || 1;
+        if (cabinetDepth >= 2) {
+            // Multi-depth cells are handled by the existing depth panel.
+            const wines = this._rackPanelWines.filter((w) => w.row === row && w.col === col);
+            this._closeRackPanel();
+            this._openDepthPanel(cabinet, row, col, wines, cabinetDepth);
+            return;
+        }
+        if (wine) {
+            this._selectedWine = wine;
+            this._detailMode = "cellar";
+            this._showDetail = true;
+            return;
+        }
+        if (this._copiedWine) {
+            this._pasteWine(cabinet.id, row, col, 0);
+            return;
+        }
+        if (this._movingWine) {
+            this._executeMoveWine(cabinet.id, row, col, "", 0);
+            return;
+        }
+        if (this._movingBuyListItem) {
+            this._executeMoveTocellar(cabinet.id, row, col, "", 0);
+            return;
+        }
+        this._addPreselect = { cabinet: cabinet.id, row, col, zone: "", depth: 0 };
+        this._showAddDialog = true;
+    }
+    _onRackPanelDragStart(e, wine) {
+        this._rackPanelDragWineId = wine.id;
+        if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/plain", JSON.stringify({
+                wineId: wine.id,
+                cabinetId: wine.cabinet_id,
+                row: wine.row ?? null,
+                col: wine.col ?? null,
+                zone: wine.zone || "",
+            }));
+        }
+    }
+    _onRackPanelDragEnd() {
+        this._rackPanelDragWineId = null;
+        this._rackPanelDragOverKey = null;
+    }
+    _onRackPanelDragOver(e, key) {
+        e.preventDefault();
+        if (e.dataTransfer)
+            e.dataTransfer.dropEffect = "move";
+        this._rackPanelDragOverKey = key;
+    }
+    // Swap/move the dragged wine into the target (row, col) slot.
+    async _onRackPanelReorder(e, targetRow, targetCol, targetWine) {
+        e.preventDefault();
+        this._rackPanelDragOverKey = null;
+        const draggedId = this._rackPanelDragWineId;
+        this._rackPanelDragWineId = null;
+        if (!draggedId || !this._rackPanelCabinet || draggedId === targetWine?.id)
+            return;
+        const draggedWine = this._rackPanelWines.find((w) => w.id === draggedId);
+        if (!draggedWine || (draggedWine.row === targetRow && draggedWine.col === targetCol))
+            return;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/move_wine",
+                wine_id: draggedWine.id,
+                cabinet_id: this._rackPanelCabinet.id,
+                row: targetRow,
+                col: targetCol,
+                zone: "",
+            });
+            if (targetWine) {
+                await this.hass.callWS({
+                    type: "wine_cellar/move_wine",
+                    wine_id: targetWine.id,
+                    cabinet_id: this._rackPanelCabinet.id,
+                    row: draggedWine.row,
+                    col: draggedWine.col,
+                    zone: "",
+                });
+            }
+            this._showToast("Wine reordered");
+            await this._loadData();
+        }
+        catch (err) {
+            console.error("Failed to reorder wine:", err);
+            this._showToast("Failed to reorder wine");
+        }
     }
     async _executeMoveWine(cabinetId, row, col, zone, depth = 0) {
         if (!this._movingWine)
@@ -8150,6 +8745,41 @@ let WineCellarCard = class WineCellarCard extends i {
     }
     async _onWineDrop(e) {
         const d = e.detail;
+        // Reordering within the same bulk zone: dropped directly on another
+        // bottle there, so swap their two depth positions.
+        if (d.targetWineId &&
+            d.targetWineId !== d.wineId &&
+            d.sourceCabinetId === d.targetCabinetId &&
+            d.sourceZone &&
+            d.sourceZone === d.targetZone) {
+            try {
+                const sourceWine = this._wines.find((w) => w.id === d.wineId);
+                const targetWine = this._wines.find((w) => w.id === d.targetWineId);
+                if (sourceWine && targetWine) {
+                    await this.hass.callWS({
+                        type: "wine_cellar/move_wine",
+                        wine_id: sourceWine.id,
+                        cabinet_id: d.targetCabinetId,
+                        zone: d.targetZone,
+                        depth: targetWine.depth || 0,
+                    });
+                    await this.hass.callWS({
+                        type: "wine_cellar/move_wine",
+                        wine_id: targetWine.id,
+                        cabinet_id: d.targetCabinetId,
+                        zone: d.targetZone,
+                        depth: sourceWine.depth || 0,
+                    });
+                    this._showToast("Wine reordered");
+                    await this._loadData();
+                }
+            }
+            catch (err) {
+                console.error("Failed to reorder wine:", err);
+                this._showToast("Failed to reorder wine");
+            }
+            return;
+        }
         // Don't drop on same position
         if (d.sourceCabinetId === d.targetCabinetId && d.sourceRow === d.targetRow && d.sourceCol === d.targetCol && d.sourceZone === d.targetZone)
             return;
@@ -8182,7 +8812,10 @@ let WineCellarCard = class WineCellarCard extends i {
                 ...(d.targetRow !== null && d.targetRow !== undefined ? { row: d.targetRow } : {}),
                 ...(d.targetCol !== null && d.targetCol !== undefined ? { col: d.targetCol } : {}),
             });
-            this._showToast(targetWine ? "Swapped wines" : "Wine moved");
+            // Same container (rack/bin/box) = reordering; a different one = an
+            // actual move between containers.
+            const sameContainer = d.sourceCabinetId === d.targetCabinetId;
+            this._showToast(sameContainer ? "Wine reordered" : targetWine ? "Swapped wines" : "Wine moved");
             await this._loadData();
         }
         catch (err) {
@@ -8192,10 +8825,15 @@ let WineCellarCard = class WineCellarCard extends i {
     }
     _copyWine(wine) {
         this._copiedWine = wine;
-        this._showToast(`Copied "${wine.name}" — tap empty cells to paste`);
+        this._showToast(`Copied "${wine.name}" — tap empty cells or bulk/box zones to paste`);
         this._showDetail = false;
+        // Close any open side panel and show every rack, so the whole cellar is reachable to paste into.
+        this._zonePanelOpen = false;
+        this._rackPanelOpen = false;
+        this._depthPanelOpen = false;
+        this._activeTab = "all";
     }
-    async _pasteWine(cabinetId, row, col, depth = 0) {
+    async _pasteWine(cabinetId, row, col, depth = 0, zone = "") {
         if (!this._copiedWine)
             return;
         try {
@@ -8223,7 +8861,7 @@ let WineCellarCard = class WineCellarCard extends i {
                     row,
                     col,
                     depth,
-                    zone: "",
+                    zone,
                     user_rating: this._copiedWine.user_rating,
                     disposition: this._copiedWine.disposition,
                 },
@@ -8434,7 +9072,7 @@ let WineCellarCard = class WineCellarCard extends i {
         ${this._copiedWine
             ? b `
               <div class="copy-banner">
-                <span>📋 Copying "${this._copiedWine.name}" — tap empty cells to place copies</span>
+                <span>📋 Copying "${this._copiedWine.name}" — tap empty cells or bulk/box zones to place copies</span>
                 <button @click=${() => (this._copiedWine = null)}>✕ Done</button>
               </div>
             `
@@ -8549,6 +9187,7 @@ let WineCellarCard = class WineCellarCard extends i {
                           @cell-click=${this._onCellClick}
                           @zone-click=${this._onZoneClick}
                           @zone-container-click=${this._onZoneContainerClick}
+                          @rack-click=${this._onRackClick}
                           @wine-drop=${this._onWineDrop}
                           @wine-longpress=${(e) => {
                     this._movingWine = e.detail.wine;
@@ -8565,6 +9204,13 @@ let WineCellarCard = class WineCellarCard extends i {
                             @cell-click=${this._onCellClick}
                             @zone-click=${this._onZoneClick}
                             @zone-container-click=${this._onZoneContainerClick}
+                            @rack-click=${this._onRackClick}
+                            @wine-drop=${this._onWineDrop}
+                            @wine-longpress=${(e) => {
+                    this._activeTab = "all";
+                    this._movingWine = e.detail.wine;
+                    this._showToast(`Tap a cell to move "${e.detail.wine.name}"`);
+                }}
                           ></cabinet-grid>
                         `)}
               </div>
@@ -8800,6 +9446,11 @@ let WineCellarCard = class WineCellarCard extends i {
           @copy-wine=${(e) => this._copyWine(e.detail.wine)}
           @move-wine=${(e) => {
             this._showDetail = false;
+            // Close any open side panel and show every rack, so any rack/zone in the cellar is reachable as a target.
+            this._zonePanelOpen = false;
+            this._rackPanelOpen = false;
+            this._depthPanelOpen = false;
+            this._activeTab = "all";
             this._movingWine = e.detail.wine;
             this._showToast(`Tap a cell to move "${e.detail.wine.name}"`);
         }}
@@ -8871,6 +9522,8 @@ let WineCellarCard = class WineCellarCard extends i {
                   ${Array.from({ length: this._depthPanelMaxDepth }, (_, i) => {
                 const wine = this._depthPanelWines.find((w) => (w.depth || 0) === i);
                 const typeColor = wine ? WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red : "";
+                const disp = wine?.disposition || "";
+                const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
                 return b `
                       <div
                         class="depth-slot ${wine ? "filled" : "empty"}"
@@ -8880,9 +9533,12 @@ let WineCellarCard = class WineCellarCard extends i {
                         ${wine
                     ? b `
                               <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
-                                ${wine.image_url
+                                <div class="depth-slot-avatar">
+                                  ${wine.image_url
                         ? b `<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
                         : b `<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                  ${dispClass ? b `<span class="depth-slot-disposition ${dispClass}">${disp}</span>` : A}
+                                </div>
                                 <div class="depth-slot-info">
                                   <div class="depth-slot-name">${wine.name}</div>
                                   <div class="depth-slot-meta">
@@ -8910,7 +9566,7 @@ let WineCellarCard = class WineCellarCard extends i {
         <!-- Zone Side Panel (Boxes, Bulk Bins) -->
         ${this._zonePanelOpen
             ? b `
-              <div class="depth-panel-backdrop" @click=${this._closeZonePanel}></div>
+              <div class="depth-panel-backdrop ${this._zonePanelDragWineId ? "drag-through" : ""}" @click=${this._closeZonePanel}></div>
               <div class="depth-panel open">
                 <div class="depth-panel-header">
                   <span class="depth-panel-title">
@@ -8925,43 +9581,61 @@ let WineCellarCard = class WineCellarCard extends i {
                 <div class="depth-panel-slots">
                   ${this._zonePanelType === "bulk"
                 ? b `
-                        <!-- Bulk mode: scrollable wine list + add button -->
-                        ${this._zonePanelWines.map((wine) => {
-                    const typeColor = WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red;
+                        <!-- Bulk mode: numbered slots, harmonized with Box mode -->
+                        ${Array.from({ length: this._zonePanelCapacity }, (_, slotIdx) => {
+                    const wine = this._zonePanelWines[slotIdx];
+                    const typeColor = wine ? WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red : "";
+                    const disp = wine?.disposition || "";
+                    const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
+                    const dragKey = `bulk-${slotIdx}`;
                     return b `
                             <div
-                              class="depth-slot filled"
-                              @click=${() => this._onZonePanelSlotClick(0, wine)}
+                              class="depth-slot ${wine ? "filled" : "empty"} ${this._zonePanelDragOverKey === dragKey ? "drag-over" : ""}"
+                              draggable=${wine ? "true" : "false"}
+                              @click=${() => this._onZonePanelSlotClick(slotIdx, wine)}
+                              @dragstart=${wine ? (e) => this._onZonePanelDragStart(e, wine) : A}
+                              @dragend=${wine ? () => this._onZonePanelDragEnd() : A}
+                              @dragover=${(e) => this._onZonePanelDragOver(e, dragKey)}
+                              @dragleave=${() => (this._zonePanelDragOverKey = null)}
+                              @drop=${(e) => this._onZonePanelBulkReorder(e, slotIdx)}
                             >
-                              <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
-                                ${wine.image_url
-                        ? b `<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
-                        : b `<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
-                                <div class="depth-slot-info">
-                                  <div class="depth-slot-name">${wine.name}</div>
-                                  <div class="depth-slot-meta">
-                                    ${wine.vintage || "NV"}
-                                    ${wine.rating ? b ` · ★${wine.rating}` : A}
-                                    ${wine.price ? b ` · $${wine.price}` : A}
-                                  </div>
-                                </div>
-                              </div>
+                              <span
+                                class="depth-slot-delete"
+                                title="Delete this slot"
+                                @click=${(e) => { e.stopPropagation(); this._deleteZoneSlot(slotIdx); }}
+                              >✕</span>
+                              <div class="depth-slot-label">Slot ${slotIdx + 1}</div>
+                              ${wine
+                        ? b `
+                                    <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
+                                      <div class="depth-slot-avatar">
+                                        ${wine.image_url
+                            ? b `<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
+                            : b `<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                        ${dispClass ? b `<span class="depth-slot-disposition ${dispClass}">${disp}</span>` : A}
+                                      </div>
+                                      <div class="depth-slot-info">
+                                        <div class="depth-slot-name">${wine.name}</div>
+                                        <div class="depth-slot-meta">
+                                          ${wine.vintage || "NV"}
+                                          ${wine.rating ? b ` · ★${wine.rating}` : A}
+                                          ${wine.price ? b ` · $${wine.price}` : A}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  `
+                        : b `
+                                    <div class="depth-slot-empty">
+                                      <span class="depth-slot-plus">+</span>
+                                      <span>Empty</span>
+                                    </div>
+                                  `}
                             </div>
                           `;
                 })}
-                        ${this._zonePanelWines.length < this._zonePanelCapacity
-                    ? b `
-                              <div
-                                class="depth-slot empty"
-                                @click=${this._onZonePanelBulkAdd}
-                              >
-                                <div class="depth-slot-empty">
-                                  <span class="depth-slot-plus">+</span>
-                                  <span>Add Wine</span>
-                                </div>
-                              </div>
-                            `
-                    : A}
+                        <div class="depth-panel-grow" @click=${this._addBulkSlot}>
+                          <span class="depth-slot-plus">+</span> Add Slot
+                        </div>
                       `
                 : b `
                         <!-- Box mode: slots grouped by box -->
@@ -8981,18 +9655,35 @@ let WineCellarCard = class WineCellarCard extends i {
                             const depthIdx = start + slotInBox;
                             const wine = this._zonePanelWines.find((w) => (w.depth || 0) === depthIdx);
                             const typeColor = wine ? WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red : "";
+                            const disp = wine?.disposition || "";
+                            const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
+                            const dragKey = `box-${depthIdx}`;
                             return b `
                                   <div
-                                    class="depth-slot ${wine ? "filled" : "empty"}"
+                                    class="depth-slot ${wine ? "filled" : "empty"} ${this._zonePanelDragOverKey === dragKey ? "drag-over" : ""}"
+                                    draggable=${wine ? "true" : "false"}
                                     @click=${() => this._onZonePanelSlotClick(depthIdx, wine)}
+                                    @dragstart=${wine ? (e) => this._onZonePanelDragStart(e, wine) : A}
+                                    @dragend=${wine ? () => this._onZonePanelDragEnd() : A}
+                                    @dragover=${(e) => this._onZonePanelDragOver(e, dragKey)}
+                                    @dragleave=${() => (this._zonePanelDragOverKey = null)}
+                                    @drop=${(e) => this._onZonePanelBoxReorder(e, depthIdx, wine)}
                                   >
+                                    <span
+                                      class="depth-slot-delete"
+                                      title="Delete this slot"
+                                      @click=${(e) => { e.stopPropagation(); this._deleteZoneSlot(depthIdx); }}
+                                    >✕</span>
                                     <div class="depth-slot-label">Slot ${slotInBox + 1}</div>
                                     ${wine
                                 ? b `
                                           <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
-                                            ${wine.image_url
+                                            <div class="depth-slot-avatar">
+                                              ${wine.image_url
                                     ? b `<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
                                     : b `<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                              ${dispClass ? b `<span class="depth-slot-disposition ${dispClass}">${disp}</span>` : A}
+                                            </div>
                                             <div class="depth-slot-info">
                                               <div class="depth-slot-name">${wine.name}</div>
                                               <div class="depth-slot-meta">
@@ -9015,7 +9706,97 @@ let WineCellarCard = class WineCellarCard extends i {
                             `;
                     });
                 })()}
+                        <div class="depth-panel-add-box">
+                          <select
+                            .value=${String(this._zonePanelNewBoxSize)}
+                            @change=${(e) => (this._zonePanelNewBoxSize = parseInt(e.target.value, 10))}
+                          >
+                            ${BOX_SIZES.map((s) => b `<option value=${s} ?selected=${s === this._zonePanelNewBoxSize}>${s}-pk</option>`)}
+                          </select>
+                          <div class="depth-panel-grow" @click=${this._addBoxSlot}>
+                            <span class="depth-slot-plus">+</span> Add Box
+                          </div>
+                        </div>
                       `}
+                </div>
+              </div>
+            `
+            : A}
+
+        <!-- Rack Panel (grid-slot cabinets: list + reorder), harmonized with Bulk/Box -->
+        ${this._rackPanelOpen
+            ? b `
+              <div class="depth-panel-backdrop ${this._rackPanelDragWineId ? "drag-through" : ""}" @click=${this._closeRackPanel}></div>
+              <div class="depth-panel open">
+                <div class="depth-panel-header">
+                  <span class="depth-panel-title">
+                    ${this._rackPanelCabinet?.name}
+                    <span class="depth-panel-subtitle">
+                      ${this._rackPanelWines.length}/${this._getRackSlots().length} bottles
+                    </span>
+                  </span>
+                  <button class="depth-panel-close" @click=${this._closeRackPanel}>✕</button>
+                </div>
+                <div class="depth-panel-slots">
+                  ${this._getRackSlots().map(({ row, col }, slotIdx) => {
+                const wines = this._rackPanelWines.filter((w) => w.row === row && w.col === col);
+                const wine = wines.length > 0 ? wines.sort((a, b) => (a.depth || 0) - (b.depth || 0))[0] : undefined;
+                const typeColor = wine ? WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red : "";
+                const disp = wine?.disposition || "";
+                const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
+                const dragKey = `rack-${row}-${col}`;
+                return b `
+                      <div
+                        class="depth-slot ${wine ? "filled" : "empty"} ${this._rackPanelDragOverKey === dragKey ? "drag-over" : ""}"
+                        draggable=${wine ? "true" : "false"}
+                        @click=${() => this._onRackPanelSlotClick(row, col, wine)}
+                        @dragstart=${wine ? (e) => this._onRackPanelDragStart(e, wine) : A}
+                        @dragend=${wine ? () => this._onRackPanelDragEnd() : A}
+                        @dragover=${(e) => this._onRackPanelDragOver(e, dragKey)}
+                        @dragleave=${() => (this._rackPanelDragOverKey = null)}
+                        @drop=${(e) => this._onRackPanelReorder(e, row, col, wine)}
+                      >
+                        ${this._isLastRackSlot(row, col)
+                    ? b `
+                              <span
+                                class="depth-slot-delete"
+                                title="Delete this slot"
+                                @click=${(e) => { e.stopPropagation(); this._deleteRackSlot(row, col); }}
+                              >✕</span>
+                            `
+                    : A}
+                        <div class="depth-slot-label">Slot ${slotIdx + 1}</div>
+                        ${wine
+                    ? b `
+                              <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
+                                <div class="depth-slot-avatar">
+                                  ${wine.image_url
+                        ? b `<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
+                        : b `<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                  ${dispClass ? b `<span class="depth-slot-disposition ${dispClass}">${disp}</span>` : A}
+                                </div>
+                                <div class="depth-slot-info">
+                                  <div class="depth-slot-name">${wine.name}</div>
+                                  <div class="depth-slot-meta">
+                                    ${wine.vintage || "NV"}
+                                    ${wine.rating ? b ` · ★${wine.rating}` : A}
+                                    ${wines.length > 1 ? b ` · ${wines.length} deep` : A}
+                                  </div>
+                                </div>
+                              </div>
+                            `
+                    : b `
+                              <div class="depth-slot-empty">
+                                <span class="depth-slot-plus">+</span>
+                                <span>Empty</span>
+                              </div>
+                            `}
+                      </div>
+                    `;
+            })}
+                  <div class="depth-panel-grow" @click=${this._addRackSlot}>
+                    <span class="depth-slot-plus">+</span> Add Slot
+                  </div>
                 </div>
               </div>
             `
@@ -9444,6 +10225,30 @@ __decorate([
 __decorate([
     r()
 ], WineCellarCard.prototype, "_zonePanelStorageRow", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_zonePanelDragWineId", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_zonePanelDragOverKey", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_zonePanelNewBoxSize", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_rackPanelOpen", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_rackPanelCabinet", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_rackPanelWines", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_rackPanelDragWineId", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_rackPanelDragOverKey", void 0);
 WineCellarCard = __decorate([
     t("wine-cellar-card")
 ], WineCellarCard);

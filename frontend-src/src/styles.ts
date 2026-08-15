@@ -277,6 +277,12 @@ export const sharedStyles = css`
     animation: fadeIn 0.2s ease;
   }
 
+  /* While dragging a wine out of the panel, let the backdrop pass drag/drop
+     events through to the racks behind it instead of swallowing them. */
+  .depth-panel-backdrop.drag-through {
+    pointer-events: none;
+  }
+
   .depth-panel {
     position: fixed;
     right: 0;
@@ -343,6 +349,7 @@ export const sharedStyles = css`
   }
 
   .depth-slot {
+    position: relative;
     border-radius: 10px;
     cursor: pointer;
     transition: background 0.15s, box-shadow 0.15s;
@@ -350,6 +357,56 @@ export const sharedStyles = css`
 
   .depth-slot:hover {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+
+  .depth-slot.drag-over {
+    box-shadow: 0 0 0 2px rgba(66, 165, 245, 0.8);
+    background: rgba(66, 165, 245, 0.15);
+  }
+
+  .depth-slot-delete {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8em;
+    line-height: 1;
+    color: var(--wc-text-secondary, #888);
+    background: rgba(0, 0, 0, 0.06);
+    z-index: 3;
+  }
+
+  .depth-slot-delete:hover {
+    background: #c62828;
+    color: #fff;
+  }
+
+  .depth-panel-add-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .depth-panel-add-box select {
+    flex: 1;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--wc-border, #ddd);
+    background: var(--wc-bg);
+    color: var(--wc-text, #333);
+    font-size: 0.85em;
+  }
+
+  .depth-panel-add-box .depth-panel-grow {
+    flex-shrink: 0;
+    padding: 8px 14px;
+    margin-top: 0;
   }
 
   .depth-slot-label {
@@ -371,6 +428,11 @@ export const sharedStyles = css`
     border-radius: 10px;
   }
 
+  .depth-slot-avatar {
+    position: relative;
+    flex-shrink: 0;
+  }
+
   .depth-slot-thumb {
     width: 32px;
     height: 44px;
@@ -384,6 +446,36 @@ export const sharedStyles = css`
     height: 12px;
     border-radius: 50%;
     flex-shrink: 0;
+  }
+
+  .depth-slot-disposition {
+    position: absolute;
+    bottom: -3px;
+    right: -4px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    font-size: 8px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    border: 1.5px solid var(--wc-bg, #fff);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    line-height: 1;
+  }
+
+  .depth-slot-disposition.drink {
+    background: #2e7d32;
+  }
+
+  .depth-slot-disposition.hold {
+    background: #1565c0;
+  }
+
+  .depth-slot-disposition.past {
+    background: #c62828;
   }
 
   .depth-slot-info {
@@ -436,5 +528,26 @@ export const sharedStyles = css`
 
   .depth-slot.empty:hover .depth-slot-plus {
     background: rgba(196, 139, 145, 0.2);
+  }
+
+  .depth-panel-grow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px;
+    margin-top: 4px;
+    border-radius: 10px;
+    border: 1px dashed var(--wc-border, #ddd);
+    color: var(--wc-text-secondary, #888);
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 600;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .depth-panel-grow:hover {
+    border-color: var(--wc-primary-text);
+    color: var(--wc-primary-text);
   }
 `;
