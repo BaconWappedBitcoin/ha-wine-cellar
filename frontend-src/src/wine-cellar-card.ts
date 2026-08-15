@@ -1,7 +1,7 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { sharedStyles } from "./styles";
-import { Wine, Cabinet, CellarStats, WINE_TYPE_COLORS, WineType, StorageRow, StorageRowType, BOX_SIZES } from "./models";
+import { Wine, Cabinet, CellarStats, WINE_TYPE_COLORS, WineType, StorageRow, StorageRowType, BOX_SIZES, getRackSlots, getWineLocation } from "./models";
 
 import "./components/cabinet-grid";
 import "./components/wine-detail-dialog";
@@ -73,6 +73,9 @@ export class WineCellarCard extends LitElement {
   @state() private _rackPanelWines: Wine[] = [];
   @state() private _rackPanelDragWineId: string | null = null;
   @state() private _rackPanelDragOverKey: string | null = null;
+
+  // Briefly highlights a wine's slot after "locate" is used from the detail dialog.
+  @state() private _highlightWineId: string | null = null;
 
   static styles = [
     sharedStyles,
@@ -860,6 +863,33 @@ export class WineCellarCard extends LitElement {
     return `Slot ${index + 1}`;
   }
 
+  // Opens the right side panel for a wine's location and briefly highlights its slot.
+  private _locateWine(wine: Wine) {
+    const loc = getWineLocation(wine, this._cabinets);
+    if (!loc.cabinet) {
+      this._showToast("This wine is unassigned");
+      return;
+    }
+    this._activeTab = "all";
+
+    if (wine.row !== null && wine.col !== null) {
+      this._openRackPanel(loc.cabinet);
+    } else if (loc.zone && loc.zone !== "bottom" && loc.storageRow) {
+      this._openZonePanel(loc.cabinet, loc.zone, loc.storageRow);
+    } else {
+      this._showToast(`In ${loc.text}`);
+      return;
+    }
+
+    this._highlightWineId = wine.id;
+    this.updateComplete.then(() => {
+      this.shadowRoot?.getElementById("highlight-slot")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    setTimeout(() => {
+      if (this._highlightWineId === wine.id) this._highlightWineId = null;
+    }, 2500);
+  }
+
   // --- Rack panel (grid-slot cabinets: list + reorder) ---
   private _onRackClick(e: CustomEvent) {
     this._openRackPanel(e.detail.cabinet);
@@ -884,15 +914,7 @@ export class WineCellarCard extends LitElement {
 
   // Every physical (row, col) slot in the rack, skipping bulk/box storage rows.
   private _getRackSlots(): { row: number; col: number }[] {
-    if (!this._rackPanelCabinet) return [];
-    const { rows, cols, storage_rows } = this._rackPanelCabinet;
-    const storageRowSet = new Set((storage_rows || []).map((sr) => sr.row));
-    const slots: { row: number; col: number }[] = [];
-    for (let r = 0; r < rows; r++) {
-      if (storageRowSet.has(r)) continue;
-      for (let c = 0; c < cols; c++) slots.push({ row: r, col: c });
-    }
-    return slots;
+    return this._rackPanelCabinet ? getRackSlots(this._rackPanelCabinet) : [];
   }
 
   // Adds exactly one new slot. A rack is a strict rows×cols rectangle, so
@@ -1806,6 +1828,7 @@ export class WineCellarCard extends LitElement {
         <wine-detail-dialog
           .wine=${this._selectedWine}
           .hass=${this.hass}
+          .cabinets=${this._cabinets}
           .open=${this._showDetail}
           .hasGemini=${this._hasGemini}
           .mode=${this._detailMode}
@@ -1817,6 +1840,7 @@ export class WineCellarCard extends LitElement {
           @wine-updated=${() => this._loadData()}
           @buy-list-updated=${() => this._loadData()}
           @copy-wine=${(e: CustomEvent) => this._copyWine(e.detail.wine)}
+          @locate-wine=${(e: CustomEvent) => this._locateWine(e.detail.wine)}
           @move-wine=${(e: CustomEvent) => {
             this._showDetail = false;
             // Close any open side panel and show every rack, so any rack/zone in the cellar is reachable as a target.
@@ -1865,6 +1889,10 @@ export class WineCellarCard extends LitElement {
           .hasGemini=${this._hasGemini}
           @close=${() => (this._showInventory = false)}
           @wine-updated=${() => this._loadData()}
+          @locate-wine=${(e: CustomEvent) => {
+            this._showInventory = false;
+            this._locateWine(e.detail.wine);
+          }}
         ></inventory-dialog>
 
         <!-- Rack Settings Dialog -->
@@ -1961,9 +1989,11 @@ export class WineCellarCard extends LitElement {
                           const disp = wine?.disposition || "";
                           const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
                           const dragKey = `bulk-${slotIdx}`;
+                          const highlighted = wine?.id === this._highlightWineId;
                           return html`
                             <div
-                              class="depth-slot ${wine ? "filled" : "empty"} ${this._zonePanelDragOverKey === dragKey ? "drag-over" : ""}"
+                              id=${highlighted ? "highlight-slot" : nothing}
+                              class="depth-slot ${wine ? "filled" : "empty"} ${this._zonePanelDragOverKey === dragKey ? "drag-over" : ""} ${highlighted ? "highlight" : ""}"
                               draggable=${wine ? "true" : "false"}
                               @click=${() => this._onZonePanelSlotClick(slotIdx, wine)}
                               @dragstart=${wine ? (e: DragEvent) => this._onZonePanelDragStart(e, wine) : nothing}
@@ -2031,9 +2061,11 @@ export class WineCellarCard extends LitElement {
                                 const disp = wine?.disposition || "";
                                 const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
                                 const dragKey = `box-${depthIdx}`;
+                                const highlighted = wine?.id === this._highlightWineId;
                                 return html`
                                   <div
-                                    class="depth-slot ${wine ? "filled" : "empty"} ${this._zonePanelDragOverKey === dragKey ? "drag-over" : ""}"
+                                    id=${highlighted ? "highlight-slot" : nothing}
+                                    class="depth-slot ${wine ? "filled" : "empty"} ${this._zonePanelDragOverKey === dragKey ? "drag-over" : ""} ${highlighted ? "highlight" : ""}"
                                     draggable=${wine ? "true" : "false"}
                                     @click=${() => this._onZonePanelSlotClick(depthIdx, wine)}
                                     @dragstart=${wine ? (e: DragEvent) => this._onZonePanelDragStart(e, wine) : nothing}
@@ -2118,9 +2150,11 @@ export class WineCellarCard extends LitElement {
                     const disp = wine?.disposition || "";
                     const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
                     const dragKey = `rack-${row}-${col}`;
+                    const highlighted = wines.some((w) => w.id === this._highlightWineId);
                     return html`
                       <div
-                        class="depth-slot ${wine ? "filled" : "empty"} ${this._rackPanelDragOverKey === dragKey ? "drag-over" : ""}"
+                        id=${highlighted ? "highlight-slot" : nothing}
+                        class="depth-slot ${wine ? "filled" : "empty"} ${this._rackPanelDragOverKey === dragKey ? "drag-over" : ""} ${highlighted ? "highlight" : ""}"
                         draggable=${wine ? "true" : "false"}
                         @click=${() => this._onRackPanelSlotClick(row, col, wine)}
                         @dragstart=${wine ? (e: DragEvent) => this._onRackPanelDragStart(e, wine) : nothing}
