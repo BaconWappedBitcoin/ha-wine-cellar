@@ -8132,10 +8132,12 @@ let WineCellarCard = class WineCellarCard extends i {
                 type: "wine_cellar/move_wine",
                 wine_id: this._movingWine.id,
                 cabinet_id: cabinetId,
-                row,
-                col,
                 zone,
                 depth,
+                // Bulk/zone moves have no X/Y; the backend schema rejects row/col
+                // sent as null, so only include them when they're actually set.
+                ...(row !== null ? { row } : {}),
+                ...(col !== null ? { col } : {}),
             });
             this._showToast(`Moved "${this._movingWine.name}"`);
             this._movingWine = null;
@@ -8163,9 +8165,12 @@ let WineCellarCard = class WineCellarCard extends i {
                     type: "wine_cellar/move_wine",
                     wine_id: targetWine.id,
                     cabinet_id: d.sourceCabinetId,
-                    row: d.sourceRow,
-                    col: d.sourceCol,
                     zone: d.sourceZone || "",
+                    // Slot targets carry real X/Y coordinates; Bulk/zone targets have
+                    // none, and the backend schema rejects row/col sent as null, so
+                    // only include them when they're actually set.
+                    ...(d.sourceRow !== null && d.sourceRow !== undefined ? { row: d.sourceRow } : {}),
+                    ...(d.sourceCol !== null && d.sourceCol !== undefined ? { col: d.sourceCol } : {}),
                 });
             }
             // Move dragged wine to target
@@ -8173,9 +8178,9 @@ let WineCellarCard = class WineCellarCard extends i {
                 type: "wine_cellar/move_wine",
                 wine_id: d.wineId,
                 cabinet_id: d.targetCabinetId,
-                row: d.targetRow,
-                col: d.targetCol,
                 zone: d.targetZone || "",
+                ...(d.targetRow !== null && d.targetRow !== undefined ? { row: d.targetRow } : {}),
+                ...(d.targetCol !== null && d.targetCol !== undefined ? { col: d.targetCol } : {}),
             });
             this._showToast(targetWine ? "Swapped wines" : "Wine moved");
             await this._loadData();
