@@ -34,6 +34,15 @@ export class CabinetGrid extends LitElement {
         text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
       }
 
+      .cabinet-name.clickable {
+        cursor: pointer;
+        border-radius: 6px;
+      }
+
+      .cabinet-name.clickable:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+
       .grid-inner {
         background: linear-gradient(180deg, #1a1a3a 0%, #0d0d2b 100%);
         border-radius: 8px;
@@ -165,15 +174,18 @@ export class CabinetGrid extends LitElement {
         box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
       }
 
-      .cell .disposition.drink {
+      .cell .disposition.drink,
+      .zone-bottle .disposition.drink {
         background: #2e7d32;
       }
 
-      .cell .disposition.hold {
+      .cell .disposition.hold,
+      .zone-bottle .disposition.hold {
         background: #1565c0;
       }
 
-      .cell .disposition.past {
+      .cell .disposition.past,
+      .zone-bottle .disposition.past {
         background: #c62828;
       }
 
@@ -264,6 +276,7 @@ export class CabinetGrid extends LitElement {
       }
 
       .zone-bottle {
+        position: relative;
         width: 28px;
         height: 28px;
         border-radius: 4px;
@@ -276,6 +289,27 @@ export class CabinetGrid extends LitElement {
         cursor: pointer;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
         transition: transform 0.2s;
+      }
+
+      .zone-bottle .disposition {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 68%;
+        height: 68%;
+        border-radius: 50%;
+        font-size: 9px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        z-index: 2;
+        pointer-events: none;
+        line-height: 1;
+        border: 1.5px solid rgba(255, 255, 255, 0.5);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
       }
 
       .zone-bottle:hover {
@@ -501,9 +535,9 @@ export class CabinetGrid extends LitElement {
   }
 
   private _getStorageRowWines(row: number): Wine[] {
-    return this.wines.filter(
-      (w) => w.cabinet_id === this.cabinet.id && w.zone === `storage-${row}`
-    );
+    return this.wines
+      .filter((w) => w.cabinet_id === this.cabinet.id && w.zone === `storage-${row}`)
+      .sort((a, b) => (a.depth || 0) - (b.depth || 0));
   }
 
   private _onCellClick(row: number, col: number, wine?: Wine, wineCount = 0, cabinetDepth = 1, wines: Wine[] = []) {
@@ -623,7 +657,7 @@ export class CabinetGrid extends LitElement {
     this._dragOverCell = null;
   }
 
-  private _onDrop(e: DragEvent, targetRow?: number, targetCol?: number, targetZone?: string) {
+  private _onDrop(e: DragEvent, targetRow?: number, targetCol?: number, targetZone?: string, targetWine?: Wine) {
     e.preventDefault();
     this._dragOverCell = null;
     if (!e.dataTransfer) return;
@@ -640,6 +674,11 @@ export class CabinetGrid extends LitElement {
           targetRow: targetRow ?? null,
           targetCol: targetCol ?? null,
           targetZone: targetZone || "",
+          // When dropping directly on another bottle within the same bulk
+          // zone, carry its id/depth so the card can swap the two instead
+          // of treating it as a same-zone no-op.
+          targetWineId: targetWine?.id ?? null,
+          targetDepth: targetWine ? (targetWine.depth ?? 0) : null,
         },
         bubbles: true,
         composed: true,
@@ -672,10 +711,13 @@ export class CabinetGrid extends LitElement {
         @dragleave=${(e: DragEvent) => this._onDragLeave(e)}
         @drop=${(e: DragEvent) => this._onDrop(e, undefined, undefined, zoneId)}>
         <div class="bottom-zone-label">◇ ${name} <span class="zone-count">${wines.length}/${capacity}</span></div>
-        ${wines.map(
-          (wine) => html`
+        ${wines.map((wine) => {
+          const disp = wine.disposition || "";
+          const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
+          const bottleKey = `${zoneKey}-${wine.id}`;
+          return html`
             <div
-              class="zone-bottle"
+              class="zone-bottle ${this._dragOverCell === bottleKey ? "drag-over" : ""}"
               style="background: ${WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red}"
               draggable="true"
               @click=${(e: Event) => {
@@ -684,12 +726,19 @@ export class CabinetGrid extends LitElement {
               }}
               @dragstart=${(e: DragEvent) => { e.stopPropagation(); this._onDragStart(e, wine, undefined, undefined, zoneId); }}
               @dragend=${(e: DragEvent) => this._onDragEnd(e)}
-              title="${wine.name}"
+              @dragover=${(e: DragEvent) => { e.stopPropagation(); this._onDragOver(e, bottleKey); }}
+              @dragleave=${(e: DragEvent) => { e.stopPropagation(); this._onDragLeave(e); }}
+              @drop=${(e: DragEvent) => { e.stopPropagation(); this._onDrop(e, undefined, undefined, zoneId, wine); }}
+              @touchstart=${(e: TouchEvent) => { e.stopPropagation(); this._onTouchStart(wine); }}
+              @touchend=${() => this._onTouchEnd()}
+              @touchmove=${() => this._onTouchMove()}
+              title="${wine.name} (${wine.vintage || "NV"})"
             >
               ${(wine.vintage || "NV").toString().slice(-2)}
+              ${dispClass ? html`<span class="disposition ${dispClass}">${disp}</span>` : nothing}
             </div>
-          `
-        )}
+          `;
+        })}
       </div>
     `;
   }
@@ -877,13 +926,28 @@ export class CabinetGrid extends LitElement {
     `;
   }
 
+  private _onRackClick() {
+    this.dispatchEvent(
+      new CustomEvent("rack-click", {
+        detail: { cabinet: this.cabinet },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
   render() {
     const { rows, cols } = this.cabinet;
     const storageRows = this._getStorageRowSet();
+    const hasGridRows = Array.from({ length: rows }, (_, row) => row).some((row) => !storageRows.has(row));
 
     return html`
       <div class="cabinet">
-        <div class="cabinet-name">${this.cabinet.name}</div>
+        <div
+          class="cabinet-name ${hasGridRows ? "clickable" : ""}"
+          @click=${hasGridRows ? () => this._onRackClick() : nothing}
+          title=${hasGridRows ? "Tap to view and reorder this rack" : ""}
+        >${this.cabinet.name}</div>
         <div class="grid-inner">
           ${Array.from({ length: rows }, (_, row) =>
               storageRows.has(row)
