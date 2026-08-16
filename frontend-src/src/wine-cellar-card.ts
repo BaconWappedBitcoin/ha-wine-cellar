@@ -1091,8 +1091,10 @@ export class WineCellarCard extends LitElement {
   private async _onWineDrop(e: CustomEvent) {
     const d = e.detail;
 
-    // Reordering within the same bulk zone: dropped directly on another
-    // bottle there, so swap their two depth positions.
+    // Reordering within the same bulk zone: dropped on/near another bottle
+    // there, so insert before/after it (whichever side the drop landed on)
+    // and reflow the whole zone to sequential depths — a straight two-item
+    // depth swap couldn't move a bottle to the front/back of a longer bin.
     if (
       d.targetWineId &&
       d.targetWineId !== d.wineId &&
@@ -1101,26 +1103,29 @@ export class WineCellarCard extends LitElement {
       d.sourceZone === d.targetZone
     ) {
       try {
-        const sourceWine = this._wines.find((w) => w.id === d.wineId);
-        const targetWine = this._wines.find((w) => w.id === d.targetWineId);
-        if (sourceWine && targetWine) {
-          await this.hass.callWS({
-            type: "wine_cellar/move_wine",
-            wine_id: sourceWine.id,
-            cabinet_id: d.targetCabinetId,
-            zone: d.targetZone,
-            depth: targetWine.depth || 0,
-          });
-          await this.hass.callWS({
-            type: "wine_cellar/move_wine",
-            wine_id: targetWine.id,
-            cabinet_id: d.targetCabinetId,
-            zone: d.targetZone,
-            depth: sourceWine.depth || 0,
-          });
-          this._showToast("Wine reordered");
-          await this._loadData();
+        const zoneWines = this._wines
+          .filter((w) => w.cabinet_id === d.targetCabinetId && w.zone === d.targetZone)
+          .sort((a, b) => (a.depth || 0) - (b.depth || 0));
+        const fromIdx = zoneWines.findIndex((w) => w.id === d.wineId);
+        if (fromIdx === -1) return;
+        const [moved] = zoneWines.splice(fromIdx, 1);
+        const toIdx = zoneWines.findIndex((w) => w.id === d.targetWineId);
+        if (toIdx === -1) return;
+        zoneWines.splice(d.insertBefore ? toIdx : toIdx + 1, 0, moved);
+
+        for (let i = 0; i < zoneWines.length; i++) {
+          if ((zoneWines[i].depth || 0) !== i) {
+            await this.hass.callWS({
+              type: "wine_cellar/move_wine",
+              wine_id: zoneWines[i].id,
+              cabinet_id: d.targetCabinetId,
+              zone: d.targetZone,
+              depth: i,
+            });
+          }
         }
+        this._showToast("Wine reordered");
+        await this._loadData();
       } catch (err) {
         console.error("Failed to reorder wine:", err);
         this._showToast("Failed to reorder wine");
@@ -1128,8 +1133,10 @@ export class WineCellarCard extends LitElement {
       return;
     }
 
-    // Don't drop on same position
-    if (d.sourceCabinetId === d.targetCabinetId && d.sourceRow === d.targetRow && d.sourceCol === d.targetCol && d.sourceZone === d.targetZone) return;
+    // Don't drop on same position. Only meaningful for grid slots — bulk/box
+    // zones have no row/col (always null), so this would always match and
+    // silently block reordering within the same zone.
+    if (!d.targetZone && d.sourceCabinetId === d.targetCabinetId && d.sourceRow === d.targetRow && d.sourceCol === d.targetCol && d.sourceZone === d.targetZone) return;
 
     try {
       // Check if target cell has a wine (swap)
@@ -1155,6 +1162,18 @@ export class WineCellarCard extends LitElement {
         });
       }
 
+      // Dropped into a bulk/box zone's general area (not swapped onto a
+      // specific bottle above): land past the last occupied depth instead
+      // of defaulting to 0, which would collide with whatever wine is
+      // already at depth 0 and — since depth-sorting is stable — look like
+      // the drop silently did nothing.
+      let targetDepth: number | undefined;
+      if (d.targetZone) {
+        targetDepth = this._wines
+          .filter((w) => w.cabinet_id === d.targetCabinetId && w.zone === d.targetZone && w.id !== d.wineId)
+          .reduce((max, w) => Math.max(max, w.depth || 0), -1) + 1;
+      }
+
       // Move dragged wine to target
       await this.hass.callWS({
         type: "wine_cellar/move_wine",
@@ -1163,6 +1182,7 @@ export class WineCellarCard extends LitElement {
         zone: d.targetZone || "",
         ...(d.targetRow !== null && d.targetRow !== undefined ? { row: d.targetRow } : {}),
         ...(d.targetCol !== null && d.targetCol !== undefined ? { col: d.targetCol } : {}),
+        ...(targetDepth !== undefined ? { depth: targetDepth } : {}),
       });
 
       // Same container (rack/bin/box) = reordering; a different one = an

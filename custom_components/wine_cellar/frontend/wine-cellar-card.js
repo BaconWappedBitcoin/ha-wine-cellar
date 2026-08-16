@@ -786,6 +786,38 @@ let CabinetGrid = class CabinetGrid extends i {
             return;
         try {
             const source = JSON.parse(e.dataTransfer.getData("text/plain"));
+            // Bulk-zone reordering: figure out which bottle the drop landed
+            // nearest to (and which half of it), so dropping anywhere in the zone
+            // reorders sensibly instead of only working when the cursor lands
+            // exactly on a chip — small chips are hard to hit precisely.
+            let effectiveTargetWine = targetWine;
+            let insertBefore = true;
+            if (effectiveTargetWine) {
+                const rect = e.currentTarget.getBoundingClientRect();
+                insertBefore = e.clientX < rect.left + rect.width / 2;
+            }
+            else if (targetZone) {
+                const container = e.currentTarget;
+                const chips = Array.from(container.querySelectorAll(".zone-bottle"));
+                let nearest = null;
+                let nearestDist = Infinity;
+                for (const chip of chips) {
+                    if (chip.dataset.wineId === source.wineId)
+                        continue;
+                    const rect = chip.getBoundingClientRect();
+                    const cx = rect.left + rect.width / 2;
+                    const dist = Math.abs(e.clientX - cx);
+                    if (dist < nearestDist) {
+                        nearestDist = dist;
+                        nearest = chip;
+                    }
+                }
+                if (nearest) {
+                    const rect = nearest.getBoundingClientRect();
+                    insertBefore = e.clientX < rect.left + rect.width / 2;
+                    effectiveTargetWine = this.wines.find((w) => w.id === nearest.dataset.wineId);
+                }
+            }
             this.dispatchEvent(new CustomEvent("wine-drop", {
                 detail: {
                     wineId: source.wineId,
@@ -797,11 +829,13 @@ let CabinetGrid = class CabinetGrid extends i {
                     targetRow: targetRow ?? null,
                     targetCol: targetCol ?? null,
                     targetZone: targetZone || "",
-                    // When dropping directly on another bottle within the same bulk
-                    // zone, carry its id/depth so the card can swap the two instead
-                    // of treating it as a same-zone no-op.
-                    targetWineId: targetWine?.id ?? null,
-                    targetDepth: targetWine ? (targetWine.depth ?? 0) : null,
+                    // When dropping on/near another bottle within the same bulk
+                    // zone, carry its id + which side the drop landed on, so the
+                    // card can insert relative to it instead of treating it as a
+                    // same-zone no-op.
+                    targetWineId: effectiveTargetWine?.id ?? null,
+                    targetDepth: effectiveTargetWine ? (effectiveTargetWine.depth ?? 0) : null,
+                    insertBefore,
                 },
                 bubbles: true,
                 composed: true,
@@ -840,6 +874,7 @@ let CabinetGrid = class CabinetGrid extends i {
             <div
               class="zone-bottle ${this._dragOverCell === bottleKey ? "drag-over" : ""}"
               style="background: ${WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red}"
+              data-wine-id="${wine.id}"
               draggable="true"
               @click=${(e) => {
                 e.stopPropagation();
@@ -8745,34 +8780,40 @@ let WineCellarCard = class WineCellarCard extends i {
     }
     async _onWineDrop(e) {
         const d = e.detail;
-        // Reordering within the same bulk zone: dropped directly on another
-        // bottle there, so swap their two depth positions.
+        // Reordering within the same bulk zone: dropped on/near another bottle
+        // there, so insert before/after it (whichever side the drop landed on)
+        // and reflow the whole zone to sequential depths — a straight two-item
+        // depth swap couldn't move a bottle to the front/back of a longer bin.
         if (d.targetWineId &&
             d.targetWineId !== d.wineId &&
             d.sourceCabinetId === d.targetCabinetId &&
             d.sourceZone &&
             d.sourceZone === d.targetZone) {
             try {
-                const sourceWine = this._wines.find((w) => w.id === d.wineId);
-                const targetWine = this._wines.find((w) => w.id === d.targetWineId);
-                if (sourceWine && targetWine) {
-                    await this.hass.callWS({
-                        type: "wine_cellar/move_wine",
-                        wine_id: sourceWine.id,
-                        cabinet_id: d.targetCabinetId,
-                        zone: d.targetZone,
-                        depth: targetWine.depth || 0,
-                    });
-                    await this.hass.callWS({
-                        type: "wine_cellar/move_wine",
-                        wine_id: targetWine.id,
-                        cabinet_id: d.targetCabinetId,
-                        zone: d.targetZone,
-                        depth: sourceWine.depth || 0,
-                    });
-                    this._showToast("Wine reordered");
-                    await this._loadData();
+                const zoneWines = this._wines
+                    .filter((w) => w.cabinet_id === d.targetCabinetId && w.zone === d.targetZone)
+                    .sort((a, b) => (a.depth || 0) - (b.depth || 0));
+                const fromIdx = zoneWines.findIndex((w) => w.id === d.wineId);
+                if (fromIdx === -1)
+                    return;
+                const [moved] = zoneWines.splice(fromIdx, 1);
+                const toIdx = zoneWines.findIndex((w) => w.id === d.targetWineId);
+                if (toIdx === -1)
+                    return;
+                zoneWines.splice(d.insertBefore ? toIdx : toIdx + 1, 0, moved);
+                for (let i = 0; i < zoneWines.length; i++) {
+                    if ((zoneWines[i].depth || 0) !== i) {
+                        await this.hass.callWS({
+                            type: "wine_cellar/move_wine",
+                            wine_id: zoneWines[i].id,
+                            cabinet_id: d.targetCabinetId,
+                            zone: d.targetZone,
+                            depth: i,
+                        });
+                    }
                 }
+                this._showToast("Wine reordered");
+                await this._loadData();
             }
             catch (err) {
                 console.error("Failed to reorder wine:", err);
@@ -8780,8 +8821,10 @@ let WineCellarCard = class WineCellarCard extends i {
             }
             return;
         }
-        // Don't drop on same position
-        if (d.sourceCabinetId === d.targetCabinetId && d.sourceRow === d.targetRow && d.sourceCol === d.targetCol && d.sourceZone === d.targetZone)
+        // Don't drop on same position. Only meaningful for grid slots — bulk/box
+        // zones have no row/col (always null), so this would always match and
+        // silently block reordering within the same zone.
+        if (!d.targetZone && d.sourceCabinetId === d.targetCabinetId && d.sourceRow === d.targetRow && d.sourceCol === d.targetCol && d.sourceZone === d.targetZone)
             return;
         try {
             // Check if target cell has a wine (swap)
@@ -8803,6 +8846,17 @@ let WineCellarCard = class WineCellarCard extends i {
                     ...(d.sourceCol !== null && d.sourceCol !== undefined ? { col: d.sourceCol } : {}),
                 });
             }
+            // Dropped into a bulk/box zone's general area (not swapped onto a
+            // specific bottle above): land past the last occupied depth instead
+            // of defaulting to 0, which would collide with whatever wine is
+            // already at depth 0 and — since depth-sorting is stable — look like
+            // the drop silently did nothing.
+            let targetDepth;
+            if (d.targetZone) {
+                targetDepth = this._wines
+                    .filter((w) => w.cabinet_id === d.targetCabinetId && w.zone === d.targetZone && w.id !== d.wineId)
+                    .reduce((max, w) => Math.max(max, w.depth || 0), -1) + 1;
+            }
             // Move dragged wine to target
             await this.hass.callWS({
                 type: "wine_cellar/move_wine",
@@ -8811,6 +8865,7 @@ let WineCellarCard = class WineCellarCard extends i {
                 zone: d.targetZone || "",
                 ...(d.targetRow !== null && d.targetRow !== undefined ? { row: d.targetRow } : {}),
                 ...(d.targetCol !== null && d.targetCol !== undefined ? { col: d.targetCol } : {}),
+                ...(targetDepth !== undefined ? { depth: targetDepth } : {}),
             });
             // Same container (rack/bin/box) = reordering; a different one = an
             // actual move between containers.
