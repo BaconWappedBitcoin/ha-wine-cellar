@@ -273,15 +273,30 @@ class WineCellarStorage:
                 return True
         return False
 
+    @staticmethod
+    def cabinet_capacity(cabinet: dict[str, Any]) -> int:
+        """Return a single cabinet's total bottle capacity.
+
+        Plain row/col grid slots, plus each bulk/box storage row's own
+        capacity (those rows replace a grid row, so they're not part of
+        the row*col count and must be added separately).
+        """
+        if cabinet.get("type") != "grid":
+            return 0
+        storage_rows = cabinet.get("storage_rows", [])
+        grid_rows = max(0, cabinet.get("rows", 0) - len(storage_rows))
+        capacity = grid_rows * cabinet.get("cols", 0) * cabinet.get("depth", 1)
+        for sr in storage_rows:
+            if sr.get("type") == "box":
+                capacity += sum(sr.get("boxes", []))
+            else:
+                capacity += sr.get("capacity", 0)
+        return capacity
+
     def get_stats(self) -> dict[str, Any]:
         """Get cellar statistics."""
         total_bottles = len(self.wines)
-        total_capacity = 0
-        for c in self.cabinets:
-            if c.get("type") == "grid":
-                storage_row_count = len(c.get("storage_rows", []))
-                grid_rows = c.get("rows", 0) - storage_row_count
-                total_capacity += max(0, grid_rows) * c.get("cols", 0) * c.get("depth", 1)
+        total_capacity = sum(self.cabinet_capacity(c) for c in self.cabinets)
         by_type: dict[str, int] = {}
         by_cabinet: dict[str, int] = {}
         total_value = 0.0
