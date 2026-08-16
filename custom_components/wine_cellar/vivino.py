@@ -32,6 +32,20 @@ HEADERS = {
     "Accept": "application/json",
 }
 
+# Without an explicit Accept-Language, Vivino's HTML page (food pairings,
+# description) comes back server-side-localized based on IP/session
+# heuristics rather than a fixed language — pin it to whatever the user has
+# picked instead of leaving it to chance.
+ACCEPT_LANGUAGE_BY_CODE = {
+    "en": "en-US,en;q=0.9",
+    "fr": "fr-FR,fr;q=0.9,en;q=0.5",
+    "de": "de-DE,de;q=0.9,en;q=0.5",
+}
+
+
+def _accept_language(language: str) -> str:
+    return ACCEPT_LANGUAGE_BY_CODE.get(language, ACCEPT_LANGUAGE_BY_CODE["en"])
+
 
 class VivinoClient:
     """Client for looking up wine data from multiple sources."""
@@ -40,7 +54,7 @@ class VivinoClient:
         """Initialize the client."""
         self._hass = hass
 
-    async def lookup_barcode(self, barcode: str) -> dict[str, Any] | None:
+    async def lookup_barcode(self, barcode: str, language: str = "en") -> dict[str, Any] | None:
         """Look up a wine by barcode using multiple sources."""
         # 1. Try UPC Item DB first (good barcode database)
         result = await self._lookup_upc_itemdb(barcode)
@@ -53,26 +67,47 @@ class VivinoClient:
             return result
 
         # 3. Try Vivino HTML search as last resort
-        html_results = await self._search_vivino_html(barcode)
+        html_results = await self._search_vivino_html(barcode, language)
         if html_results:
             return html_results[0]
 
         _LOGGER.warning("No results found for barcode: %s", barcode)
         return None
 
-    async def search_wine(self, query: str) -> list[dict[str, Any]]:
+    async def search_wine(
+        self, query: str, language: str = "en", fetch_extras: bool = True
+    ) -> list[dict[str, Any]]:
         """Search for wines by name/text query.
 
-        Tries the explore API first (structured JSON), then HTML scrape fallback.
+        Tries the explore API first (structured JSON, reliable prices) then
+        HTML scrape fallback. The explore API never returns `description` or
+        `food_pairings` — those only come from the HTML page. For a
+        well-indexed wine the explore API almost always succeeds, so without
+        this backfill those two fields would never get set at all (only
+        obscure wines that fail the explore API would ever reach the HTML
+        path). `fetch_extras=False` skips this extra request (used by batch
+        refresh, to avoid ~doubling its request volume across many wines).
         """
-        # Try explore API first — returns structured JSON with reliable prices
-        results = await self._search_vivino_explore(query)
+        results = await self._search_vivino_explore(query, language)
         if results:
+            if fetch_extras and not results[0].get("description") and not results[0].get("food_pairings"):
+                try:
+                    html_results = await self._search_vivino_html(query, language)
+                    if html_results:
+                        top = html_results[0]
+                        if top.get("description"):
+                            results[0]["description"] = top["description"]
+                        if top.get("food_pairings"):
+                            results[0]["food_pairings"] = top["food_pairings"]
+                except Exception as err:
+                    _LOGGER.debug(
+                        "Vivino: description/food_pairings backfill failed for '%s': %s", query, err
+                    )
             return results
 
         # Fall back to HTML scraping (no price data — only explore API has prices)
         _LOGGER.debug("Vivino explore API returned no results for '%s', falling back to HTML scrape", query)
-        results = await self._search_vivino_html(query)
+        results = await self._search_vivino_html(query, language)
         if results:
             return results
 
@@ -80,7 +115,7 @@ class VivinoClient:
 
     # ── Vivino Explore API ──────────────────────────────────────────
 
-    async def _search_vivino_explore(self, query: str) -> list[dict[str, Any]]:
+    async def _search_vivino_explore(self, query: str, language: str = "en") -> list[dict[str, Any]]:
         """Use Vivino's explore API to search for wines."""
         session = async_get_clientsession(self._hass)
         results: list[dict[str, Any]] = []
@@ -94,14 +129,15 @@ class VivinoClient:
                 ("page_size", "5"),
                 ("country_code", "US"),
                 ("currency_code", "USD"),
-                ("language", "en"),
+                ("language", language),
             ]
             # Add all wine type IDs as required filter
             for wt_id in ALL_WINE_TYPE_IDS:
                 params.append(("wine_type_ids[]", str(wt_id)))
 
+            headers = {**HEADERS, "Accept-Language": _accept_language(language)}
             async with session.get(
-                VIVINO_API_URL, params=params, headers=HEADERS, timeout=timeout
+                VIVINO_API_URL, params=params, headers=headers, timeout=timeout
             ) as resp:
                 if resp.status != 200:
                     _LOGGER.warning(
@@ -190,14 +226,14 @@ class VivinoClient:
 
     # ── Vivino HTML Search (scrape) ──────────────────────────────────
 
-    async def _search_vivino_html(self, query: str) -> list[dict[str, Any]]:
+    async def _search_vivino_html(self, query: str, language: str = "en") -> list[dict[str, Any]]:
         """Search Vivino by scraping the HTML search results page."""
         session = async_get_clientsession(self._hass)
 
         try:
             url = VIVINO_SEARCH_URL.format(query=quote_plus(query))
             timeout = aiohttp.ClientTimeout(total=15)
-            headers = {**HEADERS, "Accept": "text/html"}
+            headers = {**HEADERS, "Accept": "text/html", "Accept-Language": _accept_language(language)}
 
             async with session.get(
                 url, headers=headers, timeout=timeout, allow_redirects=True

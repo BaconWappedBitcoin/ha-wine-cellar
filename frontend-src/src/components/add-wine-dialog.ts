@@ -22,6 +22,7 @@ export class AddWineDialog extends LitElement {
   @property({ type: Boolean }) open = false;
   @property({ attribute: false }) hass: any;
   @property({ attribute: false }) cabinets: Cabinet[] = [];
+  @property({ attribute: false }) wines: Wine[] = [];
   @property({ attribute: false }) preselectedCabinet: string = "";
   @property({ attribute: false }) preselectedRow: number | null = null;
   @property({ attribute: false }) preselectedCol: number | null = null;
@@ -38,6 +39,9 @@ export class AddWineDialog extends LitElement {
   @state() private _error = "";
   @state() private _hasGemini = false;
   @state() private _labelLoading = false;
+  @state() private _captureStage: "front" | "back" = "front";
+  @state() private _frontImageRaw = "";
+  @state() private _showBackPrompt = false;
   @state() private _searchResults: BarcodeLookupResult[] = [];
 
   static styles = [
@@ -410,6 +414,9 @@ export class AddWineDialog extends LitElement {
         this._loading = false;
         this._labelLoading = false;
         this._searchResults = [];
+        this._captureStage = "front";
+        this._frontImageRaw = "";
+        this._showBackPrompt = false;
         this._wineData = {
           name: "",
           winery: "",
@@ -483,6 +490,7 @@ export class AddWineDialog extends LitElement {
           description: result.result.description || "",
           food_pairings: result.result.food_pairings || "",
           alcohol: result.result.alcohol || "",
+          vivino_updated_at: result.result.source === "vivino" ? new Date().toISOString() : this._wineData.vivino_updated_at,
         };
         this._step = "details";
       } else {
@@ -541,6 +549,7 @@ export class AddWineDialog extends LitElement {
       description: item.description || "",
       food_pairings: item.food_pairings || "",
       alcohol: item.alcohol || "",
+      vivino_updated_at: new Date().toISOString(),
     };
     this._searchResults = [];
     this._step = "details";
@@ -552,19 +561,31 @@ export class AddWineDialog extends LitElement {
     this._lookupBarcode();
   }
 
-  private async _onPhotoCaptured(e: CustomEvent) {
+  private _onLabelPhotoCaptured(e: CustomEvent) {
+    if (this._captureStage === "front") {
+      this._frontImageRaw = e.detail.image;
+      this._showBackPrompt = true;
+    } else {
+      this._finishLabelScan(e.detail.image);
+    }
+  }
+
+  private async _finishLabelScan(backImageRaw?: string) {
+    this._showBackPrompt = false;
     this._labelLoading = true;
     this._error = "";
 
     try {
       const result = await this.hass.callWS({
         type: "wine_cellar/recognize_label",
-        image: e.detail.image,
+        image: this._frontImageRaw,
+        ...(backImageRaw ? { back_image: backImageRaw } : {}),
       });
 
       if (result.result) {
-        // Resize captured photo to thumbnail for storage
-        const thumbUrl = await resizeImageForStorage(e.detail.image);
+        // Resize captured photos to thumbnails for storage
+        const thumbUrl = await resizeImageForStorage(this._frontImageRaw);
+        const backThumbUrl = backImageRaw ? await resizeImageForStorage(backImageRaw) : "";
         const r = result.result;
         this._wineData = {
           ...this._wineData,
@@ -582,10 +603,15 @@ export class AddWineDialog extends LitElement {
           retail_price: r.estimated_price || null,
           ai_ratings: r.ai_ratings || null,
           notes: r.notes || "",
+          barcode: r.barcode || this._wineData.barcode || "",
           image_url: thumbUrl,
+          back_image_url: backThumbUrl,
+          ai_updated_at: new Date().toISOString(),
         };
         this._scanMode = "idle";
         this._step = "details";
+        this._captureStage = "front";
+        this._frontImageRaw = "";
       } else {
         // Show specific error from backend if available
         const errorDetail = result.error || "Unknown error";
@@ -607,6 +633,16 @@ export class AddWineDialog extends LitElement {
 
   private _updateField(field: string, value: any) {
     this._wineData = { ...this._wineData, [field]: value };
+  }
+
+  private _selectZone(zoneId: string) {
+    // Land after the last occupied depth in that zone instead of always
+    // depth 0 — otherwise a second bottle added to the same zone collides
+    // with whatever's already at depth 0.
+    const depth = this.wines
+      .filter((w) => w.cabinet_id === this._wineData.cabinet_id && w.zone === zoneId)
+      .reduce((max, w) => Math.max(max, w.depth || 0), -1) + 1;
+    this._wineData = { ...this._wineData, zone: zoneId, row: null, col: null, depth };
   }
 
   private async _addWine() {
@@ -704,15 +740,39 @@ export class AddWineDialog extends LitElement {
                   <div style="margin-top: 8px">Analyzing label with AI...</div>
                 </div>
               `
-            : html`
-                <label-camera
-                  .active=${true}
-                  @photo-captured=${this._onPhotoCaptured}
-                ></label-camera>
-              `}
+            : this._showBackPrompt
+              ? html`
+                  <div style="text-align:center;padding:24px 12px">
+                    <div style="font-size:2em;margin-bottom:8px">✅</div>
+                    <div style="margin-bottom:12px;font-weight:500">Front label captured</div>
+                    <p style="font-size:0.85em;color:var(--wc-text-secondary);margin-bottom:16px">
+                      Add a photo of the back label too? It often has the vintage year (and sometimes a barcode).
+                    </p>
+                    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                      <button class="btn btn-primary" @click=${() => { this._showBackPrompt = false; this._captureStage = "back"; }}>📷 Add Back Photo</button>
+                      <button class="btn btn-outline" @click=${() => this._finishLabelScan()}>Skip, Use Front Only</button>
+                    </div>
+                  </div>
+                `
+              : html`
+                  ${this._captureStage === "back"
+                    ? html`<div class="hint" style="text-align:center;margin-bottom:6px">Now photograph the back label</div>`
+                    : nothing}
+                  <label-camera
+                    .active=${true}
+                    @photo-captured=${this._onLabelPhotoCaptured}
+                  ></label-camera>
+                `}
           ${this._error ? html`<div class="error-msg">${this._error}</div>` : nothing}
           <div class="camera-actions">
-            <button class="btn btn-outline" @click=${() => { this._scanMode = "idle"; this._error = ""; this._labelLoading = false; }}>Cancel</button>
+            <button class="btn btn-outline" @click=${() => {
+              this._scanMode = "idle";
+              this._error = "";
+              this._labelLoading = false;
+              this._showBackPrompt = false;
+              this._captureStage = "front";
+              this._frontImageRaw = "";
+            }}>Cancel</button>
           </div>
         </div>
         <div class="dialog-footer">
@@ -1021,6 +1081,10 @@ export class AddWineDialog extends LitElement {
   }
 
   private _renderLocationStep() {
+    const selectedCabinet = this.cabinets.find((c) => c.id === this._wineData.cabinet_id);
+    const zones = selectedCabinet?.storage_rows || [];
+    const hasZone = !!this._wineData.zone;
+
     return html`
       <div class="dialog-body">
         <div style="font-weight: 500; margin-bottom: 8px">Choose Location</div>
@@ -1033,7 +1097,9 @@ export class AddWineDialog extends LitElement {
             (cab) => html`
               <div
                 class="location-cabinet ${this._wineData.cabinet_id === cab.id ? "selected" : ""}"
-                @click=${() => this._updateField("cabinet_id", cab.id)}
+                @click=${() => {
+                  this._wineData = { ...this._wineData, cabinet_id: cab.id, row: null, col: null, zone: "" };
+                }}
               >
                 <div class="cab-name">${cab.name}</div>
                 <div class="cab-info">${cab.rows}×${cab.cols} slots</div>
@@ -1042,7 +1108,27 @@ export class AddWineDialog extends LitElement {
           )}
         </div>
 
-        ${this._wineData.cabinet_id
+        ${selectedCabinet && zones.length > 0 ? html`
+          <div style="margin-top:12px">
+            <label style="display:block;font-size:0.8em;color:var(--wc-text-secondary);margin-bottom:6px">Bulk / Box Zone</label>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              <button
+                class="btn ${!hasZone ? "btn-primary" : "btn-outline"}"
+                style="font-size:0.8em;padding:6px 10px"
+                @click=${() => this._updateField("zone", "")}
+              >None — use grid Row/Col</button>
+              ${zones.map((sr) => html`
+                <button
+                  class="btn ${this._wineData.zone === `storage-${sr.row}` ? "btn-primary" : "btn-outline"}"
+                  style="font-size:0.8em;padding:6px 10px"
+                  @click=${() => this._selectZone(`storage-${sr.row}`)}
+                >${sr.name || (sr.type === "box" ? "Box" : "Bulk Bin")}</button>
+              `)}
+            </div>
+          </div>
+        ` : nothing}
+
+        ${this._wineData.cabinet_id && !hasZone
           ? html`
               <div class="pos-inputs">
                 <div class="form-group">
@@ -1068,25 +1154,44 @@ export class AddWineDialog extends LitElement {
               </div>
             `
           : nothing}
+        ${this._error ? html`<div class="error-msg">${this._error}</div>` : nothing}
       </div>
 
       <div class="dialog-footer">
         <button class="btn btn-outline" @click=${() => this._goToStep("details")}>
           ← Back
         </button>
-        <button class="btn btn-primary" @click=${() => this._goToStep("confirm")}>
+        <button class="btn btn-primary" @click=${() => this._onLocationNext()}>
           Next →
         </button>
       </div>
     `;
   }
 
+  private _onLocationNext() {
+    const d = this._wineData;
+    // A cabinet with no zone and no complete row/col is a wine with no
+    // findable position — it silently vanishes (assigned to the cabinet,
+    // but rendered nowhere). Catch that here instead of at save time.
+    if (d.cabinet_id && !d.zone && (d.row == null || d.col == null || isNaN(d.row) || isNaN(d.col))) {
+      this._error = "Pick a zone, or enter both Row and Column, so the bottle has a findable spot.";
+      return;
+    }
+    this._error = "";
+    this._goToStep("confirm");
+  }
+
   private _renderConfirmStep() {
     const cabinetName =
       this.cabinets.find((c) => c.id === this._wineData.cabinet_id)?.name ||
       "Unassigned";
-    const posLabel =
-      this._wineData.row != null && this._wineData.col != null
+    const zoneCabinet = this.cabinets.find((c) => c.id === this._wineData.cabinet_id);
+    const zoneRow = this._wineData.zone
+      ? zoneCabinet?.storage_rows.find((sr) => `storage-${sr.row}` === this._wineData.zone)
+      : undefined;
+    const posLabel = zoneRow
+      ? zoneRow.name || (zoneRow.type === "box" ? "Box" : "Bulk Bin")
+      : this._wineData.row != null && this._wineData.col != null
         ? `Row ${(this._wineData.row ?? 0) + 1}, Col ${(this._wineData.col ?? 0) + 1}`
         : "Not specified";
 

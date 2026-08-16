@@ -17,9 +17,25 @@
         "title": "Cork Dork Options",
         "data": {
           "default_wine_type": "Default wine type for new entries",
-          "gemini_api_key": "Google Gemini API key (for AI label recognition)"
+          "ai_provider": "AI provider",
+          "gemini_api_key": "Google Gemini API key (used when provider is Google Gemini)",
+          "gemini_model": "Gemini model name",
+          "ai_base_url": "AI base URL (used when provider is OpenAI-compatible)",
+          "ai_api_key": "AI API key (Bearer token)",
+          "ai_model": "AI model name"
+        },
+        "data_description": {
+          "gemini_model": "Format: gemini-2.5-flash",
+          "ai_base_url": "Format: https://host or https://host/your-path — with or without a trailing /v1/chat/completions, either works",
+          "ai_api_key": "Sent as header: Authorization: Bearer <key>",
+          "ai_model": "Format: the exact model name your provider expects, e.g. gemini-2.5-flash"
         }
       }
+    },
+    "error": {
+      "ai_provider_incomplete": "Base URL, API key, and model are all required for an OpenAI-compatible provider.",
+      "ai_provider_invalid_auth": "The AI API key was rejected by the endpoint.",
+      "ai_provider_cannot_connect": "Could not connect to the AI base URL. Check the address and try again."
     }
   }
 }

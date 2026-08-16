@@ -2159,7 +2159,9 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._pendingVivinoImage = null;
         this._showPhotoCamera = false;
         this._photoBusy = false;
+        this._showAiFallbackConfirm = false;
         this.hasGemini = false;
+        this.aiFallbackAlways = false;
     }
     updated(changedProps) {
         if (changedProps.has("wine") && this.wine) {
@@ -2356,6 +2358,20 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 type: "wine_cellar/refresh_wine",
                 wine_id: this.wine.id,
             });
+            if (resp.no_vivino_match) {
+                this._refreshing = false;
+                if (!resp.ai_available) {
+                    alert(resp.error);
+                    return;
+                }
+                if (this.aiFallbackAlways) {
+                    await this._analyzeWithAI();
+                }
+                else {
+                    this._showAiFallbackConfirm = true;
+                }
+                return;
+            }
             if (resp.error) {
                 alert(resp.error);
             }
@@ -2371,6 +2387,20 @@ let WineDetailDialog = class WineDetailDialog extends i {
             console.error("Vivino refresh failed", err);
         }
         this._refreshing = false;
+    }
+    async _confirmAiFallback(remember) {
+        this._showAiFallbackConfirm = false;
+        if (remember) {
+            this.dispatchEvent(new CustomEvent("set-ai-fallback-always", {
+                detail: { value: true },
+                bubbles: true,
+                composed: true,
+            }));
+        }
+        await this._analyzeWithAI();
+    }
+    _dismissAiFallback() {
+        this._showAiFallbackConfirm = false;
     }
     async _updatePhoto(image_url) {
         if (!this.wine || !this.hass)
@@ -2463,6 +2493,17 @@ let WineDetailDialog = class WineDetailDialog extends i {
     _hasTastingNotes() {
         const n = this._tastingNotes;
         return !!(n.aroma || n.taste || n.finish || n.overall);
+    }
+    _formatUpdatedAt(iso) {
+        if (!iso)
+            return "";
+        const d = new Date(iso);
+        if (isNaN(d.getTime()))
+            return "";
+        return d.toLocaleString(undefined, {
+            dateStyle: "medium",
+            timeStyle: "short",
+        });
     }
     _renderEditForm() {
         const d = this._editData;
@@ -2685,6 +2726,15 @@ let WineDetailDialog = class WineDetailDialog extends i {
                   <button class="btn btn-primary" style="background:#c62828"
                     @click=${this._onRemove}>✕ Remove</button>
                 </div>
+                ${wine.vivino_updated_at || wine.ai_updated_at
+                ? b `
+                      <div style="text-align:center;font-size:0.68em;color:var(--wc-text-secondary);margin-top:-6px;padding-bottom:10px">
+                        ${wine.vivino_updated_at ? b `Vivino: ${this._formatUpdatedAt(wine.vivino_updated_at)}` : A}
+                        ${wine.vivino_updated_at && wine.ai_updated_at ? " · " : A}
+                        ${wine.ai_updated_at ? b `AI: ${this._formatUpdatedAt(wine.ai_updated_at)}` : A}
+                      </div>
+                    `
+                : A}
               `
             : A}
 
@@ -2914,6 +2964,25 @@ let WineDetailDialog = class WineDetailDialog extends i {
                   <button
                     style="padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.85em"
                     @click=${() => (this._showPhotoCamera = false)}
+                  >Cancel</button>
+                </div>
+              </div>
+            </div>
+          ` : A}
+          ${this._showAiFallbackConfirm ? b `
+            <div style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px">
+              <div style="background:var(--wc-bg);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center" @click=${(e) => e.stopPropagation()}>
+                <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">No Vivino Match</h3>
+                <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">Vivino couldn't find a confident match for this wine. Try AI instead?</p>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                  <button class="btn btn-primary" style="background:#1565c0" @click=${() => this._confirmAiFallback(false)}>Use AI Once</button>
+                  <button
+                    style="padding:8px 16px;border-radius:20px;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text);cursor:pointer;font-size:0.85em"
+                    @click=${() => this._confirmAiFallback(true)}
+                  >Always Use AI Automatically</button>
+                  <button
+                    style="margin-top:4px;padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.8em"
+                    @click=${this._dismissAiFallback}
                   >Cancel</button>
                 </div>
               </div>
@@ -3467,8 +3536,14 @@ __decorate([
     r()
 ], WineDetailDialog.prototype, "_photoBusy", void 0);
 __decorate([
+    r()
+], WineDetailDialog.prototype, "_showAiFallbackConfirm", void 0);
+__decorate([
     n({ type: Boolean })
 ], WineDetailDialog.prototype, "hasGemini", void 0);
+__decorate([
+    n({ type: Boolean })
+], WineDetailDialog.prototype, "aiFallbackAlways", void 0);
 WineDetailDialog = __decorate([
     t("wine-detail-dialog")
 ], WineDetailDialog);
@@ -3705,6 +3780,7 @@ let AddWineDialog = class AddWineDialog extends i {
         super(...arguments);
         this.open = false;
         this.cabinets = [];
+        this.wines = [];
         this.preselectedCabinet = "";
         this.preselectedRow = null;
         this.preselectedCol = null;
@@ -3720,6 +3796,9 @@ let AddWineDialog = class AddWineDialog extends i {
         this._error = "";
         this._hasGemini = false;
         this._labelLoading = false;
+        this._captureStage = "front";
+        this._frontImageRaw = "";
+        this._showBackPrompt = false;
         this._searchResults = [];
     }
     get _steps() {
@@ -3738,6 +3817,9 @@ let AddWineDialog = class AddWineDialog extends i {
                 this._loading = false;
                 this._labelLoading = false;
                 this._searchResults = [];
+                this._captureStage = "front";
+                this._frontImageRaw = "";
+                this._showBackPrompt = false;
                 this._wineData = {
                     name: "",
                     winery: "",
@@ -3809,6 +3891,7 @@ let AddWineDialog = class AddWineDialog extends i {
                     description: result.result.description || "",
                     food_pairings: result.result.food_pairings || "",
                     alcohol: result.result.alcohol || "",
+                    vivino_updated_at: result.result.source === "vivino" ? new Date().toISOString() : this._wineData.vivino_updated_at,
                 };
                 this._step = "details";
             }
@@ -3863,6 +3946,7 @@ let AddWineDialog = class AddWineDialog extends i {
             description: item.description || "",
             food_pairings: item.food_pairings || "",
             alcohol: item.alcohol || "",
+            vivino_updated_at: new Date().toISOString(),
         };
         this._searchResults = [];
         this._step = "details";
@@ -3872,17 +3956,29 @@ let AddWineDialog = class AddWineDialog extends i {
         this._scanMode = "idle";
         this._lookupBarcode();
     }
-    async _onPhotoCaptured(e) {
+    _onLabelPhotoCaptured(e) {
+        if (this._captureStage === "front") {
+            this._frontImageRaw = e.detail.image;
+            this._showBackPrompt = true;
+        }
+        else {
+            this._finishLabelScan(e.detail.image);
+        }
+    }
+    async _finishLabelScan(backImageRaw) {
+        this._showBackPrompt = false;
         this._labelLoading = true;
         this._error = "";
         try {
             const result = await this.hass.callWS({
                 type: "wine_cellar/recognize_label",
-                image: e.detail.image,
+                image: this._frontImageRaw,
+                ...(backImageRaw ? { back_image: backImageRaw } : {}),
             });
             if (result.result) {
-                // Resize captured photo to thumbnail for storage
-                const thumbUrl = await resizeImageForStorage(e.detail.image);
+                // Resize captured photos to thumbnails for storage
+                const thumbUrl = await resizeImageForStorage(this._frontImageRaw);
+                const backThumbUrl = backImageRaw ? await resizeImageForStorage(backImageRaw) : "";
                 const r = result.result;
                 this._wineData = {
                     ...this._wineData,
@@ -3900,10 +3996,15 @@ let AddWineDialog = class AddWineDialog extends i {
                     retail_price: r.estimated_price || null,
                     ai_ratings: r.ai_ratings || null,
                     notes: r.notes || "",
+                    barcode: r.barcode || this._wineData.barcode || "",
                     image_url: thumbUrl,
+                    back_image_url: backThumbUrl,
+                    ai_updated_at: new Date().toISOString(),
                 };
                 this._scanMode = "idle";
                 this._step = "details";
+                this._captureStage = "front";
+                this._frontImageRaw = "";
             }
             else {
                 // Show specific error from backend if available
@@ -3924,6 +4025,15 @@ let AddWineDialog = class AddWineDialog extends i {
     }
     _updateField(field, value) {
         this._wineData = { ...this._wineData, [field]: value };
+    }
+    _selectZone(zoneId) {
+        // Land after the last occupied depth in that zone instead of always
+        // depth 0 — otherwise a second bottle added to the same zone collides
+        // with whatever's already at depth 0.
+        const depth = this.wines
+            .filter((w) => w.cabinet_id === this._wineData.cabinet_id && w.zone === zoneId)
+            .reduce((max, w) => Math.max(max, w.depth || 0), -1) + 1;
+        this._wineData = { ...this._wineData, zone: zoneId, row: null, col: null, depth };
     }
     async _addWine() {
         this._loading = true;
@@ -4012,15 +4122,39 @@ let AddWineDialog = class AddWineDialog extends i {
                   <div style="margin-top: 8px">Analyzing label with AI...</div>
                 </div>
               `
-                : b `
-                <label-camera
-                  .active=${true}
-                  @photo-captured=${this._onPhotoCaptured}
-                ></label-camera>
-              `}
+                : this._showBackPrompt
+                    ? b `
+                  <div style="text-align:center;padding:24px 12px">
+                    <div style="font-size:2em;margin-bottom:8px">✅</div>
+                    <div style="margin-bottom:12px;font-weight:500">Front label captured</div>
+                    <p style="font-size:0.85em;color:var(--wc-text-secondary);margin-bottom:16px">
+                      Add a photo of the back label too? It often has the vintage year (and sometimes a barcode).
+                    </p>
+                    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                      <button class="btn btn-primary" @click=${() => { this._showBackPrompt = false; this._captureStage = "back"; }}>📷 Add Back Photo</button>
+                      <button class="btn btn-outline" @click=${() => this._finishLabelScan()}>Skip, Use Front Only</button>
+                    </div>
+                  </div>
+                `
+                    : b `
+                  ${this._captureStage === "back"
+                        ? b `<div class="hint" style="text-align:center;margin-bottom:6px">Now photograph the back label</div>`
+                        : A}
+                  <label-camera
+                    .active=${true}
+                    @photo-captured=${this._onLabelPhotoCaptured}
+                  ></label-camera>
+                `}
           ${this._error ? b `<div class="error-msg">${this._error}</div>` : A}
           <div class="camera-actions">
-            <button class="btn btn-outline" @click=${() => { this._scanMode = "idle"; this._error = ""; this._labelLoading = false; }}>Cancel</button>
+            <button class="btn btn-outline" @click=${() => {
+                this._scanMode = "idle";
+                this._error = "";
+                this._labelLoading = false;
+                this._showBackPrompt = false;
+                this._captureStage = "front";
+                this._frontImageRaw = "";
+            }}>Cancel</button>
           </div>
         </div>
         <div class="dialog-footer">
@@ -4305,6 +4439,9 @@ let AddWineDialog = class AddWineDialog extends i {
     `;
     }
     _renderLocationStep() {
+        const selectedCabinet = this.cabinets.find((c) => c.id === this._wineData.cabinet_id);
+        const zones = selectedCabinet?.storage_rows || [];
+        const hasZone = !!this._wineData.zone;
         return b `
       <div class="dialog-body">
         <div style="font-weight: 500; margin-bottom: 8px">Choose Location</div>
@@ -4316,7 +4453,9 @@ let AddWineDialog = class AddWineDialog extends i {
           ${this.cabinets.map((cab) => b `
               <div
                 class="location-cabinet ${this._wineData.cabinet_id === cab.id ? "selected" : ""}"
-                @click=${() => this._updateField("cabinet_id", cab.id)}
+                @click=${() => {
+            this._wineData = { ...this._wineData, cabinet_id: cab.id, row: null, col: null, zone: "" };
+        }}
               >
                 <div class="cab-name">${cab.name}</div>
                 <div class="cab-info">${cab.rows}×${cab.cols} slots</div>
@@ -4324,7 +4463,27 @@ let AddWineDialog = class AddWineDialog extends i {
             `)}
         </div>
 
-        ${this._wineData.cabinet_id
+        ${selectedCabinet && zones.length > 0 ? b `
+          <div style="margin-top:12px">
+            <label style="display:block;font-size:0.8em;color:var(--wc-text-secondary);margin-bottom:6px">Bulk / Box Zone</label>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              <button
+                class="btn ${!hasZone ? "btn-primary" : "btn-outline"}"
+                style="font-size:0.8em;padding:6px 10px"
+                @click=${() => this._updateField("zone", "")}
+              >None — use grid Row/Col</button>
+              ${zones.map((sr) => b `
+                <button
+                  class="btn ${this._wineData.zone === `storage-${sr.row}` ? "btn-primary" : "btn-outline"}"
+                  style="font-size:0.8em;padding:6px 10px"
+                  @click=${() => this._selectZone(`storage-${sr.row}`)}
+                >${sr.name || (sr.type === "box" ? "Box" : "Bulk Bin")}</button>
+              `)}
+            </div>
+          </div>
+        ` : A}
+
+        ${this._wineData.cabinet_id && !hasZone
             ? b `
               <div class="pos-inputs">
                 <div class="form-group">
@@ -4348,24 +4507,43 @@ let AddWineDialog = class AddWineDialog extends i {
               </div>
             `
             : A}
+        ${this._error ? b `<div class="error-msg">${this._error}</div>` : A}
       </div>
 
       <div class="dialog-footer">
         <button class="btn btn-outline" @click=${() => this._goToStep("details")}>
           ← Back
         </button>
-        <button class="btn btn-primary" @click=${() => this._goToStep("confirm")}>
+        <button class="btn btn-primary" @click=${() => this._onLocationNext()}>
           Next →
         </button>
       </div>
     `;
     }
+    _onLocationNext() {
+        const d = this._wineData;
+        // A cabinet with no zone and no complete row/col is a wine with no
+        // findable position — it silently vanishes (assigned to the cabinet,
+        // but rendered nowhere). Catch that here instead of at save time.
+        if (d.cabinet_id && !d.zone && (d.row == null || d.col == null || isNaN(d.row) || isNaN(d.col))) {
+            this._error = "Pick a zone, or enter both Row and Column, so the bottle has a findable spot.";
+            return;
+        }
+        this._error = "";
+        this._goToStep("confirm");
+    }
     _renderConfirmStep() {
         const cabinetName = this.cabinets.find((c) => c.id === this._wineData.cabinet_id)?.name ||
             "Unassigned";
-        const posLabel = this._wineData.row != null && this._wineData.col != null
-            ? `Row ${(this._wineData.row ?? 0) + 1}, Col ${(this._wineData.col ?? 0) + 1}`
-            : "Not specified";
+        const zoneCabinet = this.cabinets.find((c) => c.id === this._wineData.cabinet_id);
+        const zoneRow = this._wineData.zone
+            ? zoneCabinet?.storage_rows.find((sr) => `storage-${sr.row}` === this._wineData.zone)
+            : undefined;
+        const posLabel = zoneRow
+            ? zoneRow.name || (zoneRow.type === "box" ? "Box" : "Bulk Bin")
+            : this._wineData.row != null && this._wineData.col != null
+                ? `Row ${(this._wineData.row ?? 0) + 1}, Col ${(this._wineData.col ?? 0) + 1}`
+                : "Not specified";
         return b `
       <div class="dialog-body">
         <div style="font-weight: 500; margin-bottom: 12px">Confirm & Add</div>
@@ -4816,6 +4994,9 @@ __decorate([
 ], AddWineDialog.prototype, "cabinets", void 0);
 __decorate([
     n({ attribute: false })
+], AddWineDialog.prototype, "wines", void 0);
+__decorate([
+    n({ attribute: false })
 ], AddWineDialog.prototype, "preselectedCabinet", void 0);
 __decorate([
     n({ attribute: false })
@@ -4859,6 +5040,15 @@ __decorate([
 __decorate([
     r()
 ], AddWineDialog.prototype, "_labelLoading", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_captureStage", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_frontImageRaw", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_showBackPrompt", void 0);
 __decorate([
     r()
 ], AddWineDialog.prototype, "_searchResults", void 0);
@@ -8325,8 +8515,13 @@ let WineCellarCard = class WineCellarCard extends i {
         this._analyzing = false;
         this._batchVivino = false;
         this._showBatchVivinoConfirm = false;
+        this._batchAiFallback = false;
         this._toast = "";
         this._hasGemini = false;
+        this._metadataLanguage = "en";
+        this._supportedLanguages = ["en", "fr", "de"];
+        this._aiFallbackAlways = false;
+        this._showAiInfoDialog = false;
         this._showWineList = false;
         this._showInventory = false;
         this._buyList = [];
@@ -8397,6 +8592,9 @@ let WineCellarCard = class WineCellarCard extends i {
             this._cabinets = (cabinetsResult.cabinets || []).sort((a, b) => a.order - b.order);
             this._stats = statsResult;
             this._hasGemini = capResult?.has_gemini || false;
+            this._metadataLanguage = capResult?.metadata_language || "en";
+            this._supportedLanguages = capResult?.supported_languages || ["en", "fr", "de"];
+            this._aiFallbackAlways = capResult?.ai_fallback_always || false;
             this._buyList = buyListResult?.buy_list || [];
             // Refresh selected wine if detail dialog is open
             if (this._selectedWine) {
@@ -9225,8 +9423,42 @@ let WineCellarCard = class WineCellarCard extends i {
         }
         this._analyzing = false;
     }
+    // --- Metadata language (Vivino/AI) ---
+    async _setMetadataLanguage(lang) {
+        if (lang === this._metadataLanguage)
+            return;
+        const previous = this._metadataLanguage;
+        this._metadataLanguage = lang;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/update_settings",
+                updates: { metadata_language: lang },
+            });
+        }
+        catch (err) {
+            this._metadataLanguage = previous;
+            this._showToast("Failed to change language");
+        }
+    }
+    async _setAiFallbackAlways(value) {
+        if (value === this._aiFallbackAlways)
+            return;
+        const previous = this._aiFallbackAlways;
+        this._aiFallbackAlways = value;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/update_settings",
+                updates: { ai_fallback_always: value },
+            });
+        }
+        catch (err) {
+            this._aiFallbackAlways = previous;
+            this._showToast("Failed to change AI fallback setting");
+        }
+    }
     // --- Batch Vivino Refresh ---
     _batchRefreshVivino() {
+        this._batchAiFallback = this._aiFallbackAlways;
         this._showBatchVivinoConfirm = true;
     }
     async _runBatchVivino(photoMode) {
@@ -9237,6 +9469,7 @@ let WineCellarCard = class WineCellarCard extends i {
             const result = await this.hass.callWS({
                 type: "wine_cellar/batch_refresh_vivino",
                 photo_mode: photoMode,
+                ai_fallback: this._batchAiFallback ? "use" : "skip",
             });
             if (result.error) {
                 this._showToast(`Vivino Batch failed: ${result.error}`);
@@ -9247,6 +9480,11 @@ let WineCellarCard = class WineCellarCard extends i {
                     parts.push(`${result.photos_updated} photos updated`);
                 if (result.photos_kept)
                     parts.push(`${result.photos_kept} kept`);
+                if (result.ai_fallback_used)
+                    parts.push(`${result.ai_fallback_used} used AI instead`);
+                const unresolvedMismatch = (result.mismatched || 0) - (result.ai_fallback_used || 0);
+                if (unresolvedMismatch > 0)
+                    parts.push(`${unresolvedMismatch} no match at all`);
                 if (result.errors > 0)
                     parts.push(`(${result.errors} errors)`);
                 this._showToast(parts.join(", "));
@@ -9402,6 +9640,32 @@ let WineCellarCard = class WineCellarCard extends i {
             >
               + Add Wine
             </button>
+          </div>
+        </div>
+
+        <!-- Vivino/AI metadata language + AI fallback preference -->
+        <div style="display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:4px 12px;padding:0 16px 10px;font-size:0.72em">
+          <label style="display:flex;align-items:center;gap:4px;color:var(--wc-text-secondary);cursor:pointer">
+            <input
+              type="checkbox"
+              .checked=${this._aiFallbackAlways}
+              @change=${(e) => this._setAiFallbackAlways(e.target.checked)}
+            />
+            Always try AI when Vivino finds no match
+          </label>
+          <div style="display:flex;align-items:center;gap:4px">
+            <span style="color:var(--wc-text-secondary)">Vivino/AI language:</span>
+            ${this._supportedLanguages.map((lang) => b `
+              <button
+                style="padding:2px 8px;border-radius:10px;border:1px solid var(--wc-border);cursor:pointer;background:${this._metadataLanguage === lang ? "var(--wc-primary-text)" : "transparent"};color:${this._metadataLanguage === lang ? "#fff" : "var(--wc-text-secondary)"}"
+                @click=${() => this._setMetadataLanguage(lang)}
+              >${lang.toUpperCase()}</button>
+            `)}
+            <button
+              title="What does Vivino provide vs. AI?"
+              style="width:18px;height:18px;padding:0;border-radius:50%;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text-secondary);cursor:pointer;font-size:0.85em;line-height:1;display:flex;align-items:center;justify-content:center"
+              @click=${() => (this._showAiInfoDialog = true)}
+            >?</button>
           </div>
         </div>
 
@@ -9766,6 +10030,46 @@ let WineCellarCard = class WineCellarCard extends i {
             `
             : A}
 
+        <!-- Vivino vs AI info -->
+        ${this._showAiInfoDialog ? b `
+          <div class="dialog-overlay" @click=${() => (this._showAiInfoDialog = false)}>
+            <div class="dialog" style="max-width:420px;padding:24px" @click=${(e) => e.stopPropagation()}>
+              <h3 style="margin:0 0 12px;font-size:1.05em;color:var(--wc-text)">🍇 Vivino vs 🤖 AI — What Each Provides</h3>
+
+              <div style="margin-bottom:16px">
+                <div style="font-weight:600;font-size:0.9em;color:var(--wc-text);margin-bottom:6px">🍇 Vivino provides:</div>
+                <ul style="margin:0;padding-left:20px;font-size:0.85em;color:var(--wc-text-secondary);line-height:1.7">
+                  <li>Bottle photo</li>
+                  <li>Community rating (★) and number of ratings</li>
+                  <li>Market price</li>
+                  <li>Food pairings</li>
+                  <li>Alcohol %</li>
+                  <li>Grape variety, region, country, type (when found)</li>
+                </ul>
+              </div>
+
+              <div style="margin-bottom:16px">
+                <div style="font-weight:600;font-size:0.9em;color:var(--wc-text);margin-bottom:6px">🤖 AI provides:</div>
+                <ul style="margin:0;padding-left:20px;font-size:0.85em;color:var(--wc-text-secondary);line-height:1.7">
+                  <li>Estimated price (only fills in when Vivino has none)</li>
+                  <li>Tasting description</li>
+                  <li>Critic scores (Wine Spectator, Robert Parker, Jeb Dunnuck, Antonio Galloni)</li>
+                  <li>Drink Now / Hold / Past Peak + drinking window</li>
+                  <li>Grape variety, region, country, type — only when scanning a label photo, not on a refresh</li>
+                </ul>
+              </div>
+
+              <p style="margin:0 0 16px;font-size:0.8em;color:var(--wc-text-secondary);font-style:italic">
+                AI never provides a photo, a Vivino community rating, or food pairings — when Vivino can't find a confident match, AI fills in what it can (mainly price, description, and critic scores), not everything Vivino would have.
+              </p>
+
+              <div style="text-align:right">
+                <button class="btn btn-primary" @click=${() => (this._showAiInfoDialog = false)}>Got it</button>
+              </div>
+            </div>
+          </div>
+        ` : A}
+
         <!-- Batch Vivino Photo Mode Confirm -->
         ${this._showBatchVivinoConfirm ? b `
           <div class="dialog-overlay" @click=${() => (this._showBatchVivinoConfirm = false)}>
@@ -9774,6 +10078,16 @@ let WineCellarCard = class WineCellarCard extends i {
               <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">
                 Some wines already have a photo. What should happen to those photos?
               </p>
+              ${this._hasGemini ? b `
+                <label style="display:flex;align-items:center;gap:6px;justify-content:center;font-size:0.8em;color:var(--wc-text-secondary);margin-bottom:16px;cursor:pointer">
+                  <input
+                    type="checkbox"
+                    .checked=${this._batchAiFallback}
+                    @change=${(e) => (this._batchAiFallback = e.target.checked)}
+                  />
+                  Try AI for wines with no confident Vivino match
+                </label>
+              ` : A}
               <div style="display:flex;flex-direction:column;gap:8px">
                 <button class="btn btn-primary" style="background:#8e24aa" @click=${() => this._runBatchVivino("keep")}>
                   Keep My Existing Photos
@@ -9798,6 +10112,7 @@ let WineCellarCard = class WineCellarCard extends i {
           .cabinets=${this._cabinets}
           .open=${this._showDetail}
           .hasGemini=${this._hasGemini}
+          .aiFallbackAlways=${this._aiFallbackAlways}
           .mode=${this._detailMode}
           @close=${() => (this._showDetail = false)}
           @remove-wine=${this._onRemoveWine}
@@ -9808,6 +10123,7 @@ let WineCellarCard = class WineCellarCard extends i {
           @buy-list-updated=${() => this._loadData()}
           @copy-wine=${(e) => this._copyWine(e.detail.wine)}
           @locate-wine=${(e) => this._locateWine(e.detail.wine)}
+          @set-ai-fallback-always=${(e) => this._setAiFallbackAlways(e.detail.value)}
           @move-wine=${(e) => {
             this._showDetail = false;
             // Close any open side panel and show every rack, so any rack/zone in the cellar is reachable as a target.
@@ -9825,6 +10141,7 @@ let WineCellarCard = class WineCellarCard extends i {
           .open=${this._showAddDialog}
           .hass=${this.hass}
           .cabinets=${this._cabinets}
+          .wines=${this._wines}
           .preselectedCabinet=${this._addPreselect.cabinet}
           .preselectedRow=${this._addPreselect.row}
           .preselectedCol=${this._addPreselect.col}
@@ -10555,10 +10872,25 @@ __decorate([
 ], WineCellarCard.prototype, "_showBatchVivinoConfirm", void 0);
 __decorate([
     r()
+], WineCellarCard.prototype, "_batchAiFallback", void 0);
+__decorate([
+    r()
 ], WineCellarCard.prototype, "_toast", void 0);
 __decorate([
     r()
 ], WineCellarCard.prototype, "_hasGemini", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_metadataLanguage", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_supportedLanguages", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_aiFallbackAlways", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_showAiInfoDialog", void 0);
 __decorate([
     r()
 ], WineCellarCard.prototype, "_showWineList", void 0);

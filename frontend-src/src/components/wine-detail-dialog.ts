@@ -28,7 +28,9 @@ export class WineDetailDialog extends LitElement {
   @state() private _pendingVivinoImage: string | null = null;
   @state() private _showPhotoCamera = false;
   @state() private _photoBusy = false;
+  @state() private _showAiFallbackConfirm = false;
   @property({ type: Boolean }) hasGemini = false;
+  @property({ type: Boolean }) aiFallbackAlways = false;
 
   static styles = [
     sharedStyles,
@@ -725,6 +727,19 @@ export class WineDetailDialog extends LitElement {
         type: "wine_cellar/refresh_wine",
         wine_id: this.wine.id,
       });
+      if (resp.no_vivino_match) {
+        this._refreshing = false;
+        if (!resp.ai_available) {
+          alert(resp.error);
+          return;
+        }
+        if (this.aiFallbackAlways) {
+          await this._analyzeWithAI();
+        } else {
+          this._showAiFallbackConfirm = true;
+        }
+        return;
+      }
       if (resp.error) {
         alert(resp.error);
       } else if (resp.wine) {
@@ -738,6 +753,22 @@ export class WineDetailDialog extends LitElement {
       console.error("Vivino refresh failed", err);
     }
     this._refreshing = false;
+  }
+
+  private async _confirmAiFallback(remember: boolean) {
+    this._showAiFallbackConfirm = false;
+    if (remember) {
+      this.dispatchEvent(new CustomEvent("set-ai-fallback-always", {
+        detail: { value: true },
+        bubbles: true,
+        composed: true,
+      }));
+    }
+    await this._analyzeWithAI();
+  }
+
+  private _dismissAiFallback() {
+    this._showAiFallbackConfirm = false;
   }
 
   private async _updatePhoto(image_url: string) {
@@ -824,6 +855,16 @@ export class WineDetailDialog extends LitElement {
   private _hasTastingNotes(): boolean {
     const n = this._tastingNotes;
     return !!(n.aroma || n.taste || n.finish || n.overall);
+  }
+
+  private _formatUpdatedAt(iso: string | null): string {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
   }
 
   private _renderEditForm() {
@@ -1055,6 +1096,15 @@ export class WineDetailDialog extends LitElement {
                   <button class="btn btn-primary" style="background:#c62828"
                     @click=${this._onRemove}>✕ Remove</button>
                 </div>
+                ${wine.vivino_updated_at || wine.ai_updated_at
+                  ? html`
+                      <div style="text-align:center;font-size:0.68em;color:var(--wc-text-secondary);margin-top:-6px;padding-bottom:10px">
+                        ${wine.vivino_updated_at ? html`Vivino: ${this._formatUpdatedAt(wine.vivino_updated_at)}` : nothing}
+                        ${wine.vivino_updated_at && wine.ai_updated_at ? " · " : nothing}
+                        ${wine.ai_updated_at ? html`AI: ${this._formatUpdatedAt(wine.ai_updated_at)}` : nothing}
+                      </div>
+                    `
+                  : nothing}
               `
             : nothing}
 
@@ -1287,6 +1337,25 @@ export class WineDetailDialog extends LitElement {
                   <button
                     style="padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.85em"
                     @click=${() => (this._showPhotoCamera = false)}
+                  >Cancel</button>
+                </div>
+              </div>
+            </div>
+          ` : nothing}
+          ${this._showAiFallbackConfirm ? html`
+            <div style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px">
+              <div style="background:var(--wc-bg);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center" @click=${(e: Event) => e.stopPropagation()}>
+                <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">No Vivino Match</h3>
+                <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">Vivino couldn't find a confident match for this wine. Try AI instead?</p>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                  <button class="btn btn-primary" style="background:#1565c0" @click=${() => this._confirmAiFallback(false)}>Use AI Once</button>
+                  <button
+                    style="padding:8px 16px;border-radius:20px;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text);cursor:pointer;font-size:0.85em"
+                    @click=${() => this._confirmAiFallback(true)}
+                  >Always Use AI Automatically</button>
+                  <button
+                    style="margin-top:4px;padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.8em"
+                    @click=${this._dismissAiFallback}
                   >Cancel</button>
                 </div>
               </div>
