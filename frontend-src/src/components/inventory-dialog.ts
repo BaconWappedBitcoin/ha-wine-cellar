@@ -1,6 +1,6 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { Wine, Cabinet, WineType, WINE_TYPE_COLORS, WINE_TYPE_LABELS, WineHistoryItem } from "../models";
+import { Wine, Cabinet, WineType, WINE_TYPE_COLORS, WINE_TYPE_LABELS, WineHistoryItem, getWineLocation } from "../models";
 import { sharedStyles } from "../styles";
 import "./wine-detail-dialog";
 
@@ -1021,17 +1021,7 @@ export class InventoryDialog extends LitElement {
 
   private _renderWineItem(wine: Wine) {
     const typeColor = WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red;
-    const cabinetName = this.cabinets.find((c) => c.id === wine.cabinet_id)?.name || "";
-    let location = "Unassigned";
-    if (cabinetName) {
-      if (wine.row !== null && wine.col !== null) {
-        location = `${cabinetName} R${wine.row + 1}C${wine.col + 1}`;
-      } else if (wine.zone) {
-        location = `${cabinetName}`;
-      } else {
-        location = cabinetName;
-      }
-    }
+    const location = getWineLocation(wine, this.cabinets).text;
     const displayPrice = wine.retail_price || wine.price;
 
     return html`
@@ -1366,12 +1356,29 @@ export class InventoryDialog extends LitElement {
       <wine-detail-dialog
         .wine=${this._detailWine}
         .hass=${this.hass}
+        .cabinets=${this.cabinets}
         .open=${this._showDetail}
         .hasGemini=${this.hasGemini}
         .mode=${"cellar"}
         @close=${() => (this._showDetail = false)}
         @wine-updated=${() => {
           this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+        }}
+        @locate-wine=${(e: CustomEvent) => {
+          this._showDetail = false;
+          this.dispatchEvent(new CustomEvent("locate-wine", { detail: e.detail, bubbles: true, composed: true }));
+        }}
+        @copy-wine=${(e: CustomEvent) => {
+          this._showDetail = false;
+          this.dispatchEvent(new CustomEvent("copy-wine", { detail: e.detail, bubbles: true, composed: true }));
+        }}
+        @move-wine=${(e: CustomEvent) => {
+          this._showDetail = false;
+          this.dispatchEvent(new CustomEvent("move-wine", { detail: e.detail, bubbles: true, composed: true }));
+        }}
+        @remove-wine=${(e: CustomEvent) => {
+          this._showDetail = false;
+          this.dispatchEvent(new CustomEvent("remove-wine", { detail: e.detail, bubbles: true, composed: true }));
         }}
       ></wine-detail-dialog>
     `;

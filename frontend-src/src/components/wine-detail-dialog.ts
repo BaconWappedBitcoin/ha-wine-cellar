@@ -1,6 +1,6 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { Wine, TastingNotes, WINE_TYPE_LABELS, WINE_TYPE_COLORS, WineType, REMOVAL_REASONS } from "../models";
+import { Wine, Cabinet, TastingNotes, WINE_TYPE_LABELS, WINE_TYPE_COLORS, WineType, REMOVAL_REASONS, getWineLocation } from "../models";
 import { sharedStyles } from "../styles";
 import "./star-rating";
 
@@ -10,6 +10,7 @@ export type WineDetailMode = "cellar" | "buylist" | "winelist";
 export class WineDetailDialog extends LitElement {
   @property({ attribute: false }) wine: Wine | null = null;
   @property({ attribute: false }) hass: any;
+  @property({ attribute: false }) cabinets: Cabinet[] = [];
   @property({ type: Boolean }) open = false;
   @property({ type: String }) mode: WineDetailMode = "cellar";
 
@@ -83,6 +84,32 @@ export class WineDetailDialog extends LitElement {
         flex-shrink: 0;
         color: #fff;
         text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+      }
+
+      .wine-image-col {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+
+      .wine-location {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        width: 90px;
+        font-size: 0.68em;
+        line-height: 1.3;
+        text-align: center;
+        color: var(--wc-text-secondary, #888);
+        cursor: pointer;
+      }
+
+      .wine-location:hover {
+        color: var(--wc-primary-text);
+        text-decoration: underline;
       }
 
       .wine-title {
@@ -364,9 +391,10 @@ export class WineDetailDialog extends LitElement {
       .actions {
         display: flex;
         gap: 6px;
-        padding: 10px 16px 16px;
-        border-top: 1px solid var(--wc-border);
+        padding: 0 16px 16px;
+        border-bottom: 1px solid var(--wc-border);
         justify-content: center;
+        flex-wrap: wrap;
       }
 
       .actions .btn {
@@ -563,6 +591,19 @@ export class WineDetailDialog extends LitElement {
     );
     this._showRemoveConfirm = false;
     this._close();
+  }
+
+  private _onLocate() {
+    if (this.wine) {
+      this.dispatchEvent(
+        new CustomEvent("locate-wine", {
+          detail: { wine: this.wine },
+          bubbles: true,
+          composed: true,
+        })
+      );
+      this._close();
+    }
   }
 
   private _onMove() {
@@ -810,13 +851,22 @@ export class WineDetailDialog extends LitElement {
             <button class="icon-btn close-btn" title="Close" @click=${this._close}>✕</button>
           </div>
           <div class="wine-header">
-            ${wine.image_url
-              ? html`<img class="wine-image" src="${wine.image_url}" alt="${wine.name}" />`
-              : html`
-                  <div class="wine-image-placeholder" style="background: ${typeColor}">
-                    🍷
-                  </div>
-                `}
+            <div class="wine-image-col">
+              ${wine.image_url
+                ? html`<img class="wine-image" src="${wine.image_url}" alt="${wine.name}" />`
+                : html`
+                    <div class="wine-image-placeholder" style="background: ${typeColor}">
+                      🍷
+                    </div>
+                  `}
+              ${this.mode === "cellar"
+                ? html`
+                    <div class="wine-location" title="Tap to locate" @click=${this._onLocate}>
+                      📍 ${getWineLocation(wine, this.cabinets).text}
+                    </div>
+                  `
+                : nothing}
+            </div>
             <div class="wine-title">
               <div class="wine-name">${wine.name}</div>
               <div class="wine-winery">${wine.winery}</div>
@@ -868,6 +918,31 @@ export class WineDetailDialog extends LitElement {
                 : nothing}
             </div>
           </div>
+
+          ${!this._editingFields && (this.mode === "cellar" || this.mode === "buylist")
+            ? html`
+                <div class="actions">
+                  <button class="btn btn-primary" style="background:#8e24aa"
+                    ?disabled=${this._refreshing} @click=${this._refreshFromVivino}>
+                    ${this._refreshing ? "..." : "🍇 Vivino"}
+                  </button>
+                  ${this.hasGemini
+                    ? html`<button class="btn btn-primary" style="background:#1565c0"
+                        ?disabled=${this._analyzing} @click=${this._analyzeWithAI}>
+                        ${this._analyzing ? "..." : "🤖 AI Scan"}
+                      </button>`
+                    : nothing}
+                  ${this.mode === "cellar"
+                    ? html`
+                        <button class="btn btn-primary" style="background:#546e7a" @click=${this._onCopy}>📋 Copy</button>
+                        <button class="btn btn-primary" style="background:#6d4c41" @click=${this._onMove}>↔ Move</button>
+                      `
+                    : nothing}
+                  <button class="btn btn-primary" style="background:#c62828"
+                    @click=${this._onRemove}>✕ Remove</button>
+                </div>
+              `
+            : nothing}
 
           ${this._editingFields
             ? this._renderEditForm()
@@ -1041,41 +1116,6 @@ export class WineDetailDialog extends LitElement {
                 </div>
                 ` : nothing}
 
-                ${this.mode === "cellar" ? html`
-                <div class="actions">
-                  <button class="btn btn-primary" style="background:#8e24aa"
-                    ?disabled=${this._refreshing} @click=${this._refreshFromVivino}>
-                    ${this._refreshing ? "..." : "🍇 Vivino"}
-                  </button>
-                  ${this.hasGemini
-                    ? html`<button class="btn btn-primary" style="background:#1565c0"
-                        ?disabled=${this._analyzing} @click=${this._analyzeWithAI}>
-                        ${this._analyzing ? "..." : "🤖 AI Scan"}
-                      </button>`
-                    : nothing}
-                  <button class="btn btn-primary" style="background:#546e7a" @click=${this._onCopy}>📋 Copy</button>
-                  <button class="btn btn-primary" style="background:#6d4c41" @click=${this._onMove}>↔ Move</button>
-                  <button class="btn btn-primary" style="background:#c62828"
-                    @click=${this._onRemove}>✕ Remove</button>
-                </div>
-                ` : nothing}
-
-                ${this.mode === "buylist" ? html`
-                <div class="actions">
-                  <button class="btn btn-primary" style="background:#8e24aa"
-                    ?disabled=${this._refreshing} @click=${this._refreshFromVivino}>
-                    ${this._refreshing ? "..." : "🍇 Vivino"}
-                  </button>
-                  ${this.hasGemini
-                    ? html`<button class="btn btn-primary" style="background:#1565c0"
-                        ?disabled=${this._analyzing} @click=${this._analyzeWithAI}>
-                        ${this._analyzing ? "..." : "🤖 AI Scan"}
-                      </button>`
-                    : nothing}
-                  <button class="btn btn-primary" style="background:#c62828"
-                    @click=${this._onRemove}>✕ Remove</button>
-                </div>
-                ` : nothing}
               `}
           ${this._showRemoveConfirm ? html`
             <div style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px">
