@@ -129,7 +129,7 @@ class WineCellarCabinetSensor(SensorEntity):
                 break
         if not cabinet:
             return {}
-        capacity = cabinet.get("rows", 0) * cabinet.get("cols", 0)
+        capacity = self._storage.cabinet_capacity(cabinet)
         count = self.native_value
         return {
             "cabinet_id": self._cabinet_id,
