@@ -767,11 +767,11 @@ export class InventoryDialog extends LitElement {
   }
 
   private _parseCSV(text: string): any[] {
-    const lines = text.split("\n").filter((l) => l.trim());
-    if (lines.length < 2) return [];
+    const rows = this._parseCSVRows(text);
+    if (rows.length < 2) return [];
 
     // Parse header row
-    const headers = this._parseCSVRow(lines[0]).map((h) => h.trim().toLowerCase());
+    const headers = rows[0].map((h) => h.trim().toLowerCase());
 
     // Map CSV headers to wine fields
     const fieldMap: Record<string, string> = {
@@ -814,8 +814,8 @@ export class InventoryDialog extends LitElement {
     ]);
 
     const wines: any[] = [];
-    for (let i = 1; i < lines.length; i++) {
-      const values = this._parseCSVRow(lines[i]);
+    for (let i = 1; i < rows.length; i++) {
+      const values = rows[i];
       if (values.length === 0) continue;
 
       const wine: any = {};
@@ -853,37 +853,52 @@ export class InventoryDialog extends LitElement {
     return wines;
   }
 
-  private _parseCSVRow(line: string): string[] {
-    const result: string[] = [];
-    let current = "";
+  // Quote-aware: a comma or newline inside a quoted field (as produced by
+  // escapeCSV for multi-line Notes/Description) does not end the field/row.
+  private _parseCSVRows(text: string): string[][] {
+    const rows: string[][] = [];
+    let row: string[] = [];
+    let field = "";
     let inQuotes = false;
 
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
+    const endField = () => {
+      row.push(field);
+      field = "";
+    };
+    const endRow = () => {
+      endField();
+      if (row.some((v) => v.trim() !== "")) rows.push(row);
+      row = [];
+    };
+
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
       if (inQuotes) {
         if (ch === '"') {
-          if (i + 1 < line.length && line[i + 1] === '"') {
-            current += '"';
+          if (text[i + 1] === '"') {
+            field += '"';
             i++;
           } else {
             inQuotes = false;
           }
         } else {
-          current += ch;
+          field += ch;
         }
+      } else if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ",") {
+        endField();
+      } else if (ch === "\r") {
+        // skip, \n (or end of text) closes the row
+      } else if (ch === "\n") {
+        endRow();
       } else {
-        if (ch === '"') {
-          inQuotes = true;
-        } else if (ch === ",") {
-          result.push(current);
-          current = "";
-        } else {
-          current += ch;
-        }
+        field += ch;
       }
     }
-    result.push(current);
-    return result;
+    if (field !== "" || row.length > 0) endRow();
+
+    return rows;
   }
 
   // ── Restore JSON ──────────────────────────────────────────────

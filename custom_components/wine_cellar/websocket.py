@@ -1367,6 +1367,7 @@ async def ws_restore_backup(
     cabinets = backup.get("cabinets", [])
     buy_list = backup.get("buy_list", [])
     wine_history = backup.get("wine_history", [])
+    settings = backup.get("settings")
 
     if not isinstance(wines, list) or not isinstance(cabinets, list):
         connection.send_result(
@@ -1375,7 +1376,7 @@ async def ws_restore_backup(
         )
         return
 
-    counts = storage.restore_data(wines, cabinets, buy_list, wine_history)
+    counts = storage.restore_data(wines, cabinets, buy_list, wine_history, settings)
     await storage.async_save()
     hass.bus.async_fire(f"{DOMAIN}_updated")
 
@@ -1524,13 +1525,15 @@ async def ws_server_backup_restore(
         wines = data.get("wines", [])
         cabinets = data.get("cabinets", [])
         buy_list = data.get("buy_list", [])
+        wine_history = data.get("wine_history", [])
+        settings = data.get("settings")
 
         if not isinstance(wines, list) or not isinstance(cabinets, list):
             connection.send_result(msg["id"], {"error": "Invalid backup file format."})
             return
 
         storage = hass.data[DOMAIN]["storage"]
-        counts = storage.restore_data(wines, cabinets, buy_list)
+        counts = storage.restore_data(wines, cabinets, buy_list, wine_history, settings)
         await storage.async_save()
         hass.bus.async_fire(f"{DOMAIN}_updated")
 
