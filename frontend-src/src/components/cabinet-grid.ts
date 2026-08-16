@@ -663,6 +663,38 @@ export class CabinetGrid extends LitElement {
     if (!e.dataTransfer) return;
     try {
       const source = JSON.parse(e.dataTransfer.getData("text/plain"));
+
+      // Bulk-zone reordering: figure out which bottle the drop landed
+      // nearest to (and which half of it), so dropping anywhere in the zone
+      // reorders sensibly instead of only working when the cursor lands
+      // exactly on a chip — small chips are hard to hit precisely.
+      let effectiveTargetWine = targetWine;
+      let insertBefore = true;
+      if (effectiveTargetWine) {
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        insertBefore = e.clientX < rect.left + rect.width / 2;
+      } else if (targetZone) {
+        const container = e.currentTarget as HTMLElement;
+        const chips = Array.from(container.querySelectorAll<HTMLElement>(".zone-bottle"));
+        let nearest: HTMLElement | null = null;
+        let nearestDist = Infinity;
+        for (const chip of chips) {
+          if (chip.dataset.wineId === source.wineId) continue;
+          const rect = chip.getBoundingClientRect();
+          const cx = rect.left + rect.width / 2;
+          const dist = Math.abs(e.clientX - cx);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearest = chip;
+          }
+        }
+        if (nearest) {
+          const rect = nearest.getBoundingClientRect();
+          insertBefore = e.clientX < rect.left + rect.width / 2;
+          effectiveTargetWine = this.wines.find((w) => w.id === nearest!.dataset.wineId);
+        }
+      }
+
       this.dispatchEvent(new CustomEvent("wine-drop", {
         detail: {
           wineId: source.wineId,
@@ -674,11 +706,13 @@ export class CabinetGrid extends LitElement {
           targetRow: targetRow ?? null,
           targetCol: targetCol ?? null,
           targetZone: targetZone || "",
-          // When dropping directly on another bottle within the same bulk
-          // zone, carry its id/depth so the card can swap the two instead
-          // of treating it as a same-zone no-op.
-          targetWineId: targetWine?.id ?? null,
-          targetDepth: targetWine ? (targetWine.depth ?? 0) : null,
+          // When dropping on/near another bottle within the same bulk
+          // zone, carry its id + which side the drop landed on, so the
+          // card can insert relative to it instead of treating it as a
+          // same-zone no-op.
+          targetWineId: effectiveTargetWine?.id ?? null,
+          targetDepth: effectiveTargetWine ? (effectiveTargetWine.depth ?? 0) : null,
+          insertBefore,
         },
         bubbles: true,
         composed: true,
@@ -719,6 +753,7 @@ export class CabinetGrid extends LitElement {
             <div
               class="zone-bottle ${this._dragOverCell === bottleKey ? "drag-over" : ""}"
               style="background: ${WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red}"
+              data-wine-id="${wine.id}"
               draggable="true"
               @click=${(e: Event) => {
                 e.stopPropagation();
