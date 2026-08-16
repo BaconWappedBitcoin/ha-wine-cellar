@@ -279,9 +279,16 @@ class WineCellarStorage:
         total_capacity = 0
         for c in self.cabinets:
             if c.get("type") == "grid":
-                storage_row_count = len(c.get("storage_rows", []))
-                grid_rows = c.get("rows", 0) - storage_row_count
+                storage_rows = c.get("storage_rows", [])
+                grid_rows = c.get("rows", 0) - len(storage_rows)
                 total_capacity += max(0, grid_rows) * c.get("cols", 0) * c.get("depth", 1)
+                # Bulk/box storage rows already store a total bottle count of
+                # their own — add it in, it isn't part of the row/col grid.
+                for sr in storage_rows:
+                    if sr.get("type") == "box":
+                        total_capacity += sum(sr.get("boxes", []))
+                    else:
+                        total_capacity += sr.get("capacity", 0)
         by_type: dict[str, int] = {}
         by_cabinet: dict[str, int] = {}
         total_value = 0.0
