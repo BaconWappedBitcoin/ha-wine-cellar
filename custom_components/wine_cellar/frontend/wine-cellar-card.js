@@ -1683,6 +1683,33 @@ CabinetGrid = __decorate([
     t("cabinet-grid")
 ], CabinetGrid);
 
+/** Resize a base64 JPEG (no data: prefix) to a small thumbnail data URL for storage. */
+function resizeImageForStorage(base64, maxDim = 200, quality = 0.6) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement("canvas");
+            let w = img.width, h = img.height;
+            if (w > h) {
+                h = Math.round(h * maxDim / w);
+                w = maxDim;
+            }
+            else {
+                w = Math.round(w * maxDim / h);
+                h = maxDim;
+            }
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, w, h);
+            const dataUrl = canvas.toDataURL("image/jpeg", quality);
+            resolve(dataUrl);
+        };
+        img.onerror = () => resolve("");
+        img.src = `data:image/jpeg;base64,${base64}`;
+    });
+}
+
 let StarRating = class StarRating extends i {
     constructor() {
         super(...arguments);
@@ -1807,6 +1834,312 @@ StarRating = __decorate([
     t("star-rating")
 ], StarRating);
 
+let LabelCamera = class LabelCamera extends i {
+    constructor() {
+        super(...arguments);
+        this.active = false;
+        this._stream = null;
+        this._error = "";
+        this._captured = false;
+        this._capturedImage = "";
+    }
+    updated(changedProps) {
+        if (changedProps.has("active")) {
+            if (this.active && !this._captured) {
+                this._startCamera();
+            }
+            else if (!this.active) {
+                this._stopCamera();
+                this._captured = false;
+                this._capturedImage = "";
+            }
+        }
+    }
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this._stopCamera();
+    }
+    async _startCamera() {
+        this._error = "";
+        try {
+            this._stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: "environment",
+                    width: { ideal: 960 },
+                    height: { ideal: 1280 },
+                    aspectRatio: { ideal: 3 / 4 },
+                },
+                audio: false,
+            });
+            await this.updateComplete;
+            const video = this.renderRoot.querySelector("video");
+            if (video && this._stream) {
+                video.srcObject = this._stream;
+            }
+        }
+        catch (err) {
+            const msg = err?.message || String(err);
+            if (msg.includes("NotAllowed") || msg.includes("Permission")) {
+                this._error = "Camera access denied. Use the upload button below instead.";
+            }
+            else {
+                this._error = "Could not access camera. Use the upload button below instead.";
+            }
+        }
+    }
+    _stopCamera() {
+        if (this._stream) {
+            this._stream.getTracks().forEach((t) => t.stop());
+            this._stream = null;
+        }
+    }
+    async _capture() {
+        const video = this.renderRoot.querySelector("video");
+        if (!video)
+            return;
+        const canvas = document.createElement("canvas");
+        const maxDim = 1024;
+        let w = video.videoWidth;
+        let h = video.videoHeight;
+        if (w > maxDim || h > maxDim) {
+            const scale = maxDim / Math.max(w, h);
+            w = Math.round(w * scale);
+            h = Math.round(h * scale);
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+        const base64 = dataUrl.split(",")[1];
+        this._stopCamera();
+        this._captured = true;
+        this._capturedImage = dataUrl;
+        this.dispatchEvent(new CustomEvent("photo-captured", {
+            detail: { image: base64 },
+            bubbles: true,
+            composed: true,
+        }));
+    }
+    _onFileSelected(e) {
+        const input = e.target;
+        const file = input.files?.[0];
+        if (!file)
+            return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            const dataUrl = reader.result;
+            // Resize if needed
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement("canvas");
+                const maxDim = 1024;
+                let w = img.width;
+                let h = img.height;
+                if (w > maxDim || h > maxDim) {
+                    const scale = maxDim / Math.max(w, h);
+                    w = Math.round(w * scale);
+                    h = Math.round(h * scale);
+                }
+                canvas.width = w;
+                canvas.height = h;
+                canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+                const resizedDataUrl = canvas.toDataURL("image/jpeg", 0.8);
+                const resizedBase64 = resizedDataUrl.split(",")[1];
+                this._stopCamera();
+                this._captured = true;
+                this._capturedImage = resizedDataUrl;
+                this.dispatchEvent(new CustomEvent("photo-captured", {
+                    detail: { image: resizedBase64 },
+                    bubbles: true,
+                    composed: true,
+                }));
+            };
+            img.src = dataUrl;
+        };
+        reader.readAsDataURL(file);
+    }
+    retake() {
+        this._captured = false;
+        this._capturedImage = "";
+        this._startCamera();
+    }
+    render() {
+        if (!this.active)
+            return A;
+        if (this._captured) {
+            return b `
+        <img class="captured-preview" src=${this._capturedImage} alt="Captured label" />
+      `;
+        }
+        return b `
+      ${this._error
+            ? b `<div class="error-message">${this._error}</div>`
+            : b `
+            <div class="camera-container">
+              <video autoplay playsinline muted></video>
+            </div>
+            <div class="capture-btn-area">
+              <button class="capture-btn" @click=${this._capture} title="Take photo"></button>
+            </div>
+            <div class="hint">Point the camera at the wine label</div>
+          `}
+
+      <div class="fallback-area">
+        <label class="file-input-label">
+          📁 Upload from gallery
+          <input type="file" accept="image/*" capture="environment" @change=${this._onFileSelected} />
+        </label>
+      </div>
+    `;
+    }
+};
+LabelCamera.styles = [
+    sharedStyles,
+    i$3 `
+      :host {
+        display: block;
+      }
+
+      .camera-container {
+        position: relative;
+        width: 100%;
+        max-width: 300px;
+        margin: 0 auto;
+        aspect-ratio: 3 / 4;
+        border-radius: 12px;
+        overflow: hidden;
+        background: #000;
+      }
+
+      video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .captured-preview {
+        width: 100%;
+        max-width: 300px;
+        margin: 0 auto;
+        display: block;
+        border-radius: 12px;
+        object-fit: contain;
+        max-height: 300px;
+      }
+
+      .capture-btn-area {
+        display: flex;
+        justify-content: center;
+        padding: 12px 0;
+      }
+
+      .capture-btn {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        border: 4px solid var(--wc-primary, #722f37);
+        background: transparent;
+        cursor: pointer;
+        position: relative;
+        transition: all 0.2s;
+      }
+
+      .capture-btn::after {
+        content: "";
+        position: absolute;
+        top: 4px;
+        left: 4px;
+        right: 4px;
+        bottom: 4px;
+        border-radius: 50%;
+        background: var(--wc-primary, #722f37);
+        transition: all 0.15s;
+      }
+
+      .capture-btn:hover::after {
+        top: 2px;
+        left: 2px;
+        right: 2px;
+        bottom: 2px;
+      }
+
+      .capture-btn:active::after {
+        top: 8px;
+        left: 8px;
+        right: 8px;
+        bottom: 8px;
+      }
+
+      .fallback-area {
+        text-align: center;
+        padding: 8px 0;
+      }
+
+      .file-input-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        border-radius: 8px;
+        border: 1px solid var(--wc-border);
+        background: transparent;
+        color: var(--wc-text-secondary);
+        cursor: pointer;
+        font-size: 0.85em;
+        transition: all 0.2s;
+      }
+
+      .file-input-label:hover {
+        background: rgba(114, 47, 55, 0.08);
+      }
+
+      input[type="file"] {
+        display: none;
+      }
+
+      .error-message {
+        padding: 16px;
+        text-align: center;
+        color: #ef5350;
+        font-size: 0.9em;
+      }
+
+      .actions-row {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        padding: 8px 0;
+      }
+
+      .hint {
+        text-align: center;
+        padding: 4px 0 8px;
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+      }
+    `,
+];
+__decorate([
+    n({ type: Boolean })
+], LabelCamera.prototype, "active", void 0);
+__decorate([
+    r()
+], LabelCamera.prototype, "_stream", void 0);
+__decorate([
+    r()
+], LabelCamera.prototype, "_error", void 0);
+__decorate([
+    r()
+], LabelCamera.prototype, "_captured", void 0);
+__decorate([
+    r()
+], LabelCamera.prototype, "_capturedImage", void 0);
+LabelCamera = __decorate([
+    t("label-camera")
+], LabelCamera);
+
 let WineDetailDialog = class WineDetailDialog extends i {
     constructor() {
         super(...arguments);
@@ -1823,6 +2156,9 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._refreshing = false;
         this._analyzing = false;
         this._showRemoveConfirm = false;
+        this._pendingVivinoImage = null;
+        this._showPhotoCamera = false;
+        this._photoBusy = false;
         this.hasGemini = false;
     }
     updated(changedProps) {
@@ -2026,12 +2362,59 @@ let WineDetailDialog = class WineDetailDialog extends i {
             else if (resp.wine) {
                 this.wine = { ...this.wine, ...resp.wine };
                 this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+                if (resp.vivino_image_url) {
+                    this._pendingVivinoImage = resp.vivino_image_url;
+                }
             }
         }
         catch (err) {
             console.error("Vivino refresh failed", err);
         }
         this._refreshing = false;
+    }
+    async _updatePhoto(image_url) {
+        if (!this.wine || !this.hass)
+            return;
+        this._photoBusy = true;
+        try {
+            const updates = { image_url };
+            if (this.mode === "buylist") {
+                await this.hass.callWS({ type: "wine_cellar/update_buy_list_item", item_id: this.wine.id, updates });
+            }
+            else {
+                await this.hass.callWS({ type: "wine_cellar/update_wine", wine_id: this.wine.id, updates });
+            }
+            this.wine = { ...this.wine, image_url };
+            this.dispatchEvent(new CustomEvent(this.mode === "buylist" ? "buy-list-updated" : "wine-updated", { bubbles: true, composed: true }));
+        }
+        catch (err) {
+            console.error("Failed to update photo", err);
+        }
+        this._photoBusy = false;
+    }
+    _applyVivinoPhoto() {
+        if (!this._pendingVivinoImage)
+            return;
+        const image_url = this._pendingVivinoImage;
+        this._pendingVivinoImage = null;
+        this._updatePhoto(image_url);
+    }
+    _dismissVivinoPhoto() {
+        this._pendingVivinoImage = null;
+    }
+    _onDeletePhoto() {
+        if (!this.wine?.image_url)
+            return;
+        if (!window.confirm("Delete this bottle's photo?"))
+            return;
+        this._updatePhoto("");
+    }
+    async _onPhotoReplaced(e) {
+        this._showPhotoCamera = false;
+        const thumbUrl = await resizeImageForStorage(e.detail.image);
+        if (thumbUrl) {
+            this._updatePhoto(thumbUrl);
+        }
     }
     async _analyzeWithAI() {
         if (!this.wine || !this.hass)
@@ -2195,13 +2578,35 @@ let WineDetailDialog = class WineDetailDialog extends i {
           </div>
           <div class="wine-header">
             <div class="wine-image-col">
-              ${wine.image_url
+              <div class="wine-image-wrap">
+                ${wine.image_url
             ? b `<img class="wine-image" src="${wine.image_url}" alt="${wine.name}" />`
             : b `
-                    <div class="wine-image-placeholder" style="background: ${typeColor}">
-                      🍷
-                    </div>
-                  `}
+                      <div class="wine-image-placeholder" style="background: ${typeColor}">
+                        🍷
+                      </div>
+                    `}
+                ${this.mode !== "winelist"
+            ? b `
+                      <div class="photo-actions">
+                        <button
+                          class="photo-action-btn"
+                          title="Replace photo"
+                          ?disabled=${this._photoBusy}
+                          @click=${() => (this._showPhotoCamera = true)}
+                        >📷</button>
+                        ${wine.image_url
+                ? b `<button
+                              class="photo-action-btn"
+                              title="Delete photo"
+                              ?disabled=${this._photoBusy}
+                              @click=${this._onDeletePhoto}
+                            >🗑️</button>`
+                : A}
+                      </div>
+                    `
+            : A}
+              </div>
               ${this.mode === "cellar"
             ? b `
                     <div class="wine-location" title="Tap to locate" @click=${this._onLocate}>
@@ -2473,6 +2878,47 @@ let WineDetailDialog = class WineDetailDialog extends i {
               </div>
             </div>
           ` : A}
+          ${this._pendingVivinoImage ? b `
+            <div style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px">
+              <div style="background:var(--wc-bg);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center" @click=${(e) => e.stopPropagation()}>
+                <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">Vivino Photo Available</h3>
+                <p style="margin:0 0 12px;font-size:0.85em;color:var(--wc-text-secondary)">Vivino found a different bottle photo. Keep your current photo or use Vivino's?</p>
+                <div style="display:flex;gap:12px;justify-content:center;margin-bottom:16px">
+                  <div style="text-align:center">
+                    <img src="${wine.image_url}" style="width:70px;height:100px;object-fit:cover;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.2)" />
+                    <div style="font-size:0.7em;color:var(--wc-text-secondary);margin-top:4px">Current</div>
+                  </div>
+                  <div style="text-align:center">
+                    <img src="${this._pendingVivinoImage}" style="width:70px;height:100px;object-fit:cover;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.2)" />
+                    <div style="font-size:0.7em;color:var(--wc-text-secondary);margin-top:4px">Vivino</div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                  <button
+                    style="padding:8px 16px;border-radius:20px;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text);cursor:pointer;font-size:0.85em"
+                    @click=${this._dismissVivinoPhoto}
+                  >Keep My Photo</button>
+                  <button class="btn btn-primary" style="background:#8e24aa" @click=${this._applyVivinoPhoto}>Use Vivino's</button>
+                </div>
+              </div>
+            </div>
+          ` : A}
+          ${this._showPhotoCamera ? b `
+            <div
+              style="position:absolute;inset:0;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px;padding:16px"
+              @click=${() => (this._showPhotoCamera = false)}
+            >
+              <div style="width:100%" @click=${(e) => e.stopPropagation()}>
+                <label-camera .active=${this._showPhotoCamera} @photo-captured=${this._onPhotoReplaced}></label-camera>
+                <div style="text-align:center;margin-top:12px">
+                  <button
+                    style="padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.85em"
+                    @click=${() => (this._showPhotoCamera = false)}
+                  >Cancel</button>
+                </div>
+              </div>
+            </div>
+          ` : A}
         </div>
       </div>
     `;
@@ -2524,6 +2970,47 @@ WineDetailDialog.styles = [
         background: #f0f0f0;
         flex-shrink: 0;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      }
+
+      .wine-image-wrap {
+        position: relative;
+        flex-shrink: 0;
+      }
+
+      .photo-actions {
+        position: absolute;
+        bottom: 6px;
+        right: 6px;
+        display: flex;
+        gap: 6px;
+      }
+
+      .photo-action-btn {
+        border: 1px solid rgba(0, 0, 0, 0.15);
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.95);
+        color: #333;
+        cursor: pointer;
+        font-size: 1em;
+        line-height: 1;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+        transition: background 0.15s, transform 0.15s;
+      }
+
+      .photo-action-btn:hover {
+        background: #fff;
+        transform: scale(1.06);
+      }
+
+      .photo-action-btn:disabled {
+        opacity: 0.5;
+        cursor: default;
+        transform: none;
       }
 
       .wine-image-placeholder {
@@ -2971,6 +3458,15 @@ __decorate([
     r()
 ], WineDetailDialog.prototype, "_showRemoveConfirm", void 0);
 __decorate([
+    r()
+], WineDetailDialog.prototype, "_pendingVivinoImage", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_showPhotoCamera", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_photoBusy", void 0);
+__decorate([
     n({ type: Boolean })
 ], WineDetailDialog.prototype, "hasGemini", void 0);
 WineDetailDialog = __decorate([
@@ -3204,312 +3700,6 @@ BarcodeScanner = __decorate([
     t("barcode-scanner")
 ], BarcodeScanner);
 
-let LabelCamera = class LabelCamera extends i {
-    constructor() {
-        super(...arguments);
-        this.active = false;
-        this._stream = null;
-        this._error = "";
-        this._captured = false;
-        this._capturedImage = "";
-    }
-    updated(changedProps) {
-        if (changedProps.has("active")) {
-            if (this.active && !this._captured) {
-                this._startCamera();
-            }
-            else if (!this.active) {
-                this._stopCamera();
-                this._captured = false;
-                this._capturedImage = "";
-            }
-        }
-    }
-    disconnectedCallback() {
-        super.disconnectedCallback();
-        this._stopCamera();
-    }
-    async _startCamera() {
-        this._error = "";
-        try {
-            this._stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    facingMode: "environment",
-                    width: { ideal: 960 },
-                    height: { ideal: 1280 },
-                    aspectRatio: { ideal: 3 / 4 },
-                },
-                audio: false,
-            });
-            await this.updateComplete;
-            const video = this.renderRoot.querySelector("video");
-            if (video && this._stream) {
-                video.srcObject = this._stream;
-            }
-        }
-        catch (err) {
-            const msg = err?.message || String(err);
-            if (msg.includes("NotAllowed") || msg.includes("Permission")) {
-                this._error = "Camera access denied. Use the upload button below instead.";
-            }
-            else {
-                this._error = "Could not access camera. Use the upload button below instead.";
-            }
-        }
-    }
-    _stopCamera() {
-        if (this._stream) {
-            this._stream.getTracks().forEach((t) => t.stop());
-            this._stream = null;
-        }
-    }
-    async _capture() {
-        const video = this.renderRoot.querySelector("video");
-        if (!video)
-            return;
-        const canvas = document.createElement("canvas");
-        const maxDim = 1024;
-        let w = video.videoWidth;
-        let h = video.videoHeight;
-        if (w > maxDim || h > maxDim) {
-            const scale = maxDim / Math.max(w, h);
-            w = Math.round(w * scale);
-            h = Math.round(h * scale);
-        }
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(video, 0, 0, w, h);
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
-        const base64 = dataUrl.split(",")[1];
-        this._stopCamera();
-        this._captured = true;
-        this._capturedImage = dataUrl;
-        this.dispatchEvent(new CustomEvent("photo-captured", {
-            detail: { image: base64 },
-            bubbles: true,
-            composed: true,
-        }));
-    }
-    _onFileSelected(e) {
-        const input = e.target;
-        const file = input.files?.[0];
-        if (!file)
-            return;
-        const reader = new FileReader();
-        reader.onload = () => {
-            const dataUrl = reader.result;
-            // Resize if needed
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement("canvas");
-                const maxDim = 1024;
-                let w = img.width;
-                let h = img.height;
-                if (w > maxDim || h > maxDim) {
-                    const scale = maxDim / Math.max(w, h);
-                    w = Math.round(w * scale);
-                    h = Math.round(h * scale);
-                }
-                canvas.width = w;
-                canvas.height = h;
-                canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-                const resizedDataUrl = canvas.toDataURL("image/jpeg", 0.8);
-                const resizedBase64 = resizedDataUrl.split(",")[1];
-                this._stopCamera();
-                this._captured = true;
-                this._capturedImage = resizedDataUrl;
-                this.dispatchEvent(new CustomEvent("photo-captured", {
-                    detail: { image: resizedBase64 },
-                    bubbles: true,
-                    composed: true,
-                }));
-            };
-            img.src = dataUrl;
-        };
-        reader.readAsDataURL(file);
-    }
-    retake() {
-        this._captured = false;
-        this._capturedImage = "";
-        this._startCamera();
-    }
-    render() {
-        if (!this.active)
-            return A;
-        if (this._captured) {
-            return b `
-        <img class="captured-preview" src=${this._capturedImage} alt="Captured label" />
-      `;
-        }
-        return b `
-      ${this._error
-            ? b `<div class="error-message">${this._error}</div>`
-            : b `
-            <div class="camera-container">
-              <video autoplay playsinline muted></video>
-            </div>
-            <div class="capture-btn-area">
-              <button class="capture-btn" @click=${this._capture} title="Take photo"></button>
-            </div>
-            <div class="hint">Point the camera at the wine label</div>
-          `}
-
-      <div class="fallback-area">
-        <label class="file-input-label">
-          📁 Upload from gallery
-          <input type="file" accept="image/*" capture="environment" @change=${this._onFileSelected} />
-        </label>
-      </div>
-    `;
-    }
-};
-LabelCamera.styles = [
-    sharedStyles,
-    i$3 `
-      :host {
-        display: block;
-      }
-
-      .camera-container {
-        position: relative;
-        width: 100%;
-        max-width: 300px;
-        margin: 0 auto;
-        aspect-ratio: 3 / 4;
-        border-radius: 12px;
-        overflow: hidden;
-        background: #000;
-      }
-
-      video {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        display: block;
-      }
-
-      .captured-preview {
-        width: 100%;
-        max-width: 300px;
-        margin: 0 auto;
-        display: block;
-        border-radius: 12px;
-        object-fit: contain;
-        max-height: 300px;
-      }
-
-      .capture-btn-area {
-        display: flex;
-        justify-content: center;
-        padding: 12px 0;
-      }
-
-      .capture-btn {
-        width: 64px;
-        height: 64px;
-        border-radius: 50%;
-        border: 4px solid var(--wc-primary, #722f37);
-        background: transparent;
-        cursor: pointer;
-        position: relative;
-        transition: all 0.2s;
-      }
-
-      .capture-btn::after {
-        content: "";
-        position: absolute;
-        top: 4px;
-        left: 4px;
-        right: 4px;
-        bottom: 4px;
-        border-radius: 50%;
-        background: var(--wc-primary, #722f37);
-        transition: all 0.15s;
-      }
-
-      .capture-btn:hover::after {
-        top: 2px;
-        left: 2px;
-        right: 2px;
-        bottom: 2px;
-      }
-
-      .capture-btn:active::after {
-        top: 8px;
-        left: 8px;
-        right: 8px;
-        bottom: 8px;
-      }
-
-      .fallback-area {
-        text-align: center;
-        padding: 8px 0;
-      }
-
-      .file-input-label {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 8px 16px;
-        border-radius: 8px;
-        border: 1px solid var(--wc-border);
-        background: transparent;
-        color: var(--wc-text-secondary);
-        cursor: pointer;
-        font-size: 0.85em;
-        transition: all 0.2s;
-      }
-
-      .file-input-label:hover {
-        background: rgba(114, 47, 55, 0.08);
-      }
-
-      input[type="file"] {
-        display: none;
-      }
-
-      .error-message {
-        padding: 16px;
-        text-align: center;
-        color: #ef5350;
-        font-size: 0.9em;
-      }
-
-      .actions-row {
-        display: flex;
-        gap: 8px;
-        justify-content: center;
-        padding: 8px 0;
-      }
-
-      .hint {
-        text-align: center;
-        padding: 4px 0 8px;
-        font-size: 0.8em;
-        color: var(--wc-text-secondary);
-      }
-    `,
-];
-__decorate([
-    n({ type: Boolean })
-], LabelCamera.prototype, "active", void 0);
-__decorate([
-    r()
-], LabelCamera.prototype, "_stream", void 0);
-__decorate([
-    r()
-], LabelCamera.prototype, "_error", void 0);
-__decorate([
-    r()
-], LabelCamera.prototype, "_captured", void 0);
-__decorate([
-    r()
-], LabelCamera.prototype, "_capturedImage", void 0);
-LabelCamera = __decorate([
-    t("label-camera")
-], LabelCamera);
-
 let AddWineDialog = class AddWineDialog extends i {
     constructor() {
         super(...arguments);
@@ -3536,32 +3726,6 @@ let AddWineDialog = class AddWineDialog extends i {
         return this.buyListMode
             ? ["scan", "details", "confirm"]
             : ["scan", "details", "location", "confirm"];
-    }
-    /** Resize a base64 JPEG to a small thumbnail for storage */
-    _resizeImageForStorage(base64, maxDim = 200, quality = 0.6) {
-        return new Promise((resolve) => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement("canvas");
-                let w = img.width, h = img.height;
-                if (w > h) {
-                    h = Math.round(h * maxDim / w);
-                    w = maxDim;
-                }
-                else {
-                    w = Math.round(w * maxDim / h);
-                    h = maxDim;
-                }
-                canvas.width = w;
-                canvas.height = h;
-                const ctx = canvas.getContext("2d");
-                ctx.drawImage(img, 0, 0, w, h);
-                const dataUrl = canvas.toDataURL("image/jpeg", quality);
-                resolve(dataUrl);
-            };
-            img.onerror = () => resolve("");
-            img.src = `data:image/jpeg;base64,${base64}`;
-        });
     }
     updated(changedProps) {
         if (changedProps.has("open")) {
@@ -3718,7 +3882,7 @@ let AddWineDialog = class AddWineDialog extends i {
             });
             if (result.result) {
                 // Resize captured photo to thumbnail for storage
-                const thumbUrl = await this._resizeImageForStorage(e.detail.image);
+                const thumbUrl = await resizeImageForStorage(e.detail.image);
                 const r = result.result;
                 this._wineData = {
                     ...this._wineData,
@@ -8160,6 +8324,7 @@ let WineCellarCard = class WineCellarCard extends i {
         this._movingWine = null;
         this._analyzing = false;
         this._batchVivino = false;
+        this._showBatchVivinoConfirm = false;
         this._toast = "";
         this._hasGemini = false;
         this._showWineList = false;
@@ -9061,21 +9226,30 @@ let WineCellarCard = class WineCellarCard extends i {
         this._analyzing = false;
     }
     // --- Batch Vivino Refresh ---
-    async _batchRefreshVivino() {
+    _batchRefreshVivino() {
+        this._showBatchVivinoConfirm = true;
+    }
+    async _runBatchVivino(photoMode) {
+        this._showBatchVivinoConfirm = false;
         this._batchVivino = true;
         this._showToast("Refreshing all wines from Vivino...");
         try {
             const result = await this.hass.callWS({
                 type: "wine_cellar/batch_refresh_vivino",
+                photo_mode: photoMode,
             });
             if (result.error) {
                 this._showToast(`Vivino Batch failed: ${result.error}`);
             }
             else {
                 const parts = [`Vivino Batch complete! ${result.updated}/${result.total} updated`];
+                if (result.photos_updated)
+                    parts.push(`${result.photos_updated} photos updated`);
+                if (result.photos_kept)
+                    parts.push(`${result.photos_kept} kept`);
                 if (result.errors > 0)
                     parts.push(`(${result.errors} errors)`);
-                this._showToast(parts.join(" "));
+                this._showToast(parts.join(", "));
                 await this._loadData();
             }
         }
@@ -9591,6 +9765,31 @@ let WineCellarCard = class WineCellarCard extends i {
               </div>
             `
             : A}
+
+        <!-- Batch Vivino Photo Mode Confirm -->
+        ${this._showBatchVivinoConfirm ? b `
+          <div class="dialog-overlay" @click=${() => (this._showBatchVivinoConfirm = false)}>
+            <div class="dialog" style="max-width:340px;padding:24px;text-align:center" @click=${(e) => e.stopPropagation()}>
+              <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">Vivino Batch Scan</h3>
+              <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">
+                Some wines already have a photo. What should happen to those photos?
+              </p>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <button class="btn btn-primary" style="background:#8e24aa" @click=${() => this._runBatchVivino("keep")}>
+                  Keep My Existing Photos
+                </button>
+                <button
+                  style="padding:8px 16px;border-radius:20px;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text);cursor:pointer;font-size:0.85em"
+                  @click=${() => this._runBatchVivino("replace")}
+                >Replace With Vivino Photos</button>
+                <button
+                  style="margin-top:4px;padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.8em"
+                  @click=${() => (this._showBatchVivinoConfirm = false)}
+                >Cancel</button>
+              </div>
+            </div>
+          </div>
+        ` : A}
 
         <!-- Wine Detail Dialog -->
         <wine-detail-dialog
@@ -10351,6 +10550,9 @@ __decorate([
 __decorate([
     r()
 ], WineCellarCard.prototype, "_batchVivino", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_showBatchVivinoConfirm", void 0);
 __decorate([
     r()
 ], WineCellarCard.prototype, "_toast", void 0);

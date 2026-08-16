@@ -110,7 +110,7 @@ class VivinoClient:
                     return []
 
                 data = await resp.json()
-                matches = data.get("explore_vintage", {}).get("matches", [])
+                matches = (data.get("explore_vintage") or {}).get("matches") or []
                 _LOGGER.debug(
                     "Vivino search for '%s' returned %d matches",
                     query,
@@ -118,16 +118,20 @@ class VivinoClient:
                 )
 
                 for match in matches[:5]:
-                    vintage = match.get("vintage", {})
-                    wine = vintage.get("wine", {})
-                    winery = wine.get("winery", {})
-                    region = wine.get("region", {})
-                    country = region.get("country", {})
+                    # Vivino can return explicit `null` (not just omit the key) for
+                    # any of these nested objects, e.g. for obscure/regional wines —
+                    # `.get(key, {})` only guards a missing key, not an explicit null,
+                    # so every level here is re-defaulted with `or {}`.
+                    vintage = match.get("vintage") or {}
+                    wine = vintage.get("wine") or {}
+                    winery = wine.get("winery") or {}
+                    region = wine.get("region") or {}
+                    country = region.get("country") or {}
                     wine_type = _map_wine_type(wine.get("type_id"))
 
                     # Extract price from explore API response
                     price = None
-                    price_info = match.get("price", {})
+                    price_info = match.get("price") or {}
                     if price_info:
                         amt = price_info.get("amount")
                         if amt and isinstance(amt, (int, float)) and amt >= 6.0:
@@ -135,14 +139,14 @@ class VivinoClient:
 
                     # Extract grape variety
                     grape = ""
-                    grapes = wine.get("grapes", [])
+                    grapes = wine.get("grapes") or []
                     if grapes:
                         grape = ", ".join(
-                            g.get("name", "") for g in grapes if g.get("name")
+                            g.get("name", "") for g in grapes if g and g.get("name")
                         )
 
                     # Extract ratings count
-                    stats = wine.get("statistics", {})
+                    stats = wine.get("statistics") or {}
                     rating = stats.get("ratings_average")
                     if rating and isinstance(rating, (int, float)) and rating > 0:
                         rating = round(float(rating), 1)
@@ -157,7 +161,7 @@ class VivinoClient:
                         alcohol = f"{alc}%"
 
                     # Image URL
-                    image_url = vintage.get("image", {}).get("location", "")
+                    image_url = (vintage.get("image") or {}).get("location", "")
                     if image_url and image_url.startswith("//"):
                         image_url = "https:" + image_url
 
@@ -326,7 +330,7 @@ class VivinoClient:
                     if data.get("status") != 1:
                         continue
 
-                    product = data.get("product", {})
+                    product = data.get("product") or {}
                     name = product.get("product_name", "")
                     if not name:
                         continue
