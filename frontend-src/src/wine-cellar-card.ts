@@ -39,8 +39,13 @@ export class WineCellarCard extends LitElement {
   @state() private _analyzing = false;
   @state() private _batchVivino = false;
   @state() private _showBatchVivinoConfirm = false;
+  @state() private _batchAiFallback = false;
   @state() private _toast = "";
   @state() private _hasGemini = false;
+  @state() private _metadataLanguage = "en";
+  @state() private _supportedLanguages: string[] = ["en", "fr", "de"];
+  @state() private _aiFallbackAlways = false;
+  @state() private _showAiInfoDialog = false;
   @state() private _showWineList = false;
   @state() private _showInventory = false;
   @state() private _buyList: Wine[] = [];
@@ -420,6 +425,9 @@ export class WineCellarCard extends LitElement {
       );
       this._stats = statsResult;
       this._hasGemini = capResult?.has_gemini || false;
+      this._metadataLanguage = capResult?.metadata_language || "en";
+      this._supportedLanguages = capResult?.supported_languages || ["en", "fr", "de"];
+      this._aiFallbackAlways = capResult?.ai_fallback_always || false;
       this._buyList = buyListResult?.buy_list || [];
 
       // Refresh selected wine if detail dialog is open
@@ -1291,8 +1299,40 @@ export class WineCellarCard extends LitElement {
     this._analyzing = false;
   }
 
+  // --- Metadata language (Vivino/AI) ---
+  private async _setMetadataLanguage(lang: string) {
+    if (lang === this._metadataLanguage) return;
+    const previous = this._metadataLanguage;
+    this._metadataLanguage = lang;
+    try {
+      await this.hass.callWS({
+        type: "wine_cellar/update_settings",
+        updates: { metadata_language: lang },
+      });
+    } catch (err) {
+      this._metadataLanguage = previous;
+      this._showToast("Failed to change language");
+    }
+  }
+
+  private async _setAiFallbackAlways(value: boolean) {
+    if (value === this._aiFallbackAlways) return;
+    const previous = this._aiFallbackAlways;
+    this._aiFallbackAlways = value;
+    try {
+      await this.hass.callWS({
+        type: "wine_cellar/update_settings",
+        updates: { ai_fallback_always: value },
+      });
+    } catch (err) {
+      this._aiFallbackAlways = previous;
+      this._showToast("Failed to change AI fallback setting");
+    }
+  }
+
   // --- Batch Vivino Refresh ---
   private _batchRefreshVivino() {
+    this._batchAiFallback = this._aiFallbackAlways;
     this._showBatchVivinoConfirm = true;
   }
 
@@ -1304,6 +1344,7 @@ export class WineCellarCard extends LitElement {
       const result = await this.hass.callWS({
         type: "wine_cellar/batch_refresh_vivino",
         photo_mode: photoMode,
+        ai_fallback: this._batchAiFallback ? "use" : "skip",
       });
       if (result.error) {
         this._showToast(`Vivino Batch failed: ${result.error}`);
@@ -1311,6 +1352,9 @@ export class WineCellarCard extends LitElement {
         const parts = [`Vivino Batch complete! ${result.updated}/${result.total} updated`];
         if (result.photos_updated) parts.push(`${result.photos_updated} photos updated`);
         if (result.photos_kept) parts.push(`${result.photos_kept} kept`);
+        if (result.ai_fallback_used) parts.push(`${result.ai_fallback_used} used AI instead`);
+        const unresolvedMismatch = (result.mismatched || 0) - (result.ai_fallback_used || 0);
+        if (unresolvedMismatch > 0) parts.push(`${unresolvedMismatch} no match at all`);
         if (result.errors > 0) parts.push(`(${result.errors} errors)`);
         this._showToast(parts.join(", "));
         await this._loadData();
@@ -1472,6 +1516,32 @@ export class WineCellarCard extends LitElement {
             >
               + Add Wine
             </button>
+          </div>
+        </div>
+
+        <!-- Vivino/AI metadata language + AI fallback preference -->
+        <div style="display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:4px 12px;padding:0 16px 10px;font-size:0.72em">
+          <label style="display:flex;align-items:center;gap:4px;color:var(--wc-text-secondary);cursor:pointer">
+            <input
+              type="checkbox"
+              .checked=${this._aiFallbackAlways}
+              @change=${(e: Event) => this._setAiFallbackAlways((e.target as HTMLInputElement).checked)}
+            />
+            Always try AI when Vivino finds no match
+          </label>
+          <div style="display:flex;align-items:center;gap:4px">
+            <span style="color:var(--wc-text-secondary)">Vivino/AI language:</span>
+            ${this._supportedLanguages.map((lang) => html`
+              <button
+                style="padding:2px 8px;border-radius:10px;border:1px solid var(--wc-border);cursor:pointer;background:${this._metadataLanguage === lang ? "var(--wc-primary-text)" : "transparent"};color:${this._metadataLanguage === lang ? "#fff" : "var(--wc-text-secondary)"}"
+                @click=${() => this._setMetadataLanguage(lang)}
+              >${lang.toUpperCase()}</button>
+            `)}
+            <button
+              title="What does Vivino provide vs. AI?"
+              style="width:18px;height:18px;padding:0;border-radius:50%;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text-secondary);cursor:pointer;font-size:0.85em;line-height:1;display:flex;align-items:center;justify-content:center"
+              @click=${() => (this._showAiInfoDialog = true)}
+            >?</button>
           </div>
         </div>
 
@@ -1853,6 +1923,46 @@ export class WineCellarCard extends LitElement {
             `
           : nothing}
 
+        <!-- Vivino vs AI info -->
+        ${this._showAiInfoDialog ? html`
+          <div class="dialog-overlay" @click=${() => (this._showAiInfoDialog = false)}>
+            <div class="dialog" style="max-width:420px;padding:24px" @click=${(e: Event) => e.stopPropagation()}>
+              <h3 style="margin:0 0 12px;font-size:1.05em;color:var(--wc-text)">🍇 Vivino vs 🤖 AI — What Each Provides</h3>
+
+              <div style="margin-bottom:16px">
+                <div style="font-weight:600;font-size:0.9em;color:var(--wc-text);margin-bottom:6px">🍇 Vivino provides:</div>
+                <ul style="margin:0;padding-left:20px;font-size:0.85em;color:var(--wc-text-secondary);line-height:1.7">
+                  <li>Bottle photo</li>
+                  <li>Community rating (★) and number of ratings</li>
+                  <li>Market price</li>
+                  <li>Food pairings</li>
+                  <li>Alcohol %</li>
+                  <li>Grape variety, region, country, type (when found)</li>
+                </ul>
+              </div>
+
+              <div style="margin-bottom:16px">
+                <div style="font-weight:600;font-size:0.9em;color:var(--wc-text);margin-bottom:6px">🤖 AI provides:</div>
+                <ul style="margin:0;padding-left:20px;font-size:0.85em;color:var(--wc-text-secondary);line-height:1.7">
+                  <li>Estimated price (only fills in when Vivino has none)</li>
+                  <li>Tasting description</li>
+                  <li>Critic scores (Wine Spectator, Robert Parker, Jeb Dunnuck, Antonio Galloni)</li>
+                  <li>Drink Now / Hold / Past Peak + drinking window</li>
+                  <li>Grape variety, region, country, type — only when scanning a label photo, not on a refresh</li>
+                </ul>
+              </div>
+
+              <p style="margin:0 0 16px;font-size:0.8em;color:var(--wc-text-secondary);font-style:italic">
+                AI never provides a photo, a Vivino community rating, or food pairings — when Vivino can't find a confident match, AI fills in what it can (mainly price, description, and critic scores), not everything Vivino would have.
+              </p>
+
+              <div style="text-align:right">
+                <button class="btn btn-primary" @click=${() => (this._showAiInfoDialog = false)}>Got it</button>
+              </div>
+            </div>
+          </div>
+        ` : nothing}
+
         <!-- Batch Vivino Photo Mode Confirm -->
         ${this._showBatchVivinoConfirm ? html`
           <div class="dialog-overlay" @click=${() => (this._showBatchVivinoConfirm = false)}>
@@ -1861,6 +1971,16 @@ export class WineCellarCard extends LitElement {
               <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">
                 Some wines already have a photo. What should happen to those photos?
               </p>
+              ${this._hasGemini ? html`
+                <label style="display:flex;align-items:center;gap:6px;justify-content:center;font-size:0.8em;color:var(--wc-text-secondary);margin-bottom:16px;cursor:pointer">
+                  <input
+                    type="checkbox"
+                    .checked=${this._batchAiFallback}
+                    @change=${(e: Event) => (this._batchAiFallback = (e.target as HTMLInputElement).checked)}
+                  />
+                  Try AI for wines with no confident Vivino match
+                </label>
+              ` : nothing}
               <div style="display:flex;flex-direction:column;gap:8px">
                 <button class="btn btn-primary" style="background:#8e24aa" @click=${() => this._runBatchVivino("keep")}>
                   Keep My Existing Photos
@@ -1885,6 +2005,7 @@ export class WineCellarCard extends LitElement {
           .cabinets=${this._cabinets}
           .open=${this._showDetail}
           .hasGemini=${this._hasGemini}
+          .aiFallbackAlways=${this._aiFallbackAlways}
           .mode=${this._detailMode}
           @close=${() => (this._showDetail = false)}
           @remove-wine=${this._onRemoveWine}
@@ -1895,6 +2016,7 @@ export class WineCellarCard extends LitElement {
           @buy-list-updated=${() => this._loadData()}
           @copy-wine=${(e: CustomEvent) => this._copyWine(e.detail.wine)}
           @locate-wine=${(e: CustomEvent) => this._locateWine(e.detail.wine)}
+          @set-ai-fallback-always=${(e: CustomEvent) => this._setAiFallbackAlways(e.detail.value)}
           @move-wine=${(e: CustomEvent) => {
             this._showDetail = false;
             // Close any open side panel and show every rack, so any rack/zone in the cellar is reachable as a target.
@@ -1912,6 +2034,7 @@ export class WineCellarCard extends LitElement {
           .open=${this._showAddDialog}
           .hass=${this.hass}
           .cabinets=${this._cabinets}
+          .wines=${this._wines}
           .preselectedCabinet=${this._addPreselect.cabinet}
           .preselectedRow=${this._addPreselect.row}
           .preselectedCol=${this._addPreselect.col}

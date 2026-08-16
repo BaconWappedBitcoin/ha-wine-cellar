@@ -12,9 +12,96 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from .const import DOMAIN
+from .const import (
+    CONF_AI_FALLBACK_ALWAYS,
+    CONF_METADATA_LANGUAGE,
+    DEFAULT_METADATA_LANGUAGE,
+    DOMAIN,
+    SUPPORTED_METADATA_LANGUAGES,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
+
+# Generic wine-domain words carry no identifying signal on their own (two
+# completely unrelated wines can both be a "Chateau ... Rouge"), so they're
+# excluded before comparing name/winery word overlap.
+_GENERIC_WINE_WORDS = {
+    "chateau", "château", "domaine", "clos", "cave", "caves", "cellar", "cellars",
+    "winery", "wine", "wines", "vineyard", "vineyards", "estate", "vignoble",
+    "rouge", "blanc", "rose", "rosé", "red", "white", "sparkling", "nv",
+    "de", "du", "des", "la", "le", "les", "et", "the", "of", "and",
+    "grand", "cru", "premier",
+}
+
+
+def _significant_words(text: str) -> set[str]:
+    return {w for w in text.lower().split() if w not in _GENERIC_WINE_WORDS and len(w) > 2}
+
+
+def _get_metadata_language(hass: HomeAssistant) -> str:
+    """Return the user's chosen language for Vivino/AI metadata."""
+    storage = hass.data[DOMAIN]["storage"]
+    return storage.settings.get(CONF_METADATA_LANGUAGE, DEFAULT_METADATA_LANGUAGE)
+
+
+def _build_ai_updates(wine: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    """Build a wine `updates` dict from a Gemini analyze_single_wine result."""
+    updates: dict[str, Any] = {}
+    if result.get("disposition"):
+        updates["disposition"] = result["disposition"]
+    if result.get("drink_by"):
+        updates["drink_by"] = result["drink_by"]
+
+    # Set AI description if wine has no description or has error text
+    cur_desc = wine.get("description", "")
+    bad_kw = ("forbidden", "underage", "try searching", "page is blocked")
+    has_bad_desc = cur_desc and any(kw in cur_desc.lower() for kw in bad_kw)
+    if result.get("description") and (not cur_desc or has_bad_desc):
+        updates["description"] = result["description"]
+
+    ai_ratings: dict[str, int] = {}
+    for key in ("rating_ws", "rating_rp", "rating_jd", "rating_ag"):
+        val = result.get(key)
+        if val and isinstance(val, (int, float)) and 50 <= val <= 100:
+            ai_ratings[key] = int(val)
+    if ai_ratings:
+        updates["ai_ratings"] = ai_ratings
+
+    if result.get("drink_window"):
+        updates["drink_window"] = result["drink_window"]
+
+    est_price = result.get("estimated_price")
+    if est_price and isinstance(est_price, (int, float)) and est_price > 0:
+        if not wine.get("retail_price"):
+            updates["retail_price"] = round(float(est_price), 2)
+
+    # Fill in fields the AI could read off the label photo (or knows from
+    # the producer) — only when the wine doesn't already have them, same
+    # "fill empty fields only" rule Vivino's own enrichment follows.
+    for key in ("region", "country", "grape_variety", "alcohol"):
+        val = result.get(key)
+        if val and not wine.get(key):
+            updates[key] = val
+
+    return updates
+
+
+def _vivino_match_is_trustworthy(subject: dict[str, Any], lookup: dict[str, Any]) -> bool:
+    """Guard against Vivino's fuzzy search returning an unrelated wine.
+
+    Vivino's text search can rank an unrelated (often pricier) bottle first
+    for uncommon/regional wines, and the caller has no other way to tell —
+    so compare winery+name against what was actually searched for and
+    refuse the match if it shares no distinctive words, rather than
+    silently writing another wine's price/rating/description onto this one.
+    """
+    subject_words = _significant_words(f"{subject.get('winery', '')} {subject.get('name', '')}")
+    lookup_words = _significant_words(f"{lookup.get('winery', '')} {lookup.get('name', '')}")
+    if not subject_words or not lookup_words:
+        return True
+    overlap = len(subject_words & lookup_words) / len(subject_words | lookup_words)
+    return overlap >= 0.15
 
 
 async def _auto_enrich_wine(hass: HomeAssistant, wine: dict[str, Any]) -> None:
@@ -34,11 +121,18 @@ async def _auto_enrich_wine(hass: HomeAssistant, wine: dict[str, Any]) -> None:
         if not query:
             return
 
-        result = await vivino.search_wine(query)
+        result = await vivino.search_wine(query, _get_metadata_language(hass))
         if not result:
             return
 
         lookup = result[0]
+        if not _vivino_match_is_trustworthy(wine, lookup):
+            _LOGGER.debug(
+                "Auto-enrich: Vivino match for '%s' looks unrelated (%s %s), skipping",
+                query, lookup.get("winery"), lookup.get("name"),
+            )
+            return
+
         storage = hass.data[DOMAIN]["storage"]
         updates: dict[str, Any] = {}
 
@@ -60,6 +154,7 @@ async def _auto_enrich_wine(hass: HomeAssistant, wine: dict[str, Any]) -> None:
                 updates[key] = val
 
         if updates:
+            updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
             _LOGGER.debug("Auto-enrich wine %s: %s", wine.get("id"), list(updates.keys()))
             storage.update_wine(wine["id"], updates)
             await storage.async_save()
@@ -85,11 +180,18 @@ async def _auto_enrich_buy_list_item(hass: HomeAssistant, item: dict[str, Any]) 
         if not query:
             return
 
-        result = await vivino.search_wine(query)
+        result = await vivino.search_wine(query, _get_metadata_language(hass))
         if not result:
             return
 
         lookup = result[0]
+        if not _vivino_match_is_trustworthy(item, lookup):
+            _LOGGER.debug(
+                "Auto-enrich: Vivino match for '%s' looks unrelated (%s %s), skipping",
+                query, lookup.get("winery"), lookup.get("name"),
+            )
+            return
+
         storage = hass.data[DOMAIN]["storage"]
         updates: dict[str, Any] = {}
 
@@ -108,6 +210,7 @@ async def _auto_enrich_buy_list_item(hass: HomeAssistant, item: dict[str, Any]) 
                 updates[key] = val
 
         if updates:
+            updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
             storage.update_buy_list_item(item["id"], updates)
             await storage.async_save()
             hass.bus.async_fire(f"{DOMAIN}_updated")
@@ -131,6 +234,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_remove_cabinet)
     websocket_api.async_register_command(hass, ws_recognize_label)
     websocket_api.async_register_command(hass, ws_get_capabilities)
+    websocket_api.async_register_command(hass, ws_update_settings)
     websocket_api.async_register_command(hass, ws_analyze_wines)
     websocket_api.async_register_command(hass, ws_refresh_wine)
     websocket_api.async_register_command(hass, ws_analyze_single_wine)
@@ -316,7 +420,7 @@ async def ws_lookup_barcode(
         connection.send_result(msg["id"], {"result": cached, "cached": True})
         return
 
-    result = await vivino.lookup_barcode(barcode)
+    result = await vivino.lookup_barcode(barcode, _get_metadata_language(hass))
     if result:
         storage.cache_barcode(barcode, result)
         await storage.async_save()
@@ -337,7 +441,7 @@ async def ws_search_wine(
 ) -> None:
     """Search for wines on Vivino."""
     vivino = hass.data[DOMAIN]["vivino"]
-    results = await vivino.search_wine(msg["query"])
+    results = await vivino.search_wine(msg["query"], _get_metadata_language(hass))
     connection.send_result(msg["id"], {"results": results})
 
 
@@ -420,6 +524,7 @@ async def ws_remove_cabinet(
     {
         vol.Required("type"): "wine_cellar/recognize_label",
         vol.Required("image"): str,
+        vol.Optional("back_image"): str,
     }
 )
 @websocket_api.async_response
@@ -428,7 +533,7 @@ async def ws_recognize_label(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Recognize wine from label photo using Gemini Vision."""
+    """Recognize wine from label photo (optionally + back label) using AI Vision."""
     gemini = hass.data[DOMAIN].get("gemini")
     if not gemini:
         connection.send_result(
@@ -441,7 +546,9 @@ async def ws_recognize_label(
         return
 
     _LOGGER.debug("Recognizing label image (%d chars)", len(msg["image"]))
-    result = await gemini.recognize_label(msg["image"])
+    result = await gemini.recognize_label(
+        msg["image"], _get_metadata_language(hass), back_image_base64=msg.get("back_image")
+    )
 
     # The gemini client now returns {"error": "..."} on failure
     if "error" in result:
@@ -465,8 +572,39 @@ def ws_get_capabilities(
     """Return integration capabilities."""
     connection.send_result(
         msg["id"],
-        {"has_gemini": "gemini" in hass.data.get(DOMAIN, {})},
+        {
+            "has_gemini": "gemini" in hass.data.get(DOMAIN, {}),
+            "metadata_language": _get_metadata_language(hass),
+            "supported_languages": SUPPORTED_METADATA_LANGUAGES,
+            "ai_fallback_always": bool(
+                hass.data[DOMAIN]["storage"].settings.get(CONF_AI_FALLBACK_ALWAYS, False)
+            ),
+        },
     )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "wine_cellar/update_settings",
+        vol.Required("updates"): dict,
+    }
+)
+@websocket_api.async_response
+async def ws_update_settings(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Update app-wide settings (e.g. metadata language)."""
+    storage = hass.data[DOMAIN]["storage"]
+    updates = dict(msg["updates"])
+    lang = updates.get(CONF_METADATA_LANGUAGE)
+    if lang is not None and lang not in SUPPORTED_METADATA_LANGUAGES:
+        connection.send_result(msg["id"], {"error": f"Unsupported language: {lang}"})
+        return
+    settings = storage.update_settings(updates)
+    await storage.async_save()
+    connection.send_result(msg["id"], {"settings": settings})
 
 
 @websocket_api.websocket_command(
@@ -530,6 +668,7 @@ async def ws_refresh_wine(
     """Re-lookup wine data from Vivino and update stored fields."""
     storage = hass.data[DOMAIN]["storage"]
     vivino = hass.data[DOMAIN]["vivino"]
+    language = _get_metadata_language(hass)
     wine = storage.get_wine(msg["wine_id"])
     if not wine:
         connection.send_result(msg["id"], {"error": "Wine not found."})
@@ -549,14 +688,30 @@ async def ws_refresh_wine(
         connection.send_result(msg["id"], {"error": "No name/winery to search."})
         return
 
-    result = await vivino.search_wine(query)
-    if not result:
-        connection.send_result(msg["id"], {"error": f"No Vivino results for '{query}'."})
+    result = await vivino.search_wine(query, language)
+    lookup = result[0] if result else None
+    if lookup and not _vivino_match_is_trustworthy(wine, lookup):
+        _LOGGER.debug(
+            "Vivino match for '%s' looks unrelated (%s %s), falling back to AI",
+            query, lookup.get("winery"), lookup.get("name"),
+        )
+        lookup = None
+
+    if not lookup:
+        # No usable Vivino match (no results, or the best match looks
+        # unrelated). Don't silently fall back to AI — flag it so the
+        # frontend can ask the user first (unless they've opted into
+        # always-use-AI).
+        connection.send_result(msg["id"], {
+            "error": f"No confident Vivino match for '{query}'.",
+            "no_vivino_match": True,
+            "ai_available": hass.data[DOMAIN].get("gemini") is not None,
+        })
         return
 
-    lookup = result[0]
     # Merge: only overwrite fields that are empty/missing or enrichment fields
     updates: dict[str, Any] = {}
+    ai_price_used = False
     # Always update enrichment fields from Vivino
     for key in ("rating", "ratings_count", "description",
                 "food_pairings", "alcohol", "grape_variety"):
@@ -588,11 +743,12 @@ async def ws_refresh_wine(
         gemini = hass.data[DOMAIN].get("gemini")
         if gemini:
             try:
-                ai_result = await gemini.analyze_single_wine(wine)
+                ai_result = await gemini.analyze_single_wine(wine, language)
                 ai_price = ai_result.get("estimated_price")
                 if ai_price:
                     _LOGGER.debug("Using Gemini estimated price: %s", ai_price)
                     updates["retail_price"] = ai_price
+                    ai_price_used = True
             except Exception as err:
                 _LOGGER.debug("Gemini price fallback failed: %s", err)
 
@@ -609,6 +765,9 @@ async def ws_refresh_wine(
             updates[key] = val
 
     if updates:
+        updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
+        if ai_price_used:
+            updates["ai_updated_at"] = updates["vivino_updated_at"]
         updated_wine = storage.update_wine(msg["wine_id"], updates)
         await storage.async_save()
         hass.bus.async_fire(f"{DOMAIN}_updated")
@@ -652,46 +811,17 @@ async def ws_analyze_single_wine(
         connection.send_result(msg["id"], {"error": "Wine not found."})
         return
 
-    result = await gemini.analyze_single_wine(wine)
+    result = await gemini.analyze_single_wine(wine, _get_metadata_language(hass))
     if "error" in result:
         connection.send_result(msg["id"], {"error": result["error"]})
         return
 
     # Apply results to wine
-    updates: dict[str, Any] = {}
-    if result.get("disposition"):
-        updates["disposition"] = result["disposition"]
-    if result.get("drink_by"):
-        updates["drink_by"] = result["drink_by"]
-    # Set AI description if wine has no description or has error text
-    cur_desc = wine.get("description", "")
-    bad_kw = ("forbidden", "underage", "try searching", "page is blocked")
-    has_bad_desc = cur_desc and any(kw in cur_desc.lower() for kw in bad_kw)
-    if result.get("description") and (not cur_desc or has_bad_desc):
-        updates["description"] = result["description"]
-
-    # Store AI ratings as a dict in notes or a new field
-    ai_ratings: dict[str, int] = {}
-    for key in ("rating_ws", "rating_rp", "rating_jd", "rating_ag"):
-        val = result.get(key)
-        if val and isinstance(val, (int, float)) and 50 <= val <= 100:
-            ai_ratings[key] = int(val)
-
-    if ai_ratings:
-        updates["ai_ratings"] = ai_ratings
-
-    if result.get("drink_window"):
-        updates["drink_window"] = result["drink_window"]
-
-    # Store AI estimated price as retail_price if not already set
-    est_price = result.get("estimated_price")
-    _LOGGER.debug("AI estimated_price: %s, wine retail_price: %s", est_price, wine.get("retail_price"))
-    if est_price and isinstance(est_price, (int, float)) and est_price > 0:
-        if not wine.get("retail_price"):
-            updates["retail_price"] = round(float(est_price), 2)
+    updates = _build_ai_updates(wine, result)
 
     _LOGGER.debug("Final updates for wine %s: %s", msg["wine_id"], list(updates.keys()))
     if updates:
+        updates["ai_updated_at"] = datetime.now(timezone.utc).isoformat()
         updated_wine = storage.update_wine(msg["wine_id"], updates)
         await storage.async_save()
         hass.bus.async_fire(f"{DOMAIN}_updated")
@@ -724,13 +854,14 @@ async def ws_batch_analyze_wines(
         connection.send_result(msg["id"], {"error": "No wines to analyze."})
         return
 
+    language = _get_metadata_language(hass)
     updated = 0
     errors = 0
     total = len(wines)
 
     for wine in wines:
         try:
-            result = await gemini.analyze_single_wine(wine)
+            result = await gemini.analyze_single_wine(wine, language)
             if "error" in result:
                 _LOGGER.warning(
                     "Batch AI: error for wine %s: %s",
@@ -739,38 +870,10 @@ async def ws_batch_analyze_wines(
                 errors += 1
                 continue
 
-            updates: dict[str, Any] = {}
-            if result.get("disposition"):
-                updates["disposition"] = result["disposition"]
-            if result.get("drink_by"):
-                updates["drink_by"] = result["drink_by"]
-
-            # Set AI description if wine has no description or has error text
-            cur_desc = wine.get("description", "")
-            bad_kw = ("forbidden", "underage", "try searching", "page is blocked")
-            has_bad_desc = cur_desc and any(kw in cur_desc.lower() for kw in bad_kw)
-            if result.get("description") and (not cur_desc or has_bad_desc):
-                updates["description"] = result["description"]
-
-            # AI ratings
-            ai_ratings: dict[str, int] = {}
-            for key in ("rating_ws", "rating_rp", "rating_jd", "rating_ag"):
-                val = result.get(key)
-                if val and isinstance(val, (int, float)) and 50 <= val <= 100:
-                    ai_ratings[key] = int(val)
-            if ai_ratings:
-                updates["ai_ratings"] = ai_ratings
-
-            if result.get("drink_window"):
-                updates["drink_window"] = result["drink_window"]
-
-            # Estimated price as retail_price if not already set
-            est_price = result.get("estimated_price")
-            if est_price and isinstance(est_price, (int, float)) and est_price > 0:
-                if not wine.get("retail_price"):
-                    updates["retail_price"] = round(float(est_price), 2)
+            updates = _build_ai_updates(wine, result)
 
             if updates:
+                updates["ai_updated_at"] = datetime.now(timezone.utc).isoformat()
                 storage.update_wine(wine["id"], updates)
                 updated += 1
 
@@ -821,10 +924,14 @@ async def ws_batch_refresh_vivino(
         return
 
     photo_mode = msg.get("photo_mode", "keep")
+    ai_fallback_mode = msg.get("ai_fallback", "skip")  # "skip" | "use" — chosen upfront by the user
+    language = _get_metadata_language(hass)
     updated = 0
     errors = 0
     photos_updated = 0
     photos_kept = 0
+    mismatched = 0
+    ai_fallback_used = 0
     total = len(wines)
 
     for wine in wines:
@@ -842,12 +949,42 @@ async def ws_batch_refresh_vivino(
             if not query:
                 continue
 
-            result = await vivino.search_wine(query)
-            if not result:
+            # fetch_extras=False: skip the extra description/food_pairings
+            # HTML request here — it would ~double request volume across a
+            # whole cellar's worth of wines. Individual refresh still does it.
+            result = await vivino.search_wine(query, language, fetch_extras=False)
+            lookup = result[0] if result else None
+            if lookup and not _vivino_match_is_trustworthy(wine, lookup):
+                _LOGGER.debug(
+                    "Batch Vivino: match for '%s' looks unrelated (%s %s), falling back to AI",
+                    query, lookup.get("winery"), lookup.get("name"),
+                )
+                lookup = None
+
+            if not lookup:
+                # No usable Vivino match. Only fall back to AI if the user
+                # opted into it upfront for this batch run — never silently.
+                mismatched += 1
+                gemini = hass.data[DOMAIN].get("gemini") if ai_fallback_mode == "use" else None
+                if gemini:
+                    try:
+                        ai_result = await gemini.analyze_single_wine(wine, language)
+                        if "error" not in ai_result:
+                            ai_updates = _build_ai_updates(wine, ai_result)
+                            if ai_updates:
+                                ai_updates["ai_updated_at"] = datetime.now(timezone.utc).isoformat()
+                                storage.update_wine(wine["id"], ai_updates)
+                                updated += 1
+                                ai_fallback_used += 1
+                    except Exception as err:
+                        _LOGGER.debug(
+                            "Batch: AI fallback failed for wine %s: %s", wine.get("id"), err
+                        )
+                await asyncio.sleep(1.0)
                 continue
 
-            lookup = result[0]
             updates: dict[str, Any] = {}
+            ai_price_used = False
 
             # Always update enrichment fields from Vivino
             for key in ("rating", "ratings_count", "description",
@@ -874,7 +1011,7 @@ async def ws_batch_refresh_vivino(
                 gemini = hass.data[DOMAIN].get("gemini")
                 if gemini:
                     try:
-                        ai_result = await gemini.analyze_single_wine(wine)
+                        ai_result = await gemini.analyze_single_wine(wine, language)
                         ai_price = ai_result.get("estimated_price")
                         if ai_price:
                             _LOGGER.debug(
@@ -882,6 +1019,7 @@ async def ws_batch_refresh_vivino(
                                 wine.get("id"), ai_price,
                             )
                             updates["retail_price"] = ai_price
+                            ai_price_used = True
                     except Exception as err:
                         _LOGGER.debug("Batch: Gemini price fallback failed: %s", err)
 
@@ -899,6 +1037,9 @@ async def ws_batch_refresh_vivino(
                     updates[key] = val
 
             if updates:
+                updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
+                if ai_price_used:
+                    updates["ai_updated_at"] = updates["vivino_updated_at"]
                 storage.update_wine(wine["id"], updates)
                 updated += 1
 
@@ -923,6 +1064,8 @@ async def ws_batch_refresh_vivino(
             "errors": errors,
             "photos_updated": photos_updated,
             "photos_kept": photos_kept,
+            "mismatched": mismatched,
+            "ai_fallback_used": ai_fallback_used,
         },
     )
 
@@ -951,7 +1094,7 @@ async def ws_extract_wine_list(
         )
         return
 
-    result = await gemini.extract_wine_list(msg["image"])
+    result = await gemini.extract_wine_list(msg["image"], _get_metadata_language(hass))
 
     # Send result directly — on success it contains {wines, restaurant_name, currency}
     # On error it contains {error: "message"}
@@ -991,11 +1134,15 @@ async def ws_enrich_wine_vivino(
         return
 
     try:
-        result = await vivino.search_wine(query)
+        result = await vivino.search_wine(query, _get_metadata_language(hass))
         if not result:
             connection.send_result(msg["id"], {"result": None})
             return
-        connection.send_result(msg["id"], {"result": result[0]})
+        lookup = result[0]
+        if not _vivino_match_is_trustworthy(wine, lookup):
+            connection.send_result(msg["id"], {"result": None})
+            return
+        connection.send_result(msg["id"], {"result": lookup})
     except Exception as err:
         _LOGGER.warning("Vivino enrich error: %s", err)
         connection.send_result(msg["id"], {"result": None, "error": str(err)})
@@ -1020,7 +1167,7 @@ async def ws_analyze_wine_transient(
         return
 
     try:
-        result = await gemini.analyze_single_wine(msg["wine"])
+        result = await gemini.analyze_single_wine(msg["wine"], _get_metadata_language(hass))
         if "error" in result:
             connection.send_result(msg["id"], {"result": None, "error": result["error"]})
         else:

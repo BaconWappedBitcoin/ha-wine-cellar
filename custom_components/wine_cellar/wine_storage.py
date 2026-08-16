@@ -13,6 +13,7 @@ from .const import (
     CONF_BARCODE_CACHE,
     CONF_BUY_LIST,
     CONF_CABINETS,
+    CONF_SETTINGS,
     CONF_WINE_HISTORY,
     CONF_WINES,
     DEFAULT_CABINETS,
@@ -55,6 +56,17 @@ class WineCellarStorage:
         """Return wine removal history."""
         return self._data.get(CONF_WINE_HISTORY, [])
 
+    @property
+    def settings(self) -> dict[str, Any]:
+        """Return app-wide settings (e.g. metadata language)."""
+        return self._data.get(CONF_SETTINGS, {})
+
+    def update_settings(self, updates: dict[str, Any]) -> dict[str, Any]:
+        """Update app-wide settings."""
+        settings = self._data.setdefault(CONF_SETTINGS, {})
+        settings.update(updates)
+        return settings
+
     async def async_load(self) -> None:
         """Load data from storage."""
         data = await self._store.async_load()
@@ -65,6 +77,7 @@ class WineCellarStorage:
                 CONF_BARCODE_CACHE: {},
                 CONF_BUY_LIST: [],
                 CONF_WINE_HISTORY: [],
+                CONF_SETTINGS: {},
             }
             await self.async_save()
         else:
@@ -126,6 +139,7 @@ class WineCellarStorage:
             "grape_variety": wine_data.get("grape_variety", ""),
             "rating": wine_data.get("rating"),
             "image_url": wine_data.get("image_url", ""),
+            "back_image_url": wine_data.get("back_image_url", ""),
             "price": wine_data.get("price"),
             "retail_price": wine_data.get("retail_price"),
             "purchase_date": wine_data.get("purchase_date", ""),
@@ -146,6 +160,8 @@ class WineCellarStorage:
             "drink_window": wine_data.get("drink_window", ""),
             "ai_ratings": wine_data.get("ai_ratings"),
             "added_at": datetime.now(timezone.utc).isoformat(),
+            "vivino_updated_at": wine_data.get("vivino_updated_at"),
+            "ai_updated_at": wine_data.get("ai_updated_at"),
         }
         self._data[CONF_WINES].append(wine)
         return wine
