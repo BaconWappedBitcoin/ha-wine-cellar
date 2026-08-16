@@ -389,6 +389,7 @@ class WineCellarStorage:
             CONF_CABINETS: list(self.cabinets),
             CONF_BUY_LIST: list(self.buy_list),
             CONF_WINE_HISTORY: list(self.wine_history),
+            CONF_SETTINGS: dict(self.settings),
         }
 
     def restore_data(
@@ -397,12 +398,18 @@ class WineCellarStorage:
         cabinets: list[dict[str, Any]],
         buy_list: list[dict[str, Any]],
         wine_history: list[dict[str, Any]] | None = None,
+        settings: dict[str, Any] | None = None,
     ) -> dict[str, int]:
         """Replace all cellar data with backup data. Returns counts."""
         self._data[CONF_WINES] = wines
         self._data[CONF_CABINETS] = cabinets
         self._data[CONF_BUY_LIST] = buy_list
         self._data[CONF_WINE_HISTORY] = wine_history or []
+        # Older backups predate app-wide settings — only overwrite when the
+        # backup actually carries them, so restoring one doesn't wipe the
+        # user's current metadata-language / AI-fallback configuration.
+        if settings is not None:
+            self._data[CONF_SETTINGS] = settings
         return {
             "wines": len(wines),
             "cabinets": len(cabinets),
