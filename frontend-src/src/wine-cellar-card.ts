@@ -38,6 +38,7 @@ export class WineCellarCard extends LitElement {
   @state() private _movingWine: Wine | null = null;
   @state() private _analyzing = false;
   @state() private _batchVivino = false;
+  @state() private _showBatchVivinoConfirm = false;
   @state() private _toast = "";
   @state() private _hasGemini = false;
   @state() private _showWineList = false;
@@ -1291,19 +1292,27 @@ export class WineCellarCard extends LitElement {
   }
 
   // --- Batch Vivino Refresh ---
-  private async _batchRefreshVivino() {
+  private _batchRefreshVivino() {
+    this._showBatchVivinoConfirm = true;
+  }
+
+  private async _runBatchVivino(photoMode: "keep" | "replace") {
+    this._showBatchVivinoConfirm = false;
     this._batchVivino = true;
     this._showToast("Refreshing all wines from Vivino...");
     try {
       const result = await this.hass.callWS({
         type: "wine_cellar/batch_refresh_vivino",
+        photo_mode: photoMode,
       });
       if (result.error) {
         this._showToast(`Vivino Batch failed: ${result.error}`);
       } else {
         const parts = [`Vivino Batch complete! ${result.updated}/${result.total} updated`];
+        if (result.photos_updated) parts.push(`${result.photos_updated} photos updated`);
+        if (result.photos_kept) parts.push(`${result.photos_kept} kept`);
         if (result.errors > 0) parts.push(`(${result.errors} errors)`);
-        this._showToast(parts.join(" "));
+        this._showToast(parts.join(", "));
         await this._loadData();
       }
     } catch (err: any) {
@@ -1843,6 +1852,31 @@ export class WineCellarCard extends LitElement {
               </div>
             `
           : nothing}
+
+        <!-- Batch Vivino Photo Mode Confirm -->
+        ${this._showBatchVivinoConfirm ? html`
+          <div class="dialog-overlay" @click=${() => (this._showBatchVivinoConfirm = false)}>
+            <div class="dialog" style="max-width:340px;padding:24px;text-align:center" @click=${(e: Event) => e.stopPropagation()}>
+              <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">Vivino Batch Scan</h3>
+              <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">
+                Some wines already have a photo. What should happen to those photos?
+              </p>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <button class="btn btn-primary" style="background:#8e24aa" @click=${() => this._runBatchVivino("keep")}>
+                  Keep My Existing Photos
+                </button>
+                <button
+                  style="padding:8px 16px;border-radius:20px;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text);cursor:pointer;font-size:0.85em"
+                  @click=${() => this._runBatchVivino("replace")}
+                >Replace With Vivino Photos</button>
+                <button
+                  style="margin-top:4px;padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.8em"
+                  @click=${() => (this._showBatchVivinoConfirm = false)}
+                >Cancel</button>
+              </div>
+            </div>
+          </div>
+        ` : nothing}
 
         <!-- Wine Detail Dialog -->
         <wine-detail-dialog

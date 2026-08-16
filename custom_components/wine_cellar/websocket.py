@@ -558,11 +558,27 @@ async def ws_refresh_wine(
     # Merge: only overwrite fields that are empty/missing or enrichment fields
     updates: dict[str, Any] = {}
     # Always update enrichment fields from Vivino
-    for key in ("rating", "ratings_count", "image_url", "description",
+    for key in ("rating", "ratings_count", "description",
                 "food_pairings", "alcohol", "grape_variety"):
         val = lookup.get(key)
         if val:
             updates[key] = val
+
+    # Photo: never silently overwrite a photo the user already has. If the
+    # wine has no photo yet, apply Vivino's automatically. Otherwise surface
+    # the candidate separately so the frontend can ask the user first.
+    vivino_image_url = None
+    candidate_image = lookup.get("image_url")
+    _LOGGER.debug(
+        "Vivino photo check for '%s': candidate=%r current=%r",
+        query, candidate_image, wine.get("image_url"),
+    )
+    if candidate_image and candidate_image != wine.get("image_url"):
+        if not wine.get("image_url"):
+            updates["image_url"] = candidate_image
+        else:
+            vivino_image_url = candidate_image
+
     # Store Vivino price as retail_price (always update — Vivino is real market data)
     _LOGGER.debug("Vivino lookup price: %s", lookup.get("price"))
     if lookup.get("price"):
@@ -596,9 +612,17 @@ async def ws_refresh_wine(
         updated_wine = storage.update_wine(msg["wine_id"], updates)
         await storage.async_save()
         hass.bus.async_fire(f"{DOMAIN}_updated")
-        connection.send_result(msg["id"], {"wine": updated_wine, "updated_fields": list(updates.keys())})
+        connection.send_result(msg["id"], {
+            "wine": updated_wine,
+            "updated_fields": list(updates.keys()),
+            "vivino_image_url": vivino_image_url,
+        })
     else:
-        connection.send_result(msg["id"], {"wine": wine, "updated_fields": []})
+        connection.send_result(msg["id"], {
+            "wine": wine,
+            "updated_fields": [],
+            "vivino_image_url": vivino_image_url,
+        })
 
 
 @websocket_api.websocket_command(
@@ -770,7 +794,10 @@ async def ws_batch_analyze_wines(
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "wine_cellar/batch_refresh_vivino"}
+    {
+        vol.Required("type"): "wine_cellar/batch_refresh_vivino",
+        vol.Optional("photo_mode", default="keep"): vol.In(["keep", "replace"]),
+    }
 )
 @websocket_api.async_response
 async def ws_batch_refresh_vivino(
@@ -793,8 +820,11 @@ async def ws_batch_refresh_vivino(
         connection.send_result(msg["id"], {"error": "No wines to refresh."})
         return
 
+    photo_mode = msg.get("photo_mode", "keep")
     updated = 0
     errors = 0
+    photos_updated = 0
+    photos_kept = 0
     total = len(wines)
 
     for wine in wines:
@@ -820,11 +850,21 @@ async def ws_batch_refresh_vivino(
             updates: dict[str, Any] = {}
 
             # Always update enrichment fields from Vivino
-            for key in ("rating", "ratings_count", "image_url", "description",
+            for key in ("rating", "ratings_count", "description",
                         "food_pairings", "alcohol", "grape_variety"):
                 val = lookup.get(key)
                 if val:
                     updates[key] = val
+
+            # Photo: only overwrite an existing photo when the user opted in
+            # via photo_mode="replace"; otherwise leave the user's photo alone.
+            candidate_image = lookup.get("image_url")
+            if candidate_image and candidate_image != wine.get("image_url"):
+                if not wine.get("image_url") or photo_mode == "replace":
+                    updates["image_url"] = candidate_image
+                    photos_updated += 1
+                else:
+                    photos_kept += 1
 
             # Vivino price as retail_price
             if lookup.get("price"):
@@ -877,7 +917,13 @@ async def ws_batch_refresh_vivino(
 
     connection.send_result(
         msg["id"],
-        {"updated": updated, "total": total, "errors": errors},
+        {
+            "updated": updated,
+            "total": total,
+            "errors": errors,
+            "photos_updated": photos_updated,
+            "photos_kept": photos_kept,
+        },
     )
 
 

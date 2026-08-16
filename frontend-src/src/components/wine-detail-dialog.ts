@@ -2,7 +2,9 @@ import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { Wine, Cabinet, TastingNotes, WINE_TYPE_LABELS, WINE_TYPE_COLORS, WineType, REMOVAL_REASONS, getWineLocation } from "../models";
 import { sharedStyles } from "../styles";
+import { resizeImageForStorage } from "../utils/image";
 import "./star-rating";
+import "./label-camera";
 
 export type WineDetailMode = "cellar" | "buylist" | "winelist";
 
@@ -23,6 +25,9 @@ export class WineDetailDialog extends LitElement {
   @state() private _refreshing = false;
   @state() private _analyzing = false;
   @state() private _showRemoveConfirm = false;
+  @state() private _pendingVivinoImage: string | null = null;
+  @state() private _showPhotoCamera = false;
+  @state() private _photoBusy = false;
   @property({ type: Boolean }) hasGemini = false;
 
   static styles = [
@@ -71,6 +76,47 @@ export class WineDetailDialog extends LitElement {
         background: #f0f0f0;
         flex-shrink: 0;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      }
+
+      .wine-image-wrap {
+        position: relative;
+        flex-shrink: 0;
+      }
+
+      .photo-actions {
+        position: absolute;
+        bottom: 6px;
+        right: 6px;
+        display: flex;
+        gap: 6px;
+      }
+
+      .photo-action-btn {
+        border: 1px solid rgba(0, 0, 0, 0.15);
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.95);
+        color: #333;
+        cursor: pointer;
+        font-size: 1em;
+        line-height: 1;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+        transition: background 0.15s, transform 0.15s;
+      }
+
+      .photo-action-btn:hover {
+        background: #fff;
+        transform: scale(1.06);
+      }
+
+      .photo-action-btn:disabled {
+        opacity: 0.5;
+        cursor: default;
+        transform: none;
       }
 
       .wine-image-placeholder {
@@ -684,11 +730,57 @@ export class WineDetailDialog extends LitElement {
       } else if (resp.wine) {
         this.wine = { ...this.wine, ...resp.wine };
         this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+        if (resp.vivino_image_url) {
+          this._pendingVivinoImage = resp.vivino_image_url;
+        }
       }
     } catch (err) {
       console.error("Vivino refresh failed", err);
     }
     this._refreshing = false;
+  }
+
+  private async _updatePhoto(image_url: string) {
+    if (!this.wine || !this.hass) return;
+    this._photoBusy = true;
+    try {
+      const updates = { image_url };
+      if (this.mode === "buylist") {
+        await this.hass.callWS({ type: "wine_cellar/update_buy_list_item", item_id: this.wine.id, updates });
+      } else {
+        await this.hass.callWS({ type: "wine_cellar/update_wine", wine_id: this.wine.id, updates });
+      }
+      this.wine = { ...this.wine, image_url };
+      this.dispatchEvent(new CustomEvent(this.mode === "buylist" ? "buy-list-updated" : "wine-updated", { bubbles: true, composed: true }));
+    } catch (err) {
+      console.error("Failed to update photo", err);
+    }
+    this._photoBusy = false;
+  }
+
+  private _applyVivinoPhoto() {
+    if (!this._pendingVivinoImage) return;
+    const image_url = this._pendingVivinoImage;
+    this._pendingVivinoImage = null;
+    this._updatePhoto(image_url);
+  }
+
+  private _dismissVivinoPhoto() {
+    this._pendingVivinoImage = null;
+  }
+
+  private _onDeletePhoto() {
+    if (!this.wine?.image_url) return;
+    if (!window.confirm("Delete this bottle's photo?")) return;
+    this._updatePhoto("");
+  }
+
+  private async _onPhotoReplaced(e: CustomEvent) {
+    this._showPhotoCamera = false;
+    const thumbUrl = await resizeImageForStorage(e.detail.image);
+    if (thumbUrl) {
+      this._updatePhoto(thumbUrl);
+    }
   }
 
   private async _analyzeWithAI() {
@@ -852,13 +944,35 @@ export class WineDetailDialog extends LitElement {
           </div>
           <div class="wine-header">
             <div class="wine-image-col">
-              ${wine.image_url
-                ? html`<img class="wine-image" src="${wine.image_url}" alt="${wine.name}" />`
-                : html`
-                    <div class="wine-image-placeholder" style="background: ${typeColor}">
-                      🍷
-                    </div>
-                  `}
+              <div class="wine-image-wrap">
+                ${wine.image_url
+                  ? html`<img class="wine-image" src="${wine.image_url}" alt="${wine.name}" />`
+                  : html`
+                      <div class="wine-image-placeholder" style="background: ${typeColor}">
+                        🍷
+                      </div>
+                    `}
+                ${this.mode !== "winelist"
+                  ? html`
+                      <div class="photo-actions">
+                        <button
+                          class="photo-action-btn"
+                          title="Replace photo"
+                          ?disabled=${this._photoBusy}
+                          @click=${() => (this._showPhotoCamera = true)}
+                        >📷</button>
+                        ${wine.image_url
+                          ? html`<button
+                              class="photo-action-btn"
+                              title="Delete photo"
+                              ?disabled=${this._photoBusy}
+                              @click=${this._onDeletePhoto}
+                            >🗑️</button>`
+                          : nothing}
+                      </div>
+                    `
+                  : nothing}
+              </div>
               ${this.mode === "cellar"
                 ? html`
                     <div class="wine-location" title="Tap to locate" @click=${this._onLocate}>
@@ -1134,6 +1248,47 @@ export class WineDetailDialog extends LitElement {
                   style="margin-top:12px;padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.8em"
                   @click=${() => (this._showRemoveConfirm = false)}
                 >Cancel</button>
+              </div>
+            </div>
+          ` : nothing}
+          ${this._pendingVivinoImage ? html`
+            <div style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px">
+              <div style="background:var(--wc-bg);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center" @click=${(e: Event) => e.stopPropagation()}>
+                <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">Vivino Photo Available</h3>
+                <p style="margin:0 0 12px;font-size:0.85em;color:var(--wc-text-secondary)">Vivino found a different bottle photo. Keep your current photo or use Vivino's?</p>
+                <div style="display:flex;gap:12px;justify-content:center;margin-bottom:16px">
+                  <div style="text-align:center">
+                    <img src="${wine.image_url}" style="width:70px;height:100px;object-fit:cover;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.2)" />
+                    <div style="font-size:0.7em;color:var(--wc-text-secondary);margin-top:4px">Current</div>
+                  </div>
+                  <div style="text-align:center">
+                    <img src="${this._pendingVivinoImage}" style="width:70px;height:100px;object-fit:cover;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.2)" />
+                    <div style="font-size:0.7em;color:var(--wc-text-secondary);margin-top:4px">Vivino</div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                  <button
+                    style="padding:8px 16px;border-radius:20px;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text);cursor:pointer;font-size:0.85em"
+                    @click=${this._dismissVivinoPhoto}
+                  >Keep My Photo</button>
+                  <button class="btn btn-primary" style="background:#8e24aa" @click=${this._applyVivinoPhoto}>Use Vivino's</button>
+                </div>
+              </div>
+            </div>
+          ` : nothing}
+          ${this._showPhotoCamera ? html`
+            <div
+              style="position:absolute;inset:0;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px;padding:16px"
+              @click=${() => (this._showPhotoCamera = false)}
+            >
+              <div style="width:100%" @click=${(e: Event) => e.stopPropagation()}>
+                <label-camera .active=${this._showPhotoCamera} @photo-captured=${this._onPhotoReplaced}></label-camera>
+                <div style="text-align:center;margin-top:12px">
+                  <button
+                    style="padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.85em"
+                    @click=${() => (this._showPhotoCamera = false)}
+                  >Cancel</button>
+                </div>
               </div>
             </div>
           ` : nothing}
