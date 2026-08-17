@@ -28,6 +28,8 @@ export class WineDetailDialog extends LitElement {
   @state() private _pendingVivinoImage: string | null = null;
   @state() private _showPhotoCamera = false;
   @state() private _photoBusy = false;
+  @state() private _photoSide: "front" | "back" = "front";
+  private _photoSwipeStartX: number | null = null;
   @state() private _aiFallbackReason: "no_match" | "no_price" | null = null;
   @property({ type: Boolean }) hasGemini = false;
   @property({ type: Boolean }) aiFallbackAlways = false;
@@ -72,8 +74,8 @@ export class WineDetailDialog extends LitElement {
       }
 
       .wine-image {
-        width: 90px;
-        height: 130px;
+        width: 135px;
+        height: 195px;
         border-radius: 8px;
         object-fit: cover;
         background: #f0f0f0;
@@ -84,6 +86,41 @@ export class WineDetailDialog extends LitElement {
       .wine-image-wrap {
         position: relative;
         flex-shrink: 0;
+        touch-action: pan-y;
+      }
+
+      .photo-dots {
+        position: absolute;
+        top: 6px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 4px;
+      }
+
+      .photo-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.5);
+        border: 1px solid rgba(0, 0, 0, 0.25);
+        cursor: pointer;
+      }
+
+      .photo-dot.active {
+        background: #fff;
+      }
+
+      .photo-side-badge {
+        position: absolute;
+        bottom: 6px;
+        left: 6px;
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        font-size: 0.6em;
+        padding: 2px 6px;
+        border-radius: 10px;
+        pointer-events: none;
       }
 
       .photo-actions {
@@ -123,8 +160,8 @@ export class WineDetailDialog extends LitElement {
       }
 
       .wine-image-placeholder {
-        width: 90px;
-        height: 130px;
+        width: 135px;
+        height: 195px;
         border-radius: 8px;
         display: flex;
         align-items: center;
@@ -533,6 +570,7 @@ export class WineDetailDialog extends LitElement {
         : { aroma: "", taste: "", finish: "", overall: "" };
       this._editing = false;
       this._editingFields = false;
+      this._photoSide = "front";
     }
   }
 
@@ -775,22 +813,38 @@ export class WineDetailDialog extends LitElement {
     this._aiFallbackReason = null;
   }
 
-  private async _updatePhoto(image_url: string) {
+  private async _updatePhoto(image_url: string, field: "image_url" | "back_image_url" = "image_url") {
     if (!this.wine || !this.hass) return;
     this._photoBusy = true;
     try {
-      const updates = { image_url };
+      const updates = { [field]: image_url };
       if (this.mode === "buylist") {
         await this.hass.callWS({ type: "wine_cellar/update_buy_list_item", item_id: this.wine.id, updates });
       } else {
         await this.hass.callWS({ type: "wine_cellar/update_wine", wine_id: this.wine.id, updates });
       }
-      this.wine = { ...this.wine, image_url };
+      this.wine = { ...this.wine, [field]: image_url };
       this.dispatchEvent(new CustomEvent(this.mode === "buylist" ? "buy-list-updated" : "wine-updated", { bubbles: true, composed: true }));
     } catch (err) {
       console.error("Failed to update photo", err);
     }
     this._photoBusy = false;
+  }
+
+  private _onImageSwipeStart(e: PointerEvent) {
+    this._photoSwipeStartX = e.clientX;
+  }
+
+  private _onImageSwipeEnd(e: PointerEvent) {
+    if (this._photoSwipeStartX === null) return;
+    const dx = e.clientX - this._photoSwipeStartX;
+    this._photoSwipeStartX = null;
+    const THRESHOLD = 30;
+    if (dx <= -THRESHOLD) {
+      this._photoSide = "back";
+    } else if (dx >= THRESHOLD) {
+      this._photoSide = "front";
+    }
   }
 
   private _applyVivinoPhoto() {
@@ -805,16 +859,17 @@ export class WineDetailDialog extends LitElement {
   }
 
   private _onDeletePhoto() {
-    if (!this.wine?.image_url) return;
-    if (!window.confirm("Delete this bottle's photo?")) return;
-    this._updatePhoto("");
+    const field = this._photoSide === "back" ? "back_image_url" : "image_url";
+    if (!this.wine?.[field]) return;
+    if (!window.confirm(this._photoSide === "back" ? "Delete this bottle's back label photo?" : "Delete this bottle's photo?")) return;
+    this._updatePhoto("", field);
   }
 
   private async _onPhotoReplaced(e: CustomEvent) {
     this._showPhotoCamera = false;
     const thumbUrl = await resizeImageForStorage(e.detail.image);
     if (thumbUrl) {
-      this._updatePhoto(thumbUrl);
+      this._updatePhoto(thumbUrl, this._photoSide === "back" ? "back_image_url" : "image_url");
     }
   }
 
@@ -977,6 +1032,8 @@ export class WineDetailDialog extends LitElement {
     const wine = this.wine;
     const typeColor = WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red;
     const typeLabel = WINE_TYPE_LABELS[wine.type as WineType] || wine.type;
+    const showingBack = this._photoSide === "back";
+    const currentImageUrl = showingBack ? wine.back_image_url : wine.image_url;
 
     return html`
       <div class="dialog-overlay" @click=${this._close}>
@@ -989,27 +1046,44 @@ export class WineDetailDialog extends LitElement {
           </div>
           <div class="wine-header">
             <div class="wine-image-col">
-              <div class="wine-image-wrap">
-                ${wine.image_url
-                  ? html`<img class="wine-image" src="${wine.image_url}" alt="${wine.name}" />`
+              <div
+                class="wine-image-wrap"
+                @pointerdown=${this._onImageSwipeStart}
+                @pointerup=${this._onImageSwipeEnd}
+              >
+                ${currentImageUrl
+                  ? html`<img class="wine-image" src="${currentImageUrl}" alt="${wine.name}${showingBack ? " (back label)" : ""}" />`
                   : html`
                       <div class="wine-image-placeholder" style="background: ${typeColor}">
                         🍷
                       </div>
                     `}
+                ${showingBack ? html`<div class="photo-side-badge">Back label</div>` : nothing}
+                <div class="photo-dots">
+                  <span
+                    class="photo-dot ${this._photoSide === "front" ? "active" : ""}"
+                    title="Front label"
+                    @click=${() => (this._photoSide = "front")}
+                  ></span>
+                  <span
+                    class="photo-dot ${showingBack ? "active" : ""}"
+                    title="Back label"
+                    @click=${() => (this._photoSide = "back")}
+                  ></span>
+                </div>
                 ${this.mode !== "winelist"
                   ? html`
                       <div class="photo-actions">
                         <button
                           class="photo-action-btn"
-                          title="Replace photo"
+                          title="Replace ${showingBack ? "back label " : ""}photo"
                           ?disabled=${this._photoBusy}
                           @click=${() => (this._showPhotoCamera = true)}
                         >📷</button>
-                        ${wine.image_url
+                        ${currentImageUrl
                           ? html`<button
                               class="photo-action-btn"
-                              title="Delete photo"
+                              title="Delete ${showingBack ? "back label " : ""}photo"
                               ?disabled=${this._photoBusy}
                               @click=${this._onDeletePhoto}
                             >🗑️</button>`
@@ -1103,7 +1177,17 @@ export class WineDetailDialog extends LitElement {
                 ${wine.vivino_updated_at || wine.ai_updated_at
                   ? html`
                       <div style="text-align:center;font-size:0.68em;color:var(--wc-text-secondary);margin-top:-6px;padding-bottom:10px">
-                        ${wine.vivino_updated_at ? html`Vivino: ${this._formatUpdatedAt(wine.vivino_updated_at)}` : nothing}
+                        ${wine.vivino_updated_at
+                          ? html`${wine.vivino_id
+                              ? html`<a
+                                  href="https://www.vivino.com/w/${wine.vivino_id}"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style="color:inherit;text-decoration:underline"
+                                  @click=${(e: Event) => e.stopPropagation()}
+                                >Vivino</a>`
+                              : html`Vivino`}: ${this._formatUpdatedAt(wine.vivino_updated_at)}`
+                          : nothing}
                         ${wine.vivino_updated_at && wine.ai_updated_at ? " · " : nothing}
                         ${wine.ai_updated_at ? html`AI: ${this._formatUpdatedAt(wine.ai_updated_at)}` : nothing}
                       </div>
