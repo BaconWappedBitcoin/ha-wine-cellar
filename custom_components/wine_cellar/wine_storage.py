@@ -142,6 +142,7 @@ class WineCellarStorage:
             "back_image_url": wine_data.get("back_image_url", ""),
             "price": wine_data.get("price"),
             "retail_price": wine_data.get("retail_price"),
+            "retail_price_currency": wine_data.get("retail_price_currency"),
             "purchase_date": wine_data.get("purchase_date", ""),
             "drink_by": wine_data.get("drink_by", ""),
             "notes": wine_data.get("notes", ""),
@@ -162,6 +163,7 @@ class WineCellarStorage:
             "added_at": datetime.now(timezone.utc).isoformat(),
             "vivino_updated_at": wine_data.get("vivino_updated_at"),
             "ai_updated_at": wine_data.get("ai_updated_at"),
+            "vivino_id": wine_data.get("vivino_id"),
         }
         self._data[CONF_WINES].append(wine)
         return wine
@@ -354,6 +356,7 @@ class WineCellarStorage:
             "image_url": wine_data.get("image_url", ""),
             "price": wine_data.get("price"),
             "retail_price": wine_data.get("retail_price"),
+            "retail_price_currency": wine_data.get("retail_price_currency"),
             "notes": wine_data.get("notes", ""),
             "description": wine_data.get("description", ""),
             "food_pairings": wine_data.get("food_pairings", ""),

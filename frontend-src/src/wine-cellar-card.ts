@@ -44,6 +44,8 @@ export class WineCellarCard extends LitElement {
   @state() private _hasGemini = false;
   @state() private _metadataLanguage = "en";
   @state() private _supportedLanguages: string[] = ["en", "fr", "de"];
+  @state() private _metadataCurrency = "USD";
+  @state() private _supportedCurrencies: string[] = ["USD", "EUR", "GBP", "CHF"];
   @state() private _aiFallbackAlways = false;
   @state() private _showAiInfoDialog = false;
   @state() private _showWineList = false;
@@ -427,6 +429,8 @@ export class WineCellarCard extends LitElement {
       this._hasGemini = capResult?.has_gemini || false;
       this._metadataLanguage = capResult?.metadata_language || "en";
       this._supportedLanguages = capResult?.supported_languages || ["en", "fr", "de"];
+      this._metadataCurrency = capResult?.metadata_currency || "USD";
+      this._supportedCurrencies = capResult?.supported_currencies || ["USD", "EUR", "GBP", "CHF"];
       this._aiFallbackAlways = capResult?.ai_fallback_always || false;
       this._buyList = buyListResult?.buy_list || [];
 
@@ -1315,6 +1319,21 @@ export class WineCellarCard extends LitElement {
     }
   }
 
+  private async _setMetadataCurrency(currency: string) {
+    if (currency === this._metadataCurrency) return;
+    const previous = this._metadataCurrency;
+    this._metadataCurrency = currency;
+    try {
+      await this.hass.callWS({
+        type: "wine_cellar/update_settings",
+        updates: { metadata_currency: currency },
+      });
+    } catch (err) {
+      this._metadataCurrency = previous;
+      this._showToast("Failed to change currency");
+    }
+  }
+
   private async _setAiFallbackAlways(value: boolean) {
     if (value === this._aiFallbackAlways) return;
     const previous = this._aiFallbackAlways;
@@ -1543,6 +1562,15 @@ export class WineCellarCard extends LitElement {
               @click=${() => (this._showAiInfoDialog = true)}
             >?</button>
           </div>
+          <div style="display:flex;align-items:center;gap:4px">
+            <span style="color:var(--wc-text-secondary)">Currency:</span>
+            ${this._supportedCurrencies.map((cur) => html`
+              <button
+                style="padding:2px 8px;border-radius:10px;border:1px solid var(--wc-border);cursor:pointer;background:${this._metadataCurrency === cur ? "var(--wc-primary-text)" : "transparent"};color:${this._metadataCurrency === cur ? "#fff" : "var(--wc-text-secondary)"}"
+                @click=${() => this._setMetadataCurrency(cur)}
+              >${cur}</button>
+            `)}
+          </div>
         </div>
 
         <!-- Copy mode banner -->
@@ -1594,10 +1622,10 @@ export class WineCellarCard extends LitElement {
                 ${this._stats.total_value
                   ? html`
                       <div class="stat">
-                        <span class="stat-value">$${this._stats.total_value.toLocaleString()}</span>
+                        <span class="stat-value">${this._metadataCurrency} ${this._stats.total_value.toLocaleString()}</span>
                         value
                         ${this._stats.total_cost
-                          ? html`<span style="font-size:0.75em;color:${this._stats.total_value - this._stats.total_cost >= 0 ? '#2e7d32' : '#c62828'}">${this._stats.total_value - this._stats.total_cost >= 0 ? '+' : ''}$${(this._stats.total_value - this._stats.total_cost).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>`
+                          ? html`<span style="font-size:0.75em;color:${this._stats.total_value - this._stats.total_cost >= 0 ? '#2e7d32' : '#c62828'}">${this._stats.total_value - this._stats.total_cost >= 0 ? '+' : ''}${this._metadataCurrency} ${(this._stats.total_value - this._stats.total_cost).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>`
                           : nothing}
                       </div>
                     `
@@ -1769,7 +1797,7 @@ export class WineCellarCard extends LitElement {
                             <div class="bl-meta">
                               ${item.winery}${item.vintage ? ` · ${item.vintage}` : ""}
                               ${item.rating ? ` · ★${item.rating.toFixed(1)}` : ""}
-                              ${item.retail_price ? ` · $${item.retail_price}` : ""}
+                              ${item.retail_price ? ` · ${this._metadataCurrency} ${item.retail_price}` : ""}
                             </div>
                           </div>
                           <div class="bl-actions">
@@ -1998,6 +2026,7 @@ export class WineCellarCard extends LitElement {
           </div>
         ` : nothing}
 
+
         <!-- Wine Detail Dialog -->
         <wine-detail-dialog
           .wine=${this._selectedWine}
@@ -2006,6 +2035,7 @@ export class WineCellarCard extends LitElement {
           .open=${this._showDetail}
           .hasGemini=${this._hasGemini}
           .aiFallbackAlways=${this._aiFallbackAlways}
+          .currency=${this._metadataCurrency}
           .mode=${this._detailMode}
           @close=${() => (this._showDetail = false)}
           @remove-wine=${this._onRemoveWine}
@@ -2064,6 +2094,7 @@ export class WineCellarCard extends LitElement {
           .wines=${this._wines}
           .cabinets=${this._cabinets}
           .hasGemini=${this._hasGemini}
+          .currency=${this._metadataCurrency}
           @close=${() => (this._showInventory = false)}
           @wine-updated=${() => this._loadData()}
           @locate-wine=${(e: CustomEvent) => {
@@ -2136,7 +2167,7 @@ export class WineCellarCard extends LitElement {
                                   <div class="depth-slot-meta">
                                     ${wine.vintage || "NV"}
                                     ${wine.rating ? html` · ★${wine.rating}` : nothing}
-                                    ${wine.price ? html` · $${wine.price}` : nothing}
+                                    ${wine.price ? html` · ${this._metadataCurrency} ${wine.price}` : nothing}
                                   </div>
                                 </div>
                               </div>
@@ -2213,7 +2244,7 @@ export class WineCellarCard extends LitElement {
                                         <div class="depth-slot-meta">
                                           ${wine.vintage || "NV"}
                                           ${wine.rating ? html` · ★${wine.rating}` : nothing}
-                                          ${wine.price ? html` · $${wine.price}` : nothing}
+                                          ${wine.price ? html` · ${this._metadataCurrency} ${wine.price}` : nothing}
                                         </div>
                                       </div>
                                     </div>
@@ -2285,7 +2316,7 @@ export class WineCellarCard extends LitElement {
                                               <div class="depth-slot-meta">
                                                 ${wine.vintage || "NV"}
                                                 ${wine.rating ? html` · ★${wine.rating}` : nothing}
-                                                ${wine.price ? html` · $${wine.price}` : nothing}
+                                                ${wine.price ? html` · ${this._metadataCurrency} ${wine.price}` : nothing}
                                               </div>
                                             </div>
                                           </div>

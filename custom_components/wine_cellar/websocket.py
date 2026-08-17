@@ -14,9 +14,12 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import (
     CONF_AI_FALLBACK_ALWAYS,
+    CONF_METADATA_CURRENCY,
     CONF_METADATA_LANGUAGE,
+    DEFAULT_METADATA_CURRENCY,
     DEFAULT_METADATA_LANGUAGE,
     DOMAIN,
+    SUPPORTED_METADATA_CURRENCIES,
     SUPPORTED_METADATA_LANGUAGES,
 )
 
@@ -45,7 +48,13 @@ def _get_metadata_language(hass: HomeAssistant) -> str:
     return storage.settings.get(CONF_METADATA_LANGUAGE, DEFAULT_METADATA_LANGUAGE)
 
 
-def _build_ai_updates(wine: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+def _get_metadata_currency(hass: HomeAssistant) -> str:
+    """Return the user's chosen currency for Vivino/AI price data."""
+    storage = hass.data[DOMAIN]["storage"]
+    return storage.settings.get(CONF_METADATA_CURRENCY, DEFAULT_METADATA_CURRENCY)
+
+
+def _build_ai_updates(wine: dict[str, Any], result: dict[str, Any], currency: str = "USD") -> dict[str, Any]:
     """Build a wine `updates` dict from a Gemini analyze_single_wine result."""
     updates: dict[str, Any] = {}
     if result.get("disposition"):
@@ -73,8 +82,12 @@ def _build_ai_updates(wine: dict[str, Any], result: dict[str, Any]) -> dict[str,
 
     est_price = result.get("estimated_price")
     if est_price and isinstance(est_price, (int, float)) and est_price > 0:
-        if not wine.get("retail_price"):
+        # A price already captured in a different currency is stale, not
+        # "already have one" — an unconverted number in the wrong currency
+        # is worse than no number at all.
+        if not wine.get("retail_price") or wine.get("retail_price_currency") != currency:
             updates["retail_price"] = round(float(est_price), 2)
+            updates["retail_price_currency"] = currency
 
     # Fill in fields the AI could read off the label photo (or knows from
     # the producer) — only when the wine doesn't already have them, same
@@ -121,7 +134,10 @@ async def _auto_enrich_wine(hass: HomeAssistant, wine: dict[str, Any]) -> None:
         if not query:
             return
 
-        result = await vivino.search_wine(query, _get_metadata_language(hass))
+        currency = _get_metadata_currency(hass)
+        result = await vivino.search_wine(
+            query, _get_metadata_language(hass), currency, wine.get("vintage")
+        )
         if not result:
             return
 
@@ -146,6 +162,7 @@ async def _auto_enrich_wine(hass: HomeAssistant, wine: dict[str, Any]) -> None:
         # Vivino price as retail_price
         if lookup.get("price"):
             updates["retail_price"] = lookup["price"]
+            updates["retail_price_currency"] = currency
 
         # Fill empty fields
         for key in ("region", "country", "type"):
@@ -155,6 +172,8 @@ async def _auto_enrich_wine(hass: HomeAssistant, wine: dict[str, Any]) -> None:
 
         if updates:
             updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
+            if lookup.get("vivino_id"):
+                updates["vivino_id"] = lookup["vivino_id"]
             _LOGGER.debug("Auto-enrich wine %s: %s", wine.get("id"), list(updates.keys()))
             storage.update_wine(wine["id"], updates)
             await storage.async_save()
@@ -180,7 +199,10 @@ async def _auto_enrich_buy_list_item(hass: HomeAssistant, item: dict[str, Any]) 
         if not query:
             return
 
-        result = await vivino.search_wine(query, _get_metadata_language(hass))
+        currency = _get_metadata_currency(hass)
+        result = await vivino.search_wine(
+            query, _get_metadata_language(hass), currency, item.get("vintage")
+        )
         if not result:
             return
 
@@ -203,6 +225,7 @@ async def _auto_enrich_buy_list_item(hass: HomeAssistant, item: dict[str, Any]) 
 
         if lookup.get("price"):
             updates["retail_price"] = lookup["price"]
+            updates["retail_price_currency"] = currency
 
         for key in ("region", "country", "type"):
             val = lookup.get(key)
@@ -211,6 +234,8 @@ async def _auto_enrich_buy_list_item(hass: HomeAssistant, item: dict[str, Any]) 
 
         if updates:
             updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
+            if lookup.get("vivino_id"):
+                updates["vivino_id"] = lookup["vivino_id"]
             storage.update_buy_list_item(item["id"], updates)
             await storage.async_save()
             hass.bus.async_fire(f"{DOMAIN}_updated")
@@ -441,7 +466,7 @@ async def ws_search_wine(
 ) -> None:
     """Search for wines on Vivino."""
     vivino = hass.data[DOMAIN]["vivino"]
-    results = await vivino.search_wine(msg["query"], _get_metadata_language(hass))
+    results = await vivino.search_wine(msg["query"], _get_metadata_language(hass), _get_metadata_currency(hass))
     connection.send_result(msg["id"], {"results": results})
 
 
@@ -576,6 +601,8 @@ def ws_get_capabilities(
             "has_gemini": "gemini" in hass.data.get(DOMAIN, {}),
             "metadata_language": _get_metadata_language(hass),
             "supported_languages": SUPPORTED_METADATA_LANGUAGES,
+            "metadata_currency": _get_metadata_currency(hass),
+            "supported_currencies": SUPPORTED_METADATA_CURRENCIES,
             "ai_fallback_always": bool(
                 hass.data[DOMAIN]["storage"].settings.get(CONF_AI_FALLBACK_ALWAYS, False)
             ),
@@ -601,6 +628,10 @@ async def ws_update_settings(
     lang = updates.get(CONF_METADATA_LANGUAGE)
     if lang is not None and lang not in SUPPORTED_METADATA_LANGUAGES:
         connection.send_result(msg["id"], {"error": f"Unsupported language: {lang}"})
+        return
+    currency = updates.get(CONF_METADATA_CURRENCY)
+    if currency is not None and currency not in SUPPORTED_METADATA_CURRENCIES:
+        connection.send_result(msg["id"], {"error": f"Unsupported currency: {currency}"})
         return
     settings = storage.update_settings(updates)
     await storage.async_save()
@@ -669,12 +700,15 @@ async def ws_refresh_wine(
     storage = hass.data[DOMAIN]["storage"]
     vivino = hass.data[DOMAIN]["vivino"]
     language = _get_metadata_language(hass)
+    currency = _get_metadata_currency(hass)
+    ai_fallback_always = bool(storage.settings.get(CONF_AI_FALLBACK_ALWAYS, False))
     wine = storage.get_wine(msg["wine_id"])
     if not wine:
         connection.send_result(msg["id"], {"error": "Wine not found."})
         return
 
-    # Build search query from wine name + winery + vintage
+    # Build search query from wine name + winery + vintage (used for the
+    # text-search fallback below and for error messages)
     parts = []
     if wine.get("winery"):
         parts.append(wine["winery"])
@@ -684,18 +718,26 @@ async def ws_refresh_wine(
         parts.append(str(wine["vintage"]))
     query = " ".join(parts) if parts else ""
 
-    if not query:
-        connection.send_result(msg["id"], {"error": "No name/winery to search."})
-        return
+    # If this wine's Vivino id is already known from a prior match, look it
+    # up directly — no query ambiguity, and its full vintage list lets us
+    # pick the exact matching vintage rather than guess from search ranking.
+    lookup = None
+    if wine.get("vivino_id"):
+        lookup = await vivino.get_wine_by_id(wine["vivino_id"], wine.get("vintage"))
 
-    result = await vivino.search_wine(query, language)
-    lookup = result[0] if result else None
-    if lookup and not _vivino_match_is_trustworthy(wine, lookup):
-        _LOGGER.debug(
-            "Vivino match for '%s' looks unrelated (%s %s), falling back to AI",
-            query, lookup.get("winery"), lookup.get("name"),
-        )
-        lookup = None
+    if not lookup:
+        if not query:
+            connection.send_result(msg["id"], {"error": "No name/winery to search."})
+            return
+
+        result = await vivino.search_wine(query, language, currency, wine.get("vintage"))
+        lookup = result[0] if result else None
+        if lookup and not _vivino_match_is_trustworthy(wine, lookup):
+            _LOGGER.debug(
+                "Vivino match for '%s' looks unrelated (%s %s), falling back to AI",
+                query, lookup.get("winery"), lookup.get("name"),
+            )
+            lookup = None
 
     if not lookup:
         # No usable Vivino match (no results, or the best match looks
@@ -736,21 +778,32 @@ async def ws_refresh_wine(
 
     # Store Vivino price as retail_price (always update — Vivino is real market data)
     _LOGGER.debug("Vivino lookup price: %s", lookup.get("price"))
+    price_needs_ai = False
     if lookup.get("price"):
         updates["retail_price"] = lookup["price"]
-    elif not wine.get("retail_price"):
-        # Fallback: use Gemini AI to estimate retail price when Vivino has none
+        updates["retail_price_currency"] = currency
+    elif not wine.get("retail_price") or wine.get("retail_price_currency") != currency:
+        # No usable Vivino price — also true when the stored price was
+        # captured in a different currency, since an unconverted number in
+        # the wrong currency is worse than no number at all.
         gemini = hass.data[DOMAIN].get("gemini")
-        if gemini:
+        if ai_fallback_always and gemini:
             try:
-                ai_result = await gemini.analyze_single_wine(wine, language)
+                ai_result = await gemini.analyze_single_wine(wine, language, currency)
                 ai_price = ai_result.get("estimated_price")
                 if ai_price:
                     _LOGGER.debug("Using Gemini estimated price: %s", ai_price)
                     updates["retail_price"] = ai_price
+                    updates["retail_price_currency"] = currency
                     ai_price_used = True
             except Exception as err:
                 _LOGGER.debug("Gemini price fallback failed: %s", err)
+        elif gemini:
+            # AI could estimate it, but the user hasn't opted into
+            # always-use — flag it so the frontend can ask first, same as
+            # the no-confident-match flow. A plain "Vivino" click must
+            # never call AI silently.
+            price_needs_ai = True
 
     # Clear bad descriptions (Vivino error page text)
     cur_desc = wine.get("description", "")
@@ -766,6 +819,8 @@ async def ws_refresh_wine(
 
     if updates:
         updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
+        if lookup.get("vivino_id"):
+            updates["vivino_id"] = lookup["vivino_id"]
         if ai_price_used:
             updates["ai_updated_at"] = updates["vivino_updated_at"]
         updated_wine = storage.update_wine(msg["wine_id"], updates)
@@ -775,12 +830,14 @@ async def ws_refresh_wine(
             "wine": updated_wine,
             "updated_fields": list(updates.keys()),
             "vivino_image_url": vivino_image_url,
+            "price_needs_ai": price_needs_ai,
         })
     else:
         connection.send_result(msg["id"], {
             "wine": wine,
             "updated_fields": [],
             "vivino_image_url": vivino_image_url,
+            "price_needs_ai": price_needs_ai,
         })
 
 
@@ -811,13 +868,14 @@ async def ws_analyze_single_wine(
         connection.send_result(msg["id"], {"error": "Wine not found."})
         return
 
-    result = await gemini.analyze_single_wine(wine, _get_metadata_language(hass))
+    currency = _get_metadata_currency(hass)
+    result = await gemini.analyze_single_wine(wine, _get_metadata_language(hass), currency)
     if "error" in result:
         connection.send_result(msg["id"], {"error": result["error"]})
         return
 
     # Apply results to wine
-    updates = _build_ai_updates(wine, result)
+    updates = _build_ai_updates(wine, result, currency)
 
     _LOGGER.debug("Final updates for wine %s: %s", msg["wine_id"], list(updates.keys()))
     if updates:
@@ -855,13 +913,14 @@ async def ws_batch_analyze_wines(
         return
 
     language = _get_metadata_language(hass)
+    currency = _get_metadata_currency(hass)
     updated = 0
     errors = 0
     total = len(wines)
 
     for wine in wines:
         try:
-            result = await gemini.analyze_single_wine(wine, language)
+            result = await gemini.analyze_single_wine(wine, language, currency)
             if "error" in result:
                 _LOGGER.warning(
                     "Batch AI: error for wine %s: %s",
@@ -870,7 +929,7 @@ async def ws_batch_analyze_wines(
                 errors += 1
                 continue
 
-            updates = _build_ai_updates(wine, result)
+            updates = _build_ai_updates(wine, result, currency)
 
             if updates:
                 updates["ai_updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -900,6 +959,7 @@ async def ws_batch_analyze_wines(
     {
         vol.Required("type"): "wine_cellar/batch_refresh_vivino",
         vol.Optional("photo_mode", default="keep"): vol.In(["keep", "replace"]),
+        vol.Optional("ai_fallback", default="skip"): vol.In(["skip", "use"]),
     }
 )
 @websocket_api.async_response
@@ -926,6 +986,7 @@ async def ws_batch_refresh_vivino(
     photo_mode = msg.get("photo_mode", "keep")
     ai_fallback_mode = msg.get("ai_fallback", "skip")  # "skip" | "use" — chosen upfront by the user
     language = _get_metadata_language(hass)
+    currency = _get_metadata_currency(hass)
     updated = 0
     errors = 0
     photos_updated = 0
@@ -946,20 +1007,28 @@ async def ws_batch_refresh_vivino(
                 parts.append(str(wine["vintage"]))
             query = " ".join(parts) if parts else ""
 
-            if not query:
-                continue
+            # If this wine's Vivino id is already known, look it up
+            # directly — no query ambiguity, exact vintage from its own
+            # vintage list. Falls back to text search if that fails.
+            lookup = None
+            if wine.get("vivino_id"):
+                lookup = await vivino.get_wine_by_id(wine["vivino_id"], wine.get("vintage"))
 
-            # fetch_extras=False: skip the extra description/food_pairings
-            # HTML request here — it would ~double request volume across a
-            # whole cellar's worth of wines. Individual refresh still does it.
-            result = await vivino.search_wine(query, language, fetch_extras=False)
-            lookup = result[0] if result else None
-            if lookup and not _vivino_match_is_trustworthy(wine, lookup):
-                _LOGGER.debug(
-                    "Batch Vivino: match for '%s' looks unrelated (%s %s), falling back to AI",
-                    query, lookup.get("winery"), lookup.get("name"),
-                )
-                lookup = None
+            if not lookup:
+                if not query:
+                    continue
+
+                # fetch_extras=False: skip the extra description/food_pairings
+                # HTML request here — it would ~double request volume across a
+                # whole cellar's worth of wines. Individual refresh still does it.
+                result = await vivino.search_wine(query, language, currency, wine.get("vintage"), fetch_extras=False)
+                lookup = result[0] if result else None
+                if lookup and not _vivino_match_is_trustworthy(wine, lookup):
+                    _LOGGER.debug(
+                        "Batch Vivino: match for '%s' looks unrelated (%s %s), falling back to AI",
+                        query, lookup.get("winery"), lookup.get("name"),
+                    )
+                    lookup = None
 
             if not lookup:
                 # No usable Vivino match. Only fall back to AI if the user
@@ -968,9 +1037,9 @@ async def ws_batch_refresh_vivino(
                 gemini = hass.data[DOMAIN].get("gemini") if ai_fallback_mode == "use" else None
                 if gemini:
                     try:
-                        ai_result = await gemini.analyze_single_wine(wine, language)
+                        ai_result = await gemini.analyze_single_wine(wine, language, currency)
                         if "error" not in ai_result:
-                            ai_updates = _build_ai_updates(wine, ai_result)
+                            ai_updates = _build_ai_updates(wine, ai_result, currency)
                             if ai_updates:
                                 ai_updates["ai_updated_at"] = datetime.now(timezone.utc).isoformat()
                                 storage.update_wine(wine["id"], ai_updates)
@@ -1006,12 +1075,17 @@ async def ws_batch_refresh_vivino(
             # Vivino price as retail_price
             if lookup.get("price"):
                 updates["retail_price"] = lookup["price"]
-            elif not wine.get("retail_price"):
-                # Fallback: use Gemini AI to estimate retail price
+                updates["retail_price_currency"] = currency
+            elif ai_fallback_mode == "use" and (
+                not wine.get("retail_price") or wine.get("retail_price_currency") != currency
+            ):
+                # Fallback: use Gemini AI to estimate retail price — also
+                # fires when the stored price is in a different currency.
+                # Only when the user opted into AI for this batch run.
                 gemini = hass.data[DOMAIN].get("gemini")
                 if gemini:
                     try:
-                        ai_result = await gemini.analyze_single_wine(wine, language)
+                        ai_result = await gemini.analyze_single_wine(wine, language, currency)
                         ai_price = ai_result.get("estimated_price")
                         if ai_price:
                             _LOGGER.debug(
@@ -1019,6 +1093,7 @@ async def ws_batch_refresh_vivino(
                                 wine.get("id"), ai_price,
                             )
                             updates["retail_price"] = ai_price
+                            updates["retail_price_currency"] = currency
                             ai_price_used = True
                     except Exception as err:
                         _LOGGER.debug("Batch: Gemini price fallback failed: %s", err)
@@ -1038,6 +1113,8 @@ async def ws_batch_refresh_vivino(
 
             if updates:
                 updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
+                if lookup.get("vivino_id"):
+                    updates["vivino_id"] = lookup["vivino_id"]
                 if ai_price_used:
                     updates["ai_updated_at"] = updates["vivino_updated_at"]
                 storage.update_wine(wine["id"], updates)
@@ -1134,7 +1211,9 @@ async def ws_enrich_wine_vivino(
         return
 
     try:
-        result = await vivino.search_wine(query, _get_metadata_language(hass))
+        result = await vivino.search_wine(
+            query, _get_metadata_language(hass), _get_metadata_currency(hass), wine.get("vintage")
+        )
         if not result:
             connection.send_result(msg["id"], {"result": None})
             return
@@ -1167,7 +1246,7 @@ async def ws_analyze_wine_transient(
         return
 
     try:
-        result = await gemini.analyze_single_wine(msg["wine"], _get_metadata_language(hass))
+        result = await gemini.analyze_single_wine(msg["wine"], _get_metadata_language(hass), _get_metadata_currency(hass))
         if "error" in result:
             connection.send_result(msg["id"], {"result": None, "error": result["error"]})
         else:

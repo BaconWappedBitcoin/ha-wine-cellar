@@ -14,6 +14,7 @@ export class InventoryDialog extends LitElement {
   @property({ attribute: false }) wines: Wine[] = [];
   @property({ attribute: false }) cabinets: Cabinet[] = [];
   @property({ type: Boolean }) hasGemini = false;
+  @property({ type: String }) currency = "USD";
 
   @state() private _searchQuery = "";
   @state() private _typeFilter = "all";
@@ -642,7 +643,7 @@ export class InventoryDialog extends LitElement {
               </div>
             </div>
             <div class="inv-right">
-              ${item.price ? html`<div class="inv-price">$${item.price.toFixed(0)}</div>` : nothing}
+              ${item.price ? html`<div class="inv-price">${this.currency} ${item.price.toFixed(0)}</div>` : nothing}
               <div class="inv-location">${this._formatDate(item.removed_at)}</div>
             </div>
           </div>
@@ -1038,6 +1039,10 @@ export class InventoryDialog extends LitElement {
     const typeColor = WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red;
     const location = getWineLocation(wine, this.cabinets).text;
     const displayPrice = wine.retail_price || wine.price;
+    // A retail_price keeps the currency it was actually captured in — show
+    // that instead of the globally selected one, or a stale price ends up
+    // mislabeled as if it were in the new currency.
+    const displayCurrency = wine.retail_price ? (wine.retail_price_currency || this.currency) : this.currency;
 
     return html`
       <div class="inv-item" @click=${() => this._showWineDetail(wine)}>
@@ -1071,7 +1076,7 @@ export class InventoryDialog extends LitElement {
           </div>
         </div>
         <div class="inv-right">
-          ${displayPrice ? html`<div class="inv-price">$${displayPrice.toFixed(0)}</div>` : nothing}
+          ${displayPrice ? html`<div class="inv-price">${displayCurrency} ${displayPrice.toFixed(0)}</div>` : nothing}
           <div class="inv-location">${location}</div>
         </div>
       </div>
@@ -1137,7 +1142,7 @@ export class InventoryDialog extends LitElement {
               ? html`
                   <div class="stat">
                     <span class="stat-value"
-                      >$${allStats.totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span
+                      >${this.currency} ${allStats.totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span
                     >
                     est. value
                   </div>

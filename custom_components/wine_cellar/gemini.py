@@ -499,7 +499,9 @@ class BaseAIClient:
             "currency": str(result.get("currency", "USD")).strip().upper(),
         }
 
-    async def analyze_single_wine(self, wine: dict[str, Any], language: str = "en") -> dict[str, Any]:
+    async def analyze_single_wine(
+        self, wine: dict[str, Any], language: str = "en", currency: str = "USD"
+    ) -> dict[str, Any]:
         """Analyze a single wine with AI — disposition, drink dates, and ratings.
 
         If the wine has a stored photo (front and/or back label, from the
@@ -576,7 +578,7 @@ Rules:
   - "rating_rp": Robert Parker / Wine Advocate score (out of 100)
   - "rating_jd": Jeb Dunnuck score (out of 100)
   - "rating_ag": Antonio Galloni / Vinous score (out of 100)
-- "estimated_price": estimated current retail price in USD as a number (e.g. 45.00). Use your knowledge of the wine market to estimate what this bottle currently sells for. Return null only if you truly cannot estimate.
+- "estimated_price": estimated current retail price in {currency} as a number (e.g. 45.00). Use your knowledge of the wine market to estimate what this bottle currently sells for. Return null only if you truly cannot estimate.
 - "region"/"country"/"grape_variety"/"alcohol": only fill these in if the "Region"/"Country"/"Grape" fields above are empty AND you can actually determine them (from the label photo if attached, or from your own knowledge of this producer). Leave null if already provided above or genuinely unknown — don't guess.""" + (
             "\n\nA photo of the bottle/label is attached"
             + (" (front, then back)" if back_photo else " (front label)")
