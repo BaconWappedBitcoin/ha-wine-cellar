@@ -28,9 +28,10 @@ export class WineDetailDialog extends LitElement {
   @state() private _pendingVivinoImage: string | null = null;
   @state() private _showPhotoCamera = false;
   @state() private _photoBusy = false;
-  @state() private _showAiFallbackConfirm = false;
+  @state() private _aiFallbackReason: "no_match" | "no_price" | null = null;
   @property({ type: Boolean }) hasGemini = false;
   @property({ type: Boolean }) aiFallbackAlways = false;
+  @property({ type: String }) currency = "USD";
 
   static styles = [
     sharedStyles,
@@ -736,7 +737,7 @@ export class WineDetailDialog extends LitElement {
         if (this.aiFallbackAlways) {
           await this._analyzeWithAI();
         } else {
-          this._showAiFallbackConfirm = true;
+          this._aiFallbackReason = "no_match";
         }
         return;
       }
@@ -748,6 +749,9 @@ export class WineDetailDialog extends LitElement {
         if (resp.vivino_image_url) {
           this._pendingVivinoImage = resp.vivino_image_url;
         }
+        if (resp.price_needs_ai) {
+          this._aiFallbackReason = "no_price";
+        }
       }
     } catch (err) {
       console.error("Vivino refresh failed", err);
@@ -756,7 +760,7 @@ export class WineDetailDialog extends LitElement {
   }
 
   private async _confirmAiFallback(remember: boolean) {
-    this._showAiFallbackConfirm = false;
+    this._aiFallbackReason = null;
     if (remember) {
       this.dispatchEvent(new CustomEvent("set-ai-fallback-always", {
         detail: { value: true },
@@ -768,7 +772,7 @@ export class WineDetailDialog extends LitElement {
   }
 
   private _dismissAiFallback() {
-    this._showAiFallbackConfirm = false;
+    this._aiFallbackReason = null;
   }
 
   private async _updatePhoto(image_url: string) {
@@ -1179,10 +1183,10 @@ export class WineDetailDialog extends LitElement {
                     ? html`<div class="detail-item"><span class="detail-label">Grape</span><span class="detail-value">${wine.grape_variety}</span></div>`
                     : nothing}
                   ${wine.price
-                    ? html`<div class="detail-item"><span class="detail-label">${this.mode === "winelist" ? "Price" : "Purchase Price"}</span><span class="detail-value">$${wine.price.toFixed(2)}</span></div>`
+                    ? html`<div class="detail-item"><span class="detail-label">${this.mode === "winelist" ? "Price" : "Purchase Price"}</span><span class="detail-value">${this.currency} ${wine.price.toFixed(2)}</span></div>`
                     : nothing}
                   ${wine.retail_price
-                    ? html`<div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">$${wine.retail_price.toFixed(2)}</span></div>`
+                    ? html`<div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">${wine.retail_price_currency || this.currency} ${wine.retail_price.toFixed(2)}</span></div>`
                     : nothing}
                   ${wine.purchase_date && this.mode === "cellar"
                     ? html`<div class="detail-item"><span class="detail-label">Purchased</span><span class="detail-value">${wine.purchase_date}</span></div>`
@@ -1342,11 +1346,13 @@ export class WineDetailDialog extends LitElement {
               </div>
             </div>
           ` : nothing}
-          ${this._showAiFallbackConfirm ? html`
+          ${this._aiFallbackReason ? html`
             <div style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px">
               <div style="background:var(--wc-bg);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center" @click=${(e: Event) => e.stopPropagation()}>
-                <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">No Vivino Match</h3>
-                <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">Vivino couldn't find a confident match for this wine. Try AI instead?</p>
+                <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">${this._aiFallbackReason === "no_match" ? "No Vivino Match" : "No Price Found"}</h3>
+                <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">${this._aiFallbackReason === "no_match"
+                  ? "Vivino couldn't find a confident match for this wine. Try AI instead?"
+                  : "Vivino has no price for this wine in the selected currency. Estimate it with AI?"}</p>
                 <div style="display:flex;flex-direction:column;gap:8px">
                   <button class="btn btn-primary" style="background:#1565c0" @click=${() => this._confirmAiFallback(false)}>Use AI Once</button>
                   <button

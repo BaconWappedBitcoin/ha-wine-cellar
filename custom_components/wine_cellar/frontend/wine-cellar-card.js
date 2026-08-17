@@ -2159,9 +2159,10 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._pendingVivinoImage = null;
         this._showPhotoCamera = false;
         this._photoBusy = false;
-        this._showAiFallbackConfirm = false;
+        this._aiFallbackReason = null;
         this.hasGemini = false;
         this.aiFallbackAlways = false;
+        this.currency = "USD";
     }
     updated(changedProps) {
         if (changedProps.has("wine") && this.wine) {
@@ -2368,7 +2369,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
                     await this._analyzeWithAI();
                 }
                 else {
-                    this._showAiFallbackConfirm = true;
+                    this._aiFallbackReason = "no_match";
                 }
                 return;
             }
@@ -2381,6 +2382,9 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 if (resp.vivino_image_url) {
                     this._pendingVivinoImage = resp.vivino_image_url;
                 }
+                if (resp.price_needs_ai) {
+                    this._aiFallbackReason = "no_price";
+                }
             }
         }
         catch (err) {
@@ -2389,7 +2393,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._refreshing = false;
     }
     async _confirmAiFallback(remember) {
-        this._showAiFallbackConfirm = false;
+        this._aiFallbackReason = null;
         if (remember) {
             this.dispatchEvent(new CustomEvent("set-ai-fallback-always", {
                 detail: { value: true },
@@ -2400,7 +2404,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
         await this._analyzeWithAI();
     }
     _dismissAiFallback() {
-        this._showAiFallbackConfirm = false;
+        this._aiFallbackReason = null;
     }
     async _updatePhoto(image_url) {
         if (!this.wine || !this.hass)
@@ -2807,10 +2811,10 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 ? b `<div class="detail-item"><span class="detail-label">Grape</span><span class="detail-value">${wine.grape_variety}</span></div>`
                 : A}
                   ${wine.price
-                ? b `<div class="detail-item"><span class="detail-label">${this.mode === "winelist" ? "Price" : "Purchase Price"}</span><span class="detail-value">$${wine.price.toFixed(2)}</span></div>`
+                ? b `<div class="detail-item"><span class="detail-label">${this.mode === "winelist" ? "Price" : "Purchase Price"}</span><span class="detail-value">${this.currency} ${wine.price.toFixed(2)}</span></div>`
                 : A}
                   ${wine.retail_price
-                ? b `<div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">$${wine.retail_price.toFixed(2)}</span></div>`
+                ? b `<div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">${wine.retail_price_currency || this.currency} ${wine.retail_price.toFixed(2)}</span></div>`
                 : A}
                   ${wine.purchase_date && this.mode === "cellar"
                 ? b `<div class="detail-item"><span class="detail-label">Purchased</span><span class="detail-value">${wine.purchase_date}</span></div>`
@@ -2969,11 +2973,13 @@ let WineDetailDialog = class WineDetailDialog extends i {
               </div>
             </div>
           ` : A}
-          ${this._showAiFallbackConfirm ? b `
+          ${this._aiFallbackReason ? b `
             <div style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px">
               <div style="background:var(--wc-bg);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center" @click=${(e) => e.stopPropagation()}>
-                <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">No Vivino Match</h3>
-                <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">Vivino couldn't find a confident match for this wine. Try AI instead?</p>
+                <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">${this._aiFallbackReason === "no_match" ? "No Vivino Match" : "No Price Found"}</h3>
+                <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">${this._aiFallbackReason === "no_match"
+            ? "Vivino couldn't find a confident match for this wine. Try AI instead?"
+            : "Vivino has no price for this wine in the selected currency. Estimate it with AI?"}</p>
                 <div style="display:flex;flex-direction:column;gap:8px">
                   <button class="btn btn-primary" style="background:#1565c0" @click=${() => this._confirmAiFallback(false)}>Use AI Once</button>
                   <button
@@ -3537,13 +3543,16 @@ __decorate([
 ], WineDetailDialog.prototype, "_photoBusy", void 0);
 __decorate([
     r()
-], WineDetailDialog.prototype, "_showAiFallbackConfirm", void 0);
+], WineDetailDialog.prototype, "_aiFallbackReason", void 0);
 __decorate([
     n({ type: Boolean })
 ], WineDetailDialog.prototype, "hasGemini", void 0);
 __decorate([
     n({ type: Boolean })
 ], WineDetailDialog.prototype, "aiFallbackAlways", void 0);
+__decorate([
+    n({ type: String })
+], WineDetailDialog.prototype, "currency", void 0);
 WineDetailDialog = __decorate([
     t("wine-detail-dialog")
 ], WineDetailDialog);
@@ -7106,6 +7115,7 @@ let InventoryDialog = class InventoryDialog extends i {
         this.wines = [];
         this.cabinets = [];
         this.hasGemini = false;
+        this.currency = "USD";
         this._searchQuery = "";
         this._typeFilter = "all";
         this._sortField = "name";
@@ -7284,7 +7294,7 @@ let InventoryDialog = class InventoryDialog extends i {
               </div>
             </div>
             <div class="inv-right">
-              ${item.price ? b `<div class="inv-price">$${item.price.toFixed(0)}</div>` : A}
+              ${item.price ? b `<div class="inv-price">${this.currency} ${item.price.toFixed(0)}</div>` : A}
               <div class="inv-location">${this._formatDate(item.removed_at)}</div>
             </div>
           </div>
@@ -7649,6 +7659,10 @@ let InventoryDialog = class InventoryDialog extends i {
         const typeColor = WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red;
         const location = getWineLocation(wine, this.cabinets).text;
         const displayPrice = wine.retail_price || wine.price;
+        // A retail_price keeps the currency it was actually captured in — show
+        // that instead of the globally selected one, or a stale price ends up
+        // mislabeled as if it were in the new currency.
+        const displayCurrency = wine.retail_price ? (wine.retail_price_currency || this.currency) : this.currency;
         return b `
       <div class="inv-item" @click=${() => this._showWineDetail(wine)}>
         ${wine.image_url
@@ -7681,7 +7695,7 @@ let InventoryDialog = class InventoryDialog extends i {
           </div>
         </div>
         <div class="inv-right">
-          ${displayPrice ? b `<div class="inv-price">$${displayPrice.toFixed(0)}</div>` : A}
+          ${displayPrice ? b `<div class="inv-price">${displayCurrency} ${displayPrice.toFixed(0)}</div>` : A}
           <div class="inv-location">${location}</div>
         </div>
       </div>
@@ -7742,7 +7756,7 @@ let InventoryDialog = class InventoryDialog extends i {
             ? b `
                   <div class="stat">
                     <span class="stat-value"
-                      >$${allStats.totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span
+                      >${this.currency} ${allStats.totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span
                     >
                     est. value
                   </div>
@@ -8446,6 +8460,9 @@ __decorate([
     n({ type: Boolean })
 ], InventoryDialog.prototype, "hasGemini", void 0);
 __decorate([
+    n({ type: String })
+], InventoryDialog.prototype, "currency", void 0);
+__decorate([
     r()
 ], InventoryDialog.prototype, "_searchQuery", void 0);
 __decorate([
@@ -8535,6 +8552,8 @@ let WineCellarCard = class WineCellarCard extends i {
         this._hasGemini = false;
         this._metadataLanguage = "en";
         this._supportedLanguages = ["en", "fr", "de"];
+        this._metadataCurrency = "USD";
+        this._supportedCurrencies = ["USD", "EUR", "GBP", "CHF"];
         this._aiFallbackAlways = false;
         this._showAiInfoDialog = false;
         this._showWineList = false;
@@ -8609,6 +8628,8 @@ let WineCellarCard = class WineCellarCard extends i {
             this._hasGemini = capResult?.has_gemini || false;
             this._metadataLanguage = capResult?.metadata_language || "en";
             this._supportedLanguages = capResult?.supported_languages || ["en", "fr", "de"];
+            this._metadataCurrency = capResult?.metadata_currency || "USD";
+            this._supportedCurrencies = capResult?.supported_currencies || ["USD", "EUR", "GBP", "CHF"];
             this._aiFallbackAlways = capResult?.ai_fallback_always || false;
             this._buyList = buyListResult?.buy_list || [];
             // Refresh selected wine if detail dialog is open
@@ -9455,6 +9476,22 @@ let WineCellarCard = class WineCellarCard extends i {
             this._showToast("Failed to change language");
         }
     }
+    async _setMetadataCurrency(currency) {
+        if (currency === this._metadataCurrency)
+            return;
+        const previous = this._metadataCurrency;
+        this._metadataCurrency = currency;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/update_settings",
+                updates: { metadata_currency: currency },
+            });
+        }
+        catch (err) {
+            this._metadataCurrency = previous;
+            this._showToast("Failed to change currency");
+        }
+    }
     async _setAiFallbackAlways(value) {
         if (value === this._aiFallbackAlways)
             return;
@@ -9682,6 +9719,15 @@ let WineCellarCard = class WineCellarCard extends i {
               @click=${() => (this._showAiInfoDialog = true)}
             >?</button>
           </div>
+          <div style="display:flex;align-items:center;gap:4px">
+            <span style="color:var(--wc-text-secondary)">Currency:</span>
+            ${this._supportedCurrencies.map((cur) => b `
+              <button
+                style="padding:2px 8px;border-radius:10px;border:1px solid var(--wc-border);cursor:pointer;background:${this._metadataCurrency === cur ? "var(--wc-primary-text)" : "transparent"};color:${this._metadataCurrency === cur ? "#fff" : "var(--wc-text-secondary)"}"
+                @click=${() => this._setMetadataCurrency(cur)}
+              >${cur}</button>
+            `)}
+          </div>
         </div>
 
         <!-- Copy mode banner -->
@@ -9733,10 +9779,10 @@ let WineCellarCard = class WineCellarCard extends i {
                 ${this._stats.total_value
                 ? b `
                       <div class="stat">
-                        <span class="stat-value">$${this._stats.total_value.toLocaleString()}</span>
+                        <span class="stat-value">${this._metadataCurrency} ${this._stats.total_value.toLocaleString()}</span>
                         value
                         ${this._stats.total_cost
-                    ? b `<span style="font-size:0.75em;color:${this._stats.total_value - this._stats.total_cost >= 0 ? '#2e7d32' : '#c62828'}">${this._stats.total_value - this._stats.total_cost >= 0 ? '+' : ''}$${(this._stats.total_value - this._stats.total_cost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>`
+                    ? b `<span style="font-size:0.75em;color:${this._stats.total_value - this._stats.total_cost >= 0 ? '#2e7d32' : '#c62828'}">${this._stats.total_value - this._stats.total_cost >= 0 ? '+' : ''}${this._metadataCurrency} ${(this._stats.total_value - this._stats.total_cost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>`
                     : A}
                       </div>
                     `
@@ -9901,7 +9947,7 @@ let WineCellarCard = class WineCellarCard extends i {
                             <div class="bl-meta">
                               ${item.winery}${item.vintage ? ` · ${item.vintage}` : ""}
                               ${item.rating ? ` · ★${item.rating.toFixed(1)}` : ""}
-                              ${item.retail_price ? ` · $${item.retail_price}` : ""}
+                              ${item.retail_price ? ` · ${this._metadataCurrency} ${item.retail_price}` : ""}
                             </div>
                           </div>
                           <div class="bl-actions">
@@ -10120,6 +10166,7 @@ let WineCellarCard = class WineCellarCard extends i {
           </div>
         ` : A}
 
+
         <!-- Wine Detail Dialog -->
         <wine-detail-dialog
           .wine=${this._selectedWine}
@@ -10128,6 +10175,7 @@ let WineCellarCard = class WineCellarCard extends i {
           .open=${this._showDetail}
           .hasGemini=${this._hasGemini}
           .aiFallbackAlways=${this._aiFallbackAlways}
+          .currency=${this._metadataCurrency}
           .mode=${this._detailMode}
           @close=${() => (this._showDetail = false)}
           @remove-wine=${this._onRemoveWine}
@@ -10186,6 +10234,7 @@ let WineCellarCard = class WineCellarCard extends i {
           .wines=${this._wines}
           .cabinets=${this._cabinets}
           .hasGemini=${this._hasGemini}
+          .currency=${this._metadataCurrency}
           @close=${() => (this._showInventory = false)}
           @wine-updated=${() => this._loadData()}
           @locate-wine=${(e) => {
@@ -10258,7 +10307,7 @@ let WineCellarCard = class WineCellarCard extends i {
                                   <div class="depth-slot-meta">
                                     ${wine.vintage || "NV"}
                                     ${wine.rating ? b ` · ★${wine.rating}` : A}
-                                    ${wine.price ? b ` · $${wine.price}` : A}
+                                    ${wine.price ? b ` · ${this._metadataCurrency} ${wine.price}` : A}
                                   </div>
                                 </div>
                               </div>
@@ -10335,7 +10384,7 @@ let WineCellarCard = class WineCellarCard extends i {
                                         <div class="depth-slot-meta">
                                           ${wine.vintage || "NV"}
                                           ${wine.rating ? b ` · ★${wine.rating}` : A}
-                                          ${wine.price ? b ` · $${wine.price}` : A}
+                                          ${wine.price ? b ` · ${this._metadataCurrency} ${wine.price}` : A}
                                         </div>
                                       </div>
                                     </div>
@@ -10407,7 +10456,7 @@ let WineCellarCard = class WineCellarCard extends i {
                                               <div class="depth-slot-meta">
                                                 ${wine.vintage || "NV"}
                                                 ${wine.rating ? b ` · ★${wine.rating}` : A}
-                                                ${wine.price ? b ` · $${wine.price}` : A}
+                                                ${wine.price ? b ` · ${this._metadataCurrency} ${wine.price}` : A}
                                               </div>
                                             </div>
                                           </div>
@@ -10900,6 +10949,12 @@ __decorate([
 __decorate([
     r()
 ], WineCellarCard.prototype, "_supportedLanguages", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_metadataCurrency", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_supportedCurrencies", void 0);
 __decorate([
     r()
 ], WineCellarCard.prototype, "_aiFallbackAlways", void 0);

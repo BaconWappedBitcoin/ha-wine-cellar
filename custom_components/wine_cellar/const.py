@@ -77,6 +77,10 @@ CONF_METADATA_LANGUAGE = "metadata_language"
 DEFAULT_METADATA_LANGUAGE = "en"
 SUPPORTED_METADATA_LANGUAGES = ["en", "fr", "de"]
 
+CONF_METADATA_CURRENCY = "metadata_currency"
+DEFAULT_METADATA_CURRENCY = "USD"
+SUPPORTED_METADATA_CURRENCIES = ["USD", "EUR", "GBP", "CHF"]
+
 # When Vivino finds no confident match, offer AI as a fallback instead of
 # applying automatically. "always" skips asking and just uses AI every time.
 CONF_AI_FALLBACK_ALWAYS = "ai_fallback_always"
@@ -84,4 +88,4 @@ CONF_AI_FALLBACK_ALWAYS = "ai_fallback_always"
 ATTR_TOTAL_BOTTLES = "total_bottles"
 ATTR_TOTAL_CAPACITY = "total_capacity"
 
-FRONTEND_VERSION = "20260817g"
+FRONTEND_VERSION = "20260817h"

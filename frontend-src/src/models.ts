@@ -21,6 +21,7 @@ export interface Wine {
   back_image_url: string;
   price: number | null;
   retail_price: number | null;
+  retail_price_currency: string | null;
   purchase_date: string;
   drink_by: string;
   notes: string;
@@ -40,6 +41,7 @@ export interface Wine {
   ai_ratings: Record<string, number> | null;
   vivino_updated_at: string | null;
   ai_updated_at: string | null;
+  vivino_id: number | null;
 }
 
 export type StorageRowType = "bulk" | "box";
