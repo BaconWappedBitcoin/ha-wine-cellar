@@ -163,6 +163,21 @@ const sharedStyles = i$3 `
     background: var(--wc-hover);
   }
 
+  /* Sits right after .manage-racks-btn with the tab-bar's normal gap — no
+     margin-left: auto of its own, or it would claim the remaining space and
+     drift away from it instead of staying grouped together. */
+  .settings-tab-btn {
+    border-color: transparent;
+    color: var(--wc-primary-text);
+    font-weight: 500;
+    font-size: 0.8em;
+    padding: 6px 12px;
+  }
+
+  .settings-tab-btn:hover {
+    background: var(--wc-hover);
+  }
+
   .btn {
     display: inline-flex;
     align-items: center;
@@ -234,6 +249,13 @@ const sharedStyles = i$3 `
     max-height: 85vh;
     overflow-y: auto;
     animation: slideUp 0.3s ease;
+    /* user-select is inherited, so it crosses the Shadow DOM boundary from
+       whatever wraps this card (e.g. Home Assistant's dashboard drag-reorder
+       chrome) — re-declare it explicitly so dialog text stays selectable
+       regardless of what the host page sets. */
+    user-select: text;
+    -webkit-user-select: text;
+    -webkit-touch-callout: default;
   }
 
   .dialog-header {
@@ -1683,8 +1705,11 @@ CabinetGrid = __decorate([
     t("cabinet-grid")
 ], CabinetGrid);
 
-/** Resize a base64 JPEG (no data: prefix) to a small thumbnail data URL for storage. */
-function resizeImageForStorage(base64, maxDim = 200, quality = 0.6) {
+/** Resize a base64 JPEG (no data: prefix) to a thumbnail data URL for storage.
+ *  640px/0.78 keeps back-label text (small print, appellation info) legible
+ *  while staying well within reason for a JSON-embedded data URI — roughly
+ *  10x the pixels of the old 200px/0.6 default, still only tens of KB. */
+function resizeImageForStorage(base64, maxDim = 640, quality = 0.78) {
     return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
@@ -2159,6 +2184,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._pendingVivinoImage = null;
         this._showPhotoCamera = false;
         this._photoBusy = false;
+        this._photoSide = "front";
+        this._photoSwipeStartX = null;
         this._aiFallbackReason = null;
         this.hasGemini = false;
         this.aiFallbackAlways = false;
@@ -2172,6 +2199,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 : { aroma: "", taste: "", finish: "", overall: "" };
             this._editing = false;
             this._editingFields = false;
+            this._photoSide = "front";
         }
     }
     _close() {
@@ -2406,25 +2434,41 @@ let WineDetailDialog = class WineDetailDialog extends i {
     _dismissAiFallback() {
         this._aiFallbackReason = null;
     }
-    async _updatePhoto(image_url) {
+    async _updatePhoto(image_url, field = "image_url") {
         if (!this.wine || !this.hass)
             return;
         this._photoBusy = true;
         try {
-            const updates = { image_url };
+            const updates = { [field]: image_url };
             if (this.mode === "buylist") {
                 await this.hass.callWS({ type: "wine_cellar/update_buy_list_item", item_id: this.wine.id, updates });
             }
             else {
                 await this.hass.callWS({ type: "wine_cellar/update_wine", wine_id: this.wine.id, updates });
             }
-            this.wine = { ...this.wine, image_url };
+            this.wine = { ...this.wine, [field]: image_url };
             this.dispatchEvent(new CustomEvent(this.mode === "buylist" ? "buy-list-updated" : "wine-updated", { bubbles: true, composed: true }));
         }
         catch (err) {
             console.error("Failed to update photo", err);
         }
         this._photoBusy = false;
+    }
+    _onImageSwipeStart(e) {
+        this._photoSwipeStartX = e.clientX;
+    }
+    _onImageSwipeEnd(e) {
+        if (this._photoSwipeStartX === null)
+            return;
+        const dx = e.clientX - this._photoSwipeStartX;
+        this._photoSwipeStartX = null;
+        const THRESHOLD = 30;
+        if (dx <= -THRESHOLD) {
+            this._photoSide = "back";
+        }
+        else if (dx >= THRESHOLD) {
+            this._photoSide = "front";
+        }
     }
     _applyVivinoPhoto() {
         if (!this._pendingVivinoImage)
@@ -2437,17 +2481,18 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._pendingVivinoImage = null;
     }
     _onDeletePhoto() {
-        if (!this.wine?.image_url)
+        const field = this._photoSide === "back" ? "back_image_url" : "image_url";
+        if (!this.wine?.[field])
             return;
-        if (!window.confirm("Delete this bottle's photo?"))
+        if (!window.confirm(this._photoSide === "back" ? "Delete this bottle's back label photo?" : "Delete this bottle's photo?"))
             return;
-        this._updatePhoto("");
+        this._updatePhoto("", field);
     }
     async _onPhotoReplaced(e) {
         this._showPhotoCamera = false;
         const thumbUrl = await resizeImageForStorage(e.detail.image);
         if (thumbUrl) {
-            this._updatePhoto(thumbUrl);
+            this._updatePhoto(thumbUrl, this._photoSide === "back" ? "back_image_url" : "image_url");
         }
     }
     async _analyzeWithAI() {
@@ -2612,6 +2657,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
         const wine = this.wine;
         const typeColor = WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red;
         const typeLabel = WINE_TYPE_LABELS[wine.type] || wine.type;
+        const showingBack = this._photoSide === "back";
+        const currentImageUrl = showingBack ? wine.back_image_url : wine.image_url;
         return b `
       <div class="dialog-overlay" @click=${this._close}>
         <div class="dialog" style="position:relative" @click=${(e) => e.stopPropagation()}>
@@ -2623,27 +2670,44 @@ let WineDetailDialog = class WineDetailDialog extends i {
           </div>
           <div class="wine-header">
             <div class="wine-image-col">
-              <div class="wine-image-wrap">
-                ${wine.image_url
-            ? b `<img class="wine-image" src="${wine.image_url}" alt="${wine.name}" />`
+              <div
+                class="wine-image-wrap"
+                @pointerdown=${this._onImageSwipeStart}
+                @pointerup=${this._onImageSwipeEnd}
+              >
+                ${currentImageUrl
+            ? b `<img class="wine-image" src="${currentImageUrl}" alt="${wine.name}${showingBack ? " (back label)" : ""}" />`
             : b `
                       <div class="wine-image-placeholder" style="background: ${typeColor}">
                         🍷
                       </div>
                     `}
+                ${showingBack ? b `<div class="photo-side-badge">Back label</div>` : A}
+                <div class="photo-dots">
+                  <span
+                    class="photo-dot ${this._photoSide === "front" ? "active" : ""}"
+                    title="Front label"
+                    @click=${() => (this._photoSide = "front")}
+                  ></span>
+                  <span
+                    class="photo-dot ${showingBack ? "active" : ""}"
+                    title="Back label"
+                    @click=${() => (this._photoSide = "back")}
+                  ></span>
+                </div>
                 ${this.mode !== "winelist"
             ? b `
                       <div class="photo-actions">
                         <button
                           class="photo-action-btn"
-                          title="Replace photo"
+                          title="Replace ${showingBack ? "back label " : ""}photo"
                           ?disabled=${this._photoBusy}
                           @click=${() => (this._showPhotoCamera = true)}
                         >📷</button>
-                        ${wine.image_url
+                        ${currentImageUrl
                 ? b `<button
                               class="photo-action-btn"
-                              title="Delete photo"
+                              title="Delete ${showingBack ? "back label " : ""}photo"
                               ?disabled=${this._photoBusy}
                               @click=${this._onDeletePhoto}
                             >🗑️</button>`
@@ -2733,7 +2797,17 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 ${wine.vivino_updated_at || wine.ai_updated_at
                 ? b `
                       <div style="text-align:center;font-size:0.68em;color:var(--wc-text-secondary);margin-top:-6px;padding-bottom:10px">
-                        ${wine.vivino_updated_at ? b `Vivino: ${this._formatUpdatedAt(wine.vivino_updated_at)}` : A}
+                        ${wine.vivino_updated_at
+                    ? b `${wine.vivino_id
+                        ? b `<a
+                                  href="https://www.vivino.com/w/${wine.vivino_id}"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style="color:inherit;text-decoration:underline"
+                                  @click=${(e) => e.stopPropagation()}
+                                >Vivino</a>`
+                        : b `Vivino`}: ${this._formatUpdatedAt(wine.vivino_updated_at)}`
+                    : A}
                         ${wine.vivino_updated_at && wine.ai_updated_at ? " · " : A}
                         ${wine.ai_updated_at ? b `AI: ${this._formatUpdatedAt(wine.ai_updated_at)}` : A}
                       </div>
@@ -3038,8 +3112,8 @@ WineDetailDialog.styles = [
       }
 
       .wine-image {
-        width: 90px;
-        height: 130px;
+        width: 135px;
+        height: 195px;
         border-radius: 8px;
         object-fit: cover;
         background: #f0f0f0;
@@ -3050,6 +3124,41 @@ WineDetailDialog.styles = [
       .wine-image-wrap {
         position: relative;
         flex-shrink: 0;
+        touch-action: pan-y;
+      }
+
+      .photo-dots {
+        position: absolute;
+        top: 6px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 4px;
+      }
+
+      .photo-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.5);
+        border: 1px solid rgba(0, 0, 0, 0.25);
+        cursor: pointer;
+      }
+
+      .photo-dot.active {
+        background: #fff;
+      }
+
+      .photo-side-badge {
+        position: absolute;
+        bottom: 6px;
+        left: 6px;
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        font-size: 0.6em;
+        padding: 2px 6px;
+        border-radius: 10px;
+        pointer-events: none;
       }
 
       .photo-actions {
@@ -3089,8 +3198,8 @@ WineDetailDialog.styles = [
       }
 
       .wine-image-placeholder {
-        width: 90px;
-        height: 130px;
+        width: 135px;
+        height: 195px;
         border-radius: 8px;
         display: flex;
         align-items: center;
@@ -3543,6 +3652,9 @@ __decorate([
 ], WineDetailDialog.prototype, "_photoBusy", void 0);
 __decorate([
     r()
+], WineDetailDialog.prototype, "_photoSide", void 0);
+__decorate([
+    r()
 ], WineDetailDialog.prototype, "_aiFallbackReason", void 0);
 __decorate([
     n({ type: Boolean })
@@ -3905,14 +4017,31 @@ let AddWineDialog = class AddWineDialog extends i {
                 this._step = "details";
             }
             else {
-                this._error = "No results found. You can enter details manually.";
                 this._wineData = { ...this._wineData, barcode: this._barcode.trim() };
+                this._onBarcodeLookupFailed("No match for this barcode.");
             }
         }
         catch (err) {
-            this._error = "Lookup failed. You can enter details manually.";
+            this._wineData = { ...this._wineData, barcode: this._barcode.trim() };
+            this._onBarcodeLookupFailed("Barcode lookup failed.");
         }
         this._loading = false;
+    }
+    _onBarcodeLookupFailed(reason) {
+        // Not every bottle has a scannable/known barcode — fall back to AI
+        // label recognition automatically instead of dead-ending on "enter
+        // details manually" when it's available.
+        if (this._hasGemini) {
+            this._scanMode = "label";
+            this._labelLoading = false;
+            this._showBackPrompt = false;
+            this._captureStage = "front";
+            this._frontImageRaw = "";
+            this._error = `${reason} Take a photo of the label instead.`;
+        }
+        else {
+            this._error = `${reason} You can enter details manually.`;
+        }
     }
     async _searchWine() {
         const input = this.shadowRoot?.querySelector(".search-input");
@@ -8191,8 +8320,8 @@ InventoryDialog.styles = [
       }
 
       .inv-thumb {
-        width: 32px;
-        height: 44px;
+        width: 48px;
+        height: 66px;
         border-radius: 4px;
         object-fit: cover;
         flex-shrink: 0;
@@ -8526,6 +8655,220 @@ InventoryDialog = __decorate([
     t("inventory-dialog")
 ], InventoryDialog);
 
+let VivinoAiSettingsDialog = class VivinoAiSettingsDialog extends i {
+    constructor() {
+        super(...arguments);
+        this.open = false;
+        this.aiFallbackAlways = false;
+        this.metadataLanguage = "en";
+        this.supportedLanguages = ["en", "fr", "de"];
+        this.metadataCurrency = "USD";
+        this.supportedCurrencies = ["USD", "EUR", "GBP", "CHF"];
+    }
+    _close() {
+        this.dispatchEvent(new CustomEvent("close"));
+    }
+    _setFallback(value) {
+        this.dispatchEvent(new CustomEvent("set-ai-fallback-always", { detail: { value } }));
+    }
+    _setLanguage(lang) {
+        this.dispatchEvent(new CustomEvent("set-metadata-language", { detail: { value: lang } }));
+    }
+    _setCurrency(currency) {
+        this.dispatchEvent(new CustomEvent("set-metadata-currency", { detail: { value: currency } }));
+    }
+    render() {
+        if (!this.open)
+            return A;
+        return b `
+      <div class="dialog-overlay" @click=${this._close}>
+        <div class="dialog" style="max-width:420px;padding:20px 24px" @click=${(e) => e.stopPropagation()}>
+          <div class="dialog-top-bar" style="justify-content:space-between;padding:0 0 8px">
+            <span style="font-weight:600;color:var(--wc-text)">Vivino / AI Settings</span>
+            <button class="icon-btn close-btn" title="Close" @click=${this._close}>✕</button>
+          </div>
+
+          <div class="settings-row">
+            <label class="fallback-label">
+              <input
+                type="checkbox"
+                .checked=${this.aiFallbackAlways}
+                @change=${(e) => this._setFallback(e.target.checked)}
+              />
+              Always try AI when Vivino finds no match
+            </label>
+          </div>
+
+          <div class="settings-row">
+            <span class="settings-label">Vivino/AI language</span>
+            <div class="pill-group">
+              ${this.supportedLanguages.map((lang) => b `
+                <button
+                  class="pill ${this.metadataLanguage === lang ? "active" : ""}"
+                  @click=${() => this._setLanguage(lang)}
+                >${lang.toUpperCase()}</button>
+              `)}
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <span class="settings-label">Currency</span>
+            <div class="pill-group">
+              ${this.supportedCurrencies.map((cur) => b `
+                <button
+                  class="pill ${this.metadataCurrency === cur ? "active" : ""}"
+                  @click=${() => this._setCurrency(cur)}
+                >${cur}</button>
+              `)}
+            </div>
+          </div>
+
+          <div class="info-section">
+            <h3 class="info-title">🍇 Vivino vs 🤖 AI — What Each Provides</h3>
+
+            <div class="info-block">
+              <div class="info-block-title">🍇 Vivino provides:</div>
+              <ul>
+                <li>Bottle photo</li>
+                <li>Community rating (★) and number of ratings</li>
+                <li>Market price</li>
+                <li>Food pairings</li>
+                <li>Alcohol %</li>
+                <li>Grape variety, region, country, type (when found)</li>
+              </ul>
+            </div>
+
+            <div class="info-block">
+              <div class="info-block-title">🤖 AI provides:</div>
+              <ul>
+                <li>Estimated price (only fills in when Vivino has none)</li>
+                <li>Tasting description</li>
+                <li>Critic scores (Wine Spectator, Robert Parker, Jeb Dunnuck, Antonio Galloni)</li>
+                <li>Drink Now / Hold / Past Peak + drinking window</li>
+                <li>Grape variety, region, country, type — only when scanning a label photo, not on a refresh</li>
+              </ul>
+            </div>
+
+            <p class="info-note">
+              AI never provides a photo, a Vivino community rating, or food pairings — when Vivino can't find a confident match, AI fills in what it can (mainly price, description, and critic scores), not everything Vivino would have.
+            </p>
+          </div>
+        </div>
+      </div>
+    `;
+    }
+};
+VivinoAiSettingsDialog.styles = [
+    sharedStyles,
+    i$3 `
+      .settings-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--wc-border);
+        font-size: 0.85em;
+      }
+
+      .settings-row:last-of-type {
+        border-bottom: none;
+      }
+
+      .settings-label {
+        color: var(--wc-text);
+      }
+
+      .pill-group {
+        display: flex;
+        gap: 4px;
+      }
+
+      .pill {
+        padding: 3px 10px;
+        border-radius: 12px;
+        border: 1px solid var(--wc-border);
+        cursor: pointer;
+        background: transparent;
+        color: var(--wc-text-secondary);
+        font-size: 0.9em;
+      }
+
+      .pill.active {
+        background: var(--wc-primary-text);
+        color: #fff;
+        border-color: var(--wc-primary-text);
+      }
+
+      .fallback-label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        color: var(--wc-text);
+      }
+
+      .info-section {
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--wc-border);
+      }
+
+      .info-title {
+        margin: 0 0 12px;
+        font-size: 0.95em;
+        color: var(--wc-text);
+      }
+
+      .info-block {
+        margin-bottom: 16px;
+      }
+
+      .info-block-title {
+        font-weight: 600;
+        font-size: 0.85em;
+        color: var(--wc-text);
+        margin-bottom: 6px;
+      }
+
+      .info-block ul {
+        margin: 0;
+        padding-left: 20px;
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+        line-height: 1.7;
+      }
+
+      .info-note {
+        margin: 0;
+        font-size: 0.78em;
+        color: var(--wc-text-secondary);
+        font-style: italic;
+      }
+    `,
+];
+__decorate([
+    n({ type: Boolean })
+], VivinoAiSettingsDialog.prototype, "open", void 0);
+__decorate([
+    n({ type: Boolean })
+], VivinoAiSettingsDialog.prototype, "aiFallbackAlways", void 0);
+__decorate([
+    n({ type: String })
+], VivinoAiSettingsDialog.prototype, "metadataLanguage", void 0);
+__decorate([
+    n({ attribute: false })
+], VivinoAiSettingsDialog.prototype, "supportedLanguages", void 0);
+__decorate([
+    n({ type: String })
+], VivinoAiSettingsDialog.prototype, "metadataCurrency", void 0);
+__decorate([
+    n({ attribute: false })
+], VivinoAiSettingsDialog.prototype, "supportedCurrencies", void 0);
+VivinoAiSettingsDialog = __decorate([
+    t("vivino-ai-settings-dialog")
+], VivinoAiSettingsDialog);
+
 let WineCellarCard = class WineCellarCard extends i {
     constructor() {
         super(...arguments);
@@ -8547,6 +8890,7 @@ let WineCellarCard = class WineCellarCard extends i {
         this._analyzing = false;
         this._batchVivino = false;
         this._showBatchVivinoConfirm = false;
+        this._showBatchAiConfirm = false;
         this._batchAiFallback = false;
         this._toast = "";
         this._hasGemini = false;
@@ -8555,7 +8899,7 @@ let WineCellarCard = class WineCellarCard extends i {
         this._metadataCurrency = "USD";
         this._supportedCurrencies = ["USD", "EUR", "GBP", "CHF"];
         this._aiFallbackAlways = false;
-        this._showAiInfoDialog = false;
+        this._showVivinoAiSettings = false;
         this._showWineList = false;
         this._showInventory = false;
         this._buyList = [];
@@ -9436,7 +9780,15 @@ let WineCellarCard = class WineCellarCard extends i {
         }
     }
     // --- Batch AI Analysis ---
-    async _batchAnalyzeWines() {
+    _batchAnalyzeWines() {
+        if (this._wines.length > 5) {
+            this._showBatchAiConfirm = true;
+            return;
+        }
+        this._runBatchAnalyzeWines();
+    }
+    async _runBatchAnalyzeWines() {
+        this._showBatchAiConfirm = false;
         this._analyzing = true;
         this._showToast("Running full AI analysis on all wines...");
         try {
@@ -9695,41 +10047,6 @@ let WineCellarCard = class WineCellarCard extends i {
           </div>
         </div>
 
-        <!-- Vivino/AI metadata language + AI fallback preference -->
-        <div style="display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:4px 12px;padding:0 16px 10px;font-size:0.72em">
-          <label style="display:flex;align-items:center;gap:4px;color:var(--wc-text-secondary);cursor:pointer">
-            <input
-              type="checkbox"
-              .checked=${this._aiFallbackAlways}
-              @change=${(e) => this._setAiFallbackAlways(e.target.checked)}
-            />
-            Always try AI when Vivino finds no match
-          </label>
-          <div style="display:flex;align-items:center;gap:4px">
-            <span style="color:var(--wc-text-secondary)">Vivino/AI language:</span>
-            ${this._supportedLanguages.map((lang) => b `
-              <button
-                style="padding:2px 8px;border-radius:10px;border:1px solid var(--wc-border);cursor:pointer;background:${this._metadataLanguage === lang ? "var(--wc-primary-text)" : "transparent"};color:${this._metadataLanguage === lang ? "#fff" : "var(--wc-text-secondary)"}"
-                @click=${() => this._setMetadataLanguage(lang)}
-              >${lang.toUpperCase()}</button>
-            `)}
-            <button
-              title="What does Vivino provide vs. AI?"
-              style="width:18px;height:18px;padding:0;border-radius:50%;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text-secondary);cursor:pointer;font-size:0.85em;line-height:1;display:flex;align-items:center;justify-content:center"
-              @click=${() => (this._showAiInfoDialog = true)}
-            >?</button>
-          </div>
-          <div style="display:flex;align-items:center;gap:4px">
-            <span style="color:var(--wc-text-secondary)">Currency:</span>
-            ${this._supportedCurrencies.map((cur) => b `
-              <button
-                style="padding:2px 8px;border-radius:10px;border:1px solid var(--wc-border);cursor:pointer;background:${this._metadataCurrency === cur ? "var(--wc-primary-text)" : "transparent"};color:${this._metadataCurrency === cur ? "#fff" : "var(--wc-text-secondary)"}"
-                @click=${() => this._setMetadataCurrency(cur)}
-              >${cur}</button>
-            `)}
-          </div>
-        </div>
-
         <!-- Copy mode banner -->
         ${this._copiedWine
             ? b `
@@ -9831,6 +10148,12 @@ let WineCellarCard = class WineCellarCard extends i {
             @click=${() => (this._showRackSettings = true)}
           >
             Manage Racks
+          </button>
+          <button
+            class="tab settings-tab-btn"
+            @click=${() => (this._showVivinoAiSettings = true)}
+          >
+            ⚙️ Vivino/AI Settings
           </button>
         </div>
 
@@ -10091,46 +10414,6 @@ let WineCellarCard = class WineCellarCard extends i {
             `
             : A}
 
-        <!-- Vivino vs AI info -->
-        ${this._showAiInfoDialog ? b `
-          <div class="dialog-overlay" @click=${() => (this._showAiInfoDialog = false)}>
-            <div class="dialog" style="max-width:420px;padding:24px" @click=${(e) => e.stopPropagation()}>
-              <h3 style="margin:0 0 12px;font-size:1.05em;color:var(--wc-text)">🍇 Vivino vs 🤖 AI — What Each Provides</h3>
-
-              <div style="margin-bottom:16px">
-                <div style="font-weight:600;font-size:0.9em;color:var(--wc-text);margin-bottom:6px">🍇 Vivino provides:</div>
-                <ul style="margin:0;padding-left:20px;font-size:0.85em;color:var(--wc-text-secondary);line-height:1.7">
-                  <li>Bottle photo</li>
-                  <li>Community rating (★) and number of ratings</li>
-                  <li>Market price</li>
-                  <li>Food pairings</li>
-                  <li>Alcohol %</li>
-                  <li>Grape variety, region, country, type (when found)</li>
-                </ul>
-              </div>
-
-              <div style="margin-bottom:16px">
-                <div style="font-weight:600;font-size:0.9em;color:var(--wc-text);margin-bottom:6px">🤖 AI provides:</div>
-                <ul style="margin:0;padding-left:20px;font-size:0.85em;color:var(--wc-text-secondary);line-height:1.7">
-                  <li>Estimated price (only fills in when Vivino has none)</li>
-                  <li>Tasting description</li>
-                  <li>Critic scores (Wine Spectator, Robert Parker, Jeb Dunnuck, Antonio Galloni)</li>
-                  <li>Drink Now / Hold / Past Peak + drinking window</li>
-                  <li>Grape variety, region, country, type — only when scanning a label photo, not on a refresh</li>
-                </ul>
-              </div>
-
-              <p style="margin:0 0 16px;font-size:0.8em;color:var(--wc-text-secondary);font-style:italic">
-                AI never provides a photo, a Vivino community rating, or food pairings — when Vivino can't find a confident match, AI fills in what it can (mainly price, description, and critic scores), not everything Vivino would have.
-              </p>
-
-              <div style="text-align:right">
-                <button class="btn btn-primary" @click=${() => (this._showAiInfoDialog = false)}>Got it</button>
-              </div>
-            </div>
-          </div>
-        ` : A}
-
         <!-- Batch Vivino Photo Mode Confirm -->
         ${this._showBatchVivinoConfirm ? b `
           <div class="dialog-overlay" @click=${() => (this._showBatchVivinoConfirm = false)}>
@@ -10166,6 +10449,26 @@ let WineCellarCard = class WineCellarCard extends i {
           </div>
         ` : A}
 
+        <!-- Batch AI Analysis Confirm -->
+        ${this._showBatchAiConfirm ? b `
+          <div class="dialog-overlay" @click=${() => (this._showBatchAiConfirm = false)}>
+            <div class="dialog" style="max-width:340px;padding:24px;text-align:center" @click=${(e) => e.stopPropagation()}>
+              <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">Run AI Batch Scan?</h3>
+              <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">
+                This will run a full AI analysis on all ${this._wines.length} wines, one API call per bottle. It may take a while and use significant AI quota.
+              </p>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <button class="btn btn-primary" style="background:#1565c0" @click=${this._runBatchAnalyzeWines}>
+                  Run on ${this._wines.length} Wines
+                </button>
+                <button
+                  style="margin-top:4px;padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.8em"
+                  @click=${() => (this._showBatchAiConfirm = false)}
+                >Cancel</button>
+              </div>
+            </div>
+          </div>
+        ` : A}
 
         <!-- Wine Detail Dialog -->
         <wine-detail-dialog
@@ -10266,6 +10569,19 @@ let WineCellarCard = class WineCellarCard extends i {
           @close=${() => (this._showRackSettings = false)}
           @racks-updated=${() => this._loadData()}
         ></rack-settings-dialog>
+
+        <vivino-ai-settings-dialog
+          .open=${this._showVivinoAiSettings}
+          .aiFallbackAlways=${this._aiFallbackAlways}
+          .metadataLanguage=${this._metadataLanguage}
+          .supportedLanguages=${this._supportedLanguages}
+          .metadataCurrency=${this._metadataCurrency}
+          .supportedCurrencies=${this._supportedCurrencies}
+          @close=${() => (this._showVivinoAiSettings = false)}
+          @set-ai-fallback-always=${(e) => this._setAiFallbackAlways(e.detail.value)}
+          @set-metadata-language=${(e) => this._setMetadataLanguage(e.detail.value)}
+          @set-metadata-currency=${(e) => this._setMetadataCurrency(e.detail.value)}
+        ></vivino-ai-settings-dialog>
 
         <!-- Depth Side Panel -->
         ${this._depthPanelOpen
@@ -10936,6 +11252,9 @@ __decorate([
 ], WineCellarCard.prototype, "_showBatchVivinoConfirm", void 0);
 __decorate([
     r()
+], WineCellarCard.prototype, "_showBatchAiConfirm", void 0);
+__decorate([
+    r()
 ], WineCellarCard.prototype, "_batchAiFallback", void 0);
 __decorate([
     r()
@@ -10960,7 +11279,7 @@ __decorate([
 ], WineCellarCard.prototype, "_aiFallbackAlways", void 0);
 __decorate([
     r()
-], WineCellarCard.prototype, "_showAiInfoDialog", void 0);
+], WineCellarCard.prototype, "_showVivinoAiSettings", void 0);
 __decorate([
     r()
 ], WineCellarCard.prototype, "_showWineList", void 0);

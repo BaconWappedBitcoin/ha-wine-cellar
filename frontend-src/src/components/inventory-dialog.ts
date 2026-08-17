@@ -219,8 +219,8 @@ export class InventoryDialog extends LitElement {
       }
 
       .inv-thumb {
-        width: 32px;
-        height: 44px;
+        width: 48px;
+        height: 66px;
         border-radius: 4px;
         object-fit: cover;
         flex-shrink: 0;

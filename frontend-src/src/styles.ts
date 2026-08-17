@@ -91,6 +91,21 @@ export const sharedStyles = css`
     background: var(--wc-hover);
   }
 
+  /* Sits right after .manage-racks-btn with the tab-bar's normal gap — no
+     margin-left: auto of its own, or it would claim the remaining space and
+     drift away from it instead of staying grouped together. */
+  .settings-tab-btn {
+    border-color: transparent;
+    color: var(--wc-primary-text);
+    font-weight: 500;
+    font-size: 0.8em;
+    padding: 6px 12px;
+  }
+
+  .settings-tab-btn:hover {
+    background: var(--wc-hover);
+  }
+
   .btn {
     display: inline-flex;
     align-items: center;
@@ -162,6 +177,13 @@ export const sharedStyles = css`
     max-height: 85vh;
     overflow-y: auto;
     animation: slideUp 0.3s ease;
+    /* user-select is inherited, so it crosses the Shadow DOM boundary from
+       whatever wraps this card (e.g. Home Assistant's dashboard drag-reorder
+       chrome) — re-declare it explicitly so dialog text stays selectable
+       regardless of what the host page sets. */
+    user-select: text;
+    -webkit-user-select: text;
+    -webkit-touch-callout: default;
   }
 
   .dialog-header {

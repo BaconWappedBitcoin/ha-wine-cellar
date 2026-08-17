@@ -494,14 +494,31 @@ export class AddWineDialog extends LitElement {
         };
         this._step = "details";
       } else {
-        this._error = "No results found. You can enter details manually.";
         this._wineData = { ...this._wineData, barcode: this._barcode.trim() };
+        this._onBarcodeLookupFailed("No match for this barcode.");
       }
     } catch (err) {
-      this._error = "Lookup failed. You can enter details manually.";
+      this._wineData = { ...this._wineData, barcode: this._barcode.trim() };
+      this._onBarcodeLookupFailed("Barcode lookup failed.");
     }
 
     this._loading = false;
+  }
+
+  private _onBarcodeLookupFailed(reason: string) {
+    // Not every bottle has a scannable/known barcode — fall back to AI
+    // label recognition automatically instead of dead-ending on "enter
+    // details manually" when it's available.
+    if (this._hasGemini) {
+      this._scanMode = "label";
+      this._labelLoading = false;
+      this._showBackPrompt = false;
+      this._captureStage = "front";
+      this._frontImageRaw = "";
+      this._error = `${reason} Take a photo of the label instead.`;
+    } else {
+      this._error = `${reason} You can enter details manually.`;
+    }
   }
 
   private async _searchWine() {

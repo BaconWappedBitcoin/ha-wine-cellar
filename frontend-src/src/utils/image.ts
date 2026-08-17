@@ -1,5 +1,8 @@
-/** Resize a base64 JPEG (no data: prefix) to a small thumbnail data URL for storage. */
-export function resizeImageForStorage(base64: string, maxDim = 200, quality = 0.6): Promise<string> {
+/** Resize a base64 JPEG (no data: prefix) to a thumbnail data URL for storage.
+ *  640px/0.78 keeps back-label text (small print, appellation info) legible
+ *  while staying well within reason for a JSON-embedded data URI — roughly
+ *  10x the pixels of the old 200px/0.6 default, still only tens of KB. */
+export function resizeImageForStorage(base64: string, maxDim = 640, quality = 0.78): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
