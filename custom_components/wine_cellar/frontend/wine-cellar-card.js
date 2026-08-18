@@ -9125,18 +9125,31 @@ let WineCellarCard = class WineCellarCard extends i {
     // --- Zone side panel (boxes, bulk bins) ---
     _onZoneContainerClick(e) {
         const { cabinet, zone, storageRow } = e.detail;
+        const nextDepth = this._wines.filter((w) => w.cabinet_id === cabinet.id && w.zone === zone).length;
+        const hasRoom = nextDepth < (storageRow.capacity || 20);
         // If we have a copied wine, paste it in this zone instead of opening panel
         if (this._copiedWine) {
-            const nextDepth = this._wines.filter((w) => w.cabinet_id === cabinet.id && w.zone === zone).length;
+            if (!hasRoom) {
+                this._showToast(`"${storageRow.name || "Zone"}" is full — cannot paste here.`);
+                return;
+            }
             this._pasteWine(cabinet.id, null, null, nextDepth, zone);
             return;
         }
         // If moving wine, drop it in this zone instead of opening panel
         if (this._movingWine) {
+            if (!hasRoom) {
+                this._showToast(`"${storageRow.name || "Zone"}" is full — cannot move here.`);
+                return;
+            }
             this._executeMoveWine(cabinet.id, null, null, zone);
             return;
         }
         if (this._movingBuyListItem) {
+            if (!hasRoom) {
+                this._showToast(`"${storageRow.name || "Zone"}" is full — cannot move here.`);
+                return;
+            }
             this._executeMoveTocellar(cabinet.id, null, null, zone);
             return;
         }
@@ -9756,7 +9769,11 @@ let WineCellarCard = class WineCellarCard extends i {
                     grape_variety: this._copiedWine.grape_variety,
                     rating: this._copiedWine.rating,
                     image_url: this._copiedWine.image_url,
+                    back_image_url: this._copiedWine.back_image_url,
                     price: this._copiedWine.price,
+                    retail_price: this._copiedWine.retail_price,
+                    retail_price_currency: this._copiedWine.retail_price_currency,
+                    purchase_date: this._copiedWine.purchase_date,
                     drink_by: this._copiedWine.drink_by,
                     notes: this._copiedWine.notes,
                     description: this._copiedWine.description,
@@ -9769,7 +9786,13 @@ let WineCellarCard = class WineCellarCard extends i {
                     depth,
                     zone,
                     user_rating: this._copiedWine.user_rating,
+                    tasting_notes: this._copiedWine.tasting_notes,
                     disposition: this._copiedWine.disposition,
+                    drink_window: this._copiedWine.drink_window,
+                    ai_ratings: this._copiedWine.ai_ratings,
+                    vivino_updated_at: this._copiedWine.vivino_updated_at,
+                    ai_updated_at: this._copiedWine.ai_updated_at,
+                    vivino_id: this._copiedWine.vivino_id,
                 },
             });
             this._showToast("Wine pasted! Tap more empty cells or click ✕ to stop.");
