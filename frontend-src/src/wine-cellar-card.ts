@@ -1219,9 +1219,17 @@ export class WineCellarCard extends LitElement {
       // the drop silently did nothing.
       let targetDepth: number | undefined;
       if (d.targetZone) {
-        targetDepth = this._wines
-          .filter((w) => w.cabinet_id === d.targetCabinetId && w.zone === d.targetZone && w.id !== d.wineId)
-          .reduce((max, w) => Math.max(max, w.depth || 0), -1) + 1;
+        const occupants = this._wines.filter(
+          (w) => w.cabinet_id === d.targetCabinetId && w.zone === d.targetZone && w.id !== d.wineId
+        );
+        const targetCabinet = this._cabinets.find((c) => c.id === d.targetCabinetId);
+        const rowIdx = parseInt(d.targetZone.replace("storage-", ""), 10);
+        const storageRow = targetCabinet?.storage_rows?.find((s) => s.row === rowIdx);
+        if (storageRow && occupants.length >= (storageRow.capacity || 20)) {
+          this._showToast(`"${storageRow.name || "Zone"}" is full — cannot move here.`);
+          return;
+        }
+        targetDepth = occupants.reduce((max, w) => Math.max(max, w.depth || 0), -1) + 1;
       }
 
       // Move dragged wine to target
