@@ -190,11 +190,28 @@ class WineCellarStorage:
                     "added_at": wine.get("added_at", ""),
                     "removed_at": datetime.now(timezone.utc).isoformat(),
                     "reason": reason,
+                    "full_wine": dict(wine),
                 }
                 self._data[CONF_WINE_HISTORY].append(history_entry)
                 wines.pop(i)
                 return True
         return False
+
+    def restore_wine(self, history_id: str) -> dict[str, Any] | None:
+        """Restore a wine from history back into the cellar as unassigned."""
+        history = self._data[CONF_WINE_HISTORY]
+        for i, entry in enumerate(history):
+            if entry["id"] == history_id:
+                wine_data = dict(entry.get("full_wine") or entry)
+                wine_data["cabinet_id"] = ""
+                wine_data["row"] = None
+                wine_data["col"] = None
+                wine_data["zone"] = ""
+                wine_data["depth"] = 0
+                wine = self.add_wine(wine_data)
+                history.pop(i)
+                return wine
+        return None
 
     def update_wine(self, wine_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
         """Update a wine bottle's data."""

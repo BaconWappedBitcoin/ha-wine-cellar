@@ -601,6 +601,18 @@ export class InventoryDialog extends LitElement {
     }
   }
 
+  private async _restoreFromHistory(historyId: string) {
+    try {
+      await this.hass.callWS({ type: "wine_cellar/restore_wine", history_id: historyId });
+      this._historyItems = this._historyItems.filter((i) => i.id !== historyId);
+      this._statusMsg = "Wine restored to Unassigned";
+      this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+    } catch (err) {
+      console.error("Failed to restore wine from history", err);
+      this._statusMsg = "Failed to restore wine";
+    }
+  }
+
   private _formatReason(reason: string): string {
     const map: Record<string, string> = {
       drank: "Drank", gifted: "Gifted", sold: "Sold",
@@ -645,6 +657,7 @@ export class InventoryDialog extends LitElement {
             <div class="inv-right">
               ${item.price ? html`<div class="inv-price">${this.currency} ${item.price.toFixed(0)}</div>` : nothing}
               <div class="inv-location">${this._formatDate(item.removed_at)}</div>
+              <button class="inv-btn" style="margin-top:4px" @click=${() => this._restoreFromHistory(item.id)}>Restore</button>
             </div>
           </div>
         `)}
