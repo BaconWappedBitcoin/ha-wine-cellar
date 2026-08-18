@@ -275,6 +275,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_move_to_cellar)
     websocket_api.async_register_command(hass, ws_get_wine_history)
     websocket_api.async_register_command(hass, ws_clear_wine_history)
+    websocket_api.async_register_command(hass, ws_restore_wine)
     websocket_api.async_register_command(hass, ws_get_backup)
     websocket_api.async_register_command(hass, ws_restore_backup)
     websocket_api.async_register_command(hass, ws_import_wines)
@@ -1406,6 +1407,27 @@ async def ws_clear_wine_history(
     storage._data["wine_history"] = []
     await storage.async_save()
     connection.send_result(msg["id"], {"success": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "wine_cellar/restore_wine",
+        vol.Required("history_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_restore_wine(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Restore a wine from history back into the cellar as unassigned."""
+    storage = hass.data[DOMAIN]["storage"]
+    wine = storage.restore_wine(msg["history_id"])
+    if wine:
+        await storage.async_save()
+        hass.bus.async_fire(f"{DOMAIN}_updated")
+    connection.send_result(msg["id"], {"wine": wine})
 
 
 # ── Backup / Restore / Import ────────────────────────────────────────
