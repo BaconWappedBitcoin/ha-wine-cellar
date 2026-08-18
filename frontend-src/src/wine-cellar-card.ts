@@ -118,6 +118,18 @@ export class WineCellarCard extends LitElement {
         font-size: 1.2em;
       }
 
+      .title-text {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+
+      .title-credit {
+        font-size: 0.45em;
+        font-weight: 400;
+        color: var(--wc-text-secondary);
+      }
+
       .header-actions {
         display: flex;
         gap: 4px;
@@ -1527,7 +1539,10 @@ export class WineCellarCard extends LitElement {
         <div class="header-row">
           <div class="title">
             <span class="title-icon">🍷</span>
-            ${title}
+            <div class="title-text">
+              <div>${title}</div>
+              <div class="title-credit">originally created by @BaconWappedBitcoin</div>
+            </div>
           </div>
           <div class="header-actions">
             ${this._hasGemini ? html`
