@@ -1,7 +1,7 @@
 {
   "domain": "wine_cellar",
   "name": "Cork Dork",
-  "codeowners": ["@BaconWappedBitcoin"],
+  "codeowners": ["@dobunzli"],
   "config_flow": true,
   "dependencies": ["http", "lovelace", "websocket_api"],
   "documentation": "https://github.com/BaconWappedBitcoin/ha-wine-cellar",
