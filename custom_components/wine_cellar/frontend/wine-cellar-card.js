@@ -719,6 +719,144 @@ function getWineLocation(wine, cabinets) {
     return { text: cabinet.name, cabinet, zone: "", storageRow: null };
 }
 
+// Shared search / filter / sort helpers.
+//
+// The card and the inventory dialog used to carry two separate, silently
+// diverging search implementations (6 fields vs 11). Everything text-search
+// related now lives here so a field only ever has to be added once.
+// Accent-insensitive lowercase: "Côtes" and "cotes", "Rosé" and "rose" must
+// match. Home Assistant users type without accents far more often than with.
+function normalizeText(value) {
+    if (value === null || value === undefined)
+        return "";
+    return String(value)
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+}
+// Free-text search terms that map onto a disposition code rather than onto
+// any stored text.
+const DISPOSITION_TERMS = {
+    drink: "D",
+    "drink now": "D",
+    hold: "H",
+    past: "P",
+    peak: "P",
+    "past peak": "P",
+    "past-peak": "P",
+};
+// Rebuilding the haystack for every wine on every keystroke is wasteful once
+// a cellar gets large; wine objects are replaced wholesale on each reload, so
+// a WeakMap keyed on the object stays correct without any invalidation.
+const haystackCache = new WeakMap();
+function buildHaystack(wine, extra) {
+    const tn = wine.tasting_notes;
+    const parts = [
+        wine.name,
+        wine.winery,
+        wine.region,
+        wine.country,
+        wine.grape_variety,
+        wine.type,
+        wine.vintage,
+        wine.notes,
+        wine.description,
+        wine.food_pairings,
+        wine.alcohol,
+        wine.barcode,
+        wine.drink_by,
+        wine.drink_window,
+        wine.purchase_date,
+        tn?.aroma,
+        tn?.taste,
+        tn?.finish,
+        tn?.overall,
+        extra,
+    ];
+    return parts.map(normalizeText).filter(Boolean).join("\n");
+}
+function haystackFor(wine, extra) {
+    const cached = haystackCache.get(wine);
+    if (cached && cached.extra === extra)
+        return cached.text;
+    const text = buildHaystack(wine, extra);
+    haystackCache.set(wine, { extra, text });
+    return text;
+}
+// The cabinet name is searchable too ("kitchen" finds everything stored
+// there), which means it has to be resolved before matching.
+function cabinetNameFor(wine, cabinets) {
+    if (!wine.cabinet_id)
+        return "";
+    return cabinets.find((c) => c.id === wine.cabinet_id)?.name || "";
+}
+// Every whitespace-separated token must match somewhere, so "bordeaux 2015"
+// finally works — the old single-blob `includes` could never match a query
+// spanning two different fields.
+function matchesQuery(wine, query, cabinets = []) {
+    const normalized = normalizeText(query).trim();
+    if (!normalized)
+        return true;
+    const fullCode = DISPOSITION_TERMS[normalized];
+    if (fullCode && wine.disposition === fullCode)
+        return true;
+    const haystack = haystackFor(wine, normalizeText(cabinetNameFor(wine, cabinets)));
+    const tokens = normalized.split(/\s+/).filter(Boolean);
+    return tokens.every((token) => {
+        if (haystack.includes(token))
+            return true;
+        const code = DISPOSITION_TERMS[token];
+        return !!code && wine.disposition === code;
+    });
+}
+// ── Drink-by ───────────────────────────────────────────────────────────
+// `drink_by` is a free-text year ("2028", "drink by 2030") and `drink_window`
+// a range ("2025-2028"); both come from the AI, so parse defensively and fall
+// back to the end of the window when no explicit year was stored.
+function drinkByYear(wine) {
+    const explicit = String(wine.drink_by || "").match(/\d{4}/);
+    if (explicit)
+        return parseInt(explicit[0], 10);
+    const windowYears = String(wine.drink_window || "").match(/\d{4}/g);
+    if (windowYears && windowYears.length) {
+        return parseInt(windowYears[windowYears.length - 1], 10);
+    }
+    return null;
+}
+// Wines with no drink-by data sort to the bottom in *both* directions —
+// otherwise an ascending sort buries the urgent bottles under every wine
+// that was never analyzed.
+function compareNullable(a, b, dir, cmp) {
+    if (a === null && b === null)
+        return 0;
+    if (a === null)
+        return 1;
+    if (b === null)
+        return -1;
+    return dir * cmp(a, b);
+}
+// ── Facets ─────────────────────────────────────────────────────────────
+// Comma-separated fields (grape varieties, food pairings) are exploded into
+// individual values so the filter menus only ever offer what the cellar
+// actually contains.
+function splitMulti(value) {
+    return (value || "")
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean);
+}
+function collectFacet(wines, pick) {
+    const seen = new Map();
+    for (const wine of wines) {
+        for (const value of pick(wine)) {
+            const key = normalizeText(value);
+            if (key && !seen.has(key))
+                seen.set(key, value);
+        }
+    }
+    return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
 let CabinetGrid = class CabinetGrid extends i {
     constructor() {
         super(...arguments);
@@ -7237,6 +7375,23 @@ WineListDialog = __decorate([
     t("wine-list-dialog")
 ], WineListDialog);
 
+// Persisted so the inventory reopens the way it was left; the search query is
+// deliberately excluded — a stale query silently hiding the cellar is far more
+// confusing than a stale sort order.
+const PREFS_KEY = "wine_cellar_inventory_prefs_v1";
+const DEFAULT_FILTERS = {
+    typeFilter: "all",
+    dispositionFilter: "all",
+    countryFilter: "all",
+    grapeFilter: "all",
+    foodFilter: "all",
+    cabinetFilter: "all",
+    minRating: 0,
+    maxPrice: null,
+    vintageMin: null,
+    vintageMax: null,
+    preset: "all",
+};
 let InventoryDialog = class InventoryDialog extends i {
     constructor() {
         super(...arguments);
@@ -7246,7 +7401,18 @@ let InventoryDialog = class InventoryDialog extends i {
         this.hasGemini = false;
         this.currency = "USD";
         this._searchQuery = "";
-        this._typeFilter = "all";
+        this._typeFilter = DEFAULT_FILTERS.typeFilter;
+        this._dispositionFilter = DEFAULT_FILTERS.dispositionFilter;
+        this._countryFilter = DEFAULT_FILTERS.countryFilter;
+        this._grapeFilter = DEFAULT_FILTERS.grapeFilter;
+        this._foodFilter = DEFAULT_FILTERS.foodFilter;
+        this._cabinetFilter = DEFAULT_FILTERS.cabinetFilter;
+        this._minRating = DEFAULT_FILTERS.minRating;
+        this._maxPrice = DEFAULT_FILTERS.maxPrice;
+        this._vintageMin = DEFAULT_FILTERS.vintageMin;
+        this._vintageMax = DEFAULT_FILTERS.vintageMax;
+        this._preset = DEFAULT_FILTERS.preset;
+        this._showFilters = false;
         this._sortField = "name";
         this._sortDir = "asc";
         this._detailWine = null;
@@ -7268,10 +7434,10 @@ let InventoryDialog = class InventoryDialog extends i {
     }
     updated(changedProps) {
         if (changedProps.has("open") && this.open) {
+            // Only the search query is transient. Sort order and filters are
+            // restored from localStorage on connect and must survive a reopen —
+            // resetting them here would silently undo the saved preferences.
             this._searchQuery = "";
-            this._typeFilter = "all";
-            this._sortField = "name";
-            this._sortDir = "asc";
             this._showDetail = false;
             this._detailWine = null;
             this._statusMsg = "";
@@ -7286,32 +7452,205 @@ let InventoryDialog = class InventoryDialog extends i {
         this.open = false;
         this.dispatchEvent(new CustomEvent("close"));
     }
+    // ── Preferences (sort + filters survive a reopen) ─────────────
+    connectedCallback() {
+        super.connectedCallback();
+        this._loadPrefs();
+    }
+    _loadPrefs() {
+        try {
+            const raw = localStorage.getItem(PREFS_KEY);
+            if (!raw)
+                return;
+            const p = JSON.parse(raw);
+            if (p.sortField)
+                this._sortField = p.sortField;
+            if (p.sortDir)
+                this._sortDir = p.sortDir;
+            if (p.typeFilter)
+                this._typeFilter = p.typeFilter;
+            if (p.dispositionFilter)
+                this._dispositionFilter = p.dispositionFilter;
+            if (p.countryFilter)
+                this._countryFilter = p.countryFilter;
+            if (p.grapeFilter)
+                this._grapeFilter = p.grapeFilter;
+            if (p.foodFilter)
+                this._foodFilter = p.foodFilter;
+            if (p.cabinetFilter)
+                this._cabinetFilter = p.cabinetFilter;
+            if (typeof p.minRating === "number")
+                this._minRating = p.minRating;
+            if (p.maxPrice !== undefined)
+                this._maxPrice = p.maxPrice;
+            if (p.vintageMin !== undefined)
+                this._vintageMin = p.vintageMin;
+            if (p.vintageMax !== undefined)
+                this._vintageMax = p.vintageMax;
+            if (p.preset)
+                this._preset = p.preset;
+        }
+        catch {
+            // A corrupt or unavailable localStorage must never keep the dialog
+            // from opening — fall back to defaults silently.
+        }
+    }
+    _savePrefs() {
+        try {
+            localStorage.setItem(PREFS_KEY, JSON.stringify({
+                sortField: this._sortField,
+                sortDir: this._sortDir,
+                typeFilter: this._typeFilter,
+                dispositionFilter: this._dispositionFilter,
+                countryFilter: this._countryFilter,
+                grapeFilter: this._grapeFilter,
+                foodFilter: this._foodFilter,
+                cabinetFilter: this._cabinetFilter,
+                minRating: this._minRating,
+                maxPrice: this._maxPrice,
+                vintageMin: this._vintageMin,
+                vintageMax: this._vintageMax,
+                preset: this._preset,
+            }));
+        }
+        catch {
+            // Private browsing / full quota — not worth surfacing.
+        }
+    }
+    _clearFilters() {
+        this._typeFilter = DEFAULT_FILTERS.typeFilter;
+        this._dispositionFilter = DEFAULT_FILTERS.dispositionFilter;
+        this._countryFilter = DEFAULT_FILTERS.countryFilter;
+        this._grapeFilter = DEFAULT_FILTERS.grapeFilter;
+        this._foodFilter = DEFAULT_FILTERS.foodFilter;
+        this._cabinetFilter = DEFAULT_FILTERS.cabinetFilter;
+        this._minRating = DEFAULT_FILTERS.minRating;
+        this._maxPrice = DEFAULT_FILTERS.maxPrice;
+        this._vintageMin = DEFAULT_FILTERS.vintageMin;
+        this._vintageMax = DEFAULT_FILTERS.vintageMax;
+        this._preset = DEFAULT_FILTERS.preset;
+        this._searchQuery = "";
+        this._savePrefs();
+    }
+    // Everything that is currently narrowing the list, so a persisted filter
+    // can never silently hide half the cellar.
+    _activeFilterCount() {
+        let n = 0;
+        if (this._typeFilter !== "all")
+            n++;
+        if (this._dispositionFilter !== "all")
+            n++;
+        if (this._countryFilter !== "all")
+            n++;
+        if (this._grapeFilter !== "all")
+            n++;
+        if (this._foodFilter !== "all")
+            n++;
+        if (this._cabinetFilter !== "all")
+            n++;
+        if (this._minRating > 0)
+            n++;
+        if (this._maxPrice !== null)
+            n++;
+        if (this._vintageMin !== null)
+            n++;
+        if (this._vintageMax !== null)
+            n++;
+        if (this._preset !== "all")
+            n++;
+        return n;
+    }
+    // ── Facets ────────────────────────────────────────────────────
+    _countryOptions() {
+        return collectFacet(this.wines, (w) => (w.country ? [w.country] : []));
+    }
+    _grapeOptions() {
+        return collectFacet(this.wines, (w) => splitMulti(w.grape_variety));
+    }
+    // Vivino returns pairings from a closed vocabulary ("Beef", "Blue cheese",
+    // "Spicy food"…), so offering the ones actually present in the cellar beats
+    // hoping the user guesses the exact wording.
+    _foodOptions() {
+        return collectFacet(this.wines, (w) => splitMulti(w.food_pairings));
+    }
+    _winesWithoutPairings() {
+        return this.wines.filter((w) => !splitMulti(w.food_pairings).length).length;
+    }
+    // ── Filtering & sorting ───────────────────────────────────────
+    _matchesPreset(wine, currentYear, recentCutoff) {
+        switch (this._preset) {
+            case "drink_this_year": {
+                if (wine.disposition === "P")
+                    return false;
+                const year = drinkByYear(wine);
+                return year !== null ? year <= currentYear : wine.disposition === "D";
+            }
+            case "past_peak":
+                return wine.disposition === "P";
+            case "unrated":
+                return !wine.user_rating;
+            case "incomplete":
+                return (!wine.food_pairings || !wine.description || !wine.drink_window || !wine.image_url);
+            case "recent":
+                return !!wine.added_at && wine.added_at >= recentCutoff;
+            default:
+                return true;
+        }
+    }
     _getFilteredAndSortedWines() {
         let wines = [...this.wines];
         if (this._typeFilter !== "all") {
             wines = wines.filter((w) => w.type === this._typeFilter);
         }
+        if (this._dispositionFilter !== "all") {
+            const want = this._dispositionFilter;
+            wines = wines.filter((w) => want === "none" ? !w.disposition : w.disposition === want);
+        }
+        if (this._countryFilter !== "all") {
+            const want = normalizeText(this._countryFilter);
+            wines = wines.filter((w) => normalizeText(w.country) === want);
+        }
+        if (this._grapeFilter !== "all") {
+            const want = normalizeText(this._grapeFilter);
+            wines = wines.filter((w) => normalizeText(w.grape_variety).includes(want));
+        }
+        if (this._foodFilter !== "all") {
+            const want = normalizeText(this._foodFilter);
+            wines = wines.filter((w) => normalizeText(w.food_pairings).includes(want));
+        }
+        if (this._cabinetFilter !== "all") {
+            const known = new Set(this.cabinets.map((c) => c.id));
+            wines = wines.filter((w) => this._cabinetFilter === "unassigned"
+                ? !w.cabinet_id || !known.has(w.cabinet_id)
+                : w.cabinet_id === this._cabinetFilter);
+        }
+        if (this._minRating > 0) {
+            wines = wines.filter((w) => (w.rating || 0) >= this._minRating);
+        }
+        // "Under X" can only be answered for wines that actually carry a price —
+        // an unpriced bottle is unknown, not cheap.
+        if (this._maxPrice !== null) {
+            const max = this._maxPrice;
+            wines = wines.filter((w) => {
+                const price = w.retail_price || w.price;
+                return !!price && price <= max;
+            });
+        }
+        if (this._vintageMin !== null) {
+            const min = this._vintageMin;
+            wines = wines.filter((w) => w.vintage !== null && w.vintage >= min);
+        }
+        if (this._vintageMax !== null) {
+            const max = this._vintageMax;
+            wines = wines.filter((w) => w.vintage !== null && w.vintage <= max);
+        }
+        if (this._preset !== "all") {
+            const currentYear = new Date().getFullYear();
+            const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
+            wines = wines.filter((w) => this._matchesPreset(w, currentYear, cutoff));
+        }
         if (this._searchQuery) {
-            const q = this._searchQuery.toLowerCase();
-            // Map disposition search terms to codes
-            const dispMap = {
-                drink: "D", "drink now": "D",
-                hold: "H",
-                past: "P", "past peak": "P", "past-peak": "P",
-            };
-            const dispCode = dispMap[q];
-            wines = wines.filter((w) => w.name.toLowerCase().includes(q) ||
-                w.winery.toLowerCase().includes(q) ||
-                (w.region || "").toLowerCase().includes(q) ||
-                (w.country || "").toLowerCase().includes(q) ||
-                (w.grape_variety || "").toLowerCase().includes(q) ||
-                (w.type || "").toLowerCase().includes(q) ||
-                (w.notes || "").toLowerCase().includes(q) ||
-                (w.description || "").toLowerCase().includes(q) ||
-                String(w.vintage || "").includes(q) ||
-                (w.barcode || "").includes(q) ||
-                (dispCode && w.disposition === dispCode) ||
-                (w.drink_window || "").toLowerCase().includes(q));
+            wines = wines.filter((w) => matchesQuery(w, this._searchQuery, this.cabinets));
         }
         const dir = this._sortDir === "asc" ? 1 : -1;
         wines.sort((a, b) => {
@@ -7326,8 +7665,23 @@ let InventoryDialog = class InventoryDialog extends i {
                     return dir * (a.type || "").localeCompare(b.type || "");
                 case "rating":
                     return dir * ((a.rating || 0) - (b.rating || 0));
+                case "user_rating":
+                    return dir * ((a.user_rating || 0) - (b.user_rating || 0));
                 case "price":
                     return dir * ((a.retail_price || a.price || 0) - (b.retail_price || b.price || 0));
+                case "drink_by":
+                    return compareNullable(drinkByYear(a), drinkByYear(b), dir, (x, y) => x - y);
+                case "urgency": {
+                    // Past peak first, then drink-now, then hold, then unanalyzed —
+                    // within a bucket, the soonest drink-by year leads.
+                    const rank = (w) => w.disposition === "P" ? 0 : w.disposition === "D" ? 1 : w.disposition === "H" ? 2 : 3;
+                    const byRank = rank(a) - rank(b);
+                    if (byRank !== 0)
+                        return dir * byRank;
+                    return compareNullable(drinkByYear(a), drinkByYear(b), dir, (x, y) => x - y);
+                }
+                case "purchase_date":
+                    return compareNullable(a.purchase_date || null, b.purchase_date || null, dir, (x, y) => x.localeCompare(y));
                 case "added_at":
                     return dir * (a.added_at || "").localeCompare(b.added_at || "");
                 case "cabinet": {
@@ -7797,9 +8151,162 @@ let InventoryDialog = class InventoryDialog extends i {
         this._detailWine = wine;
         this._showDetail = true;
     }
+    // Parses a number input back to `null` when emptied, so clearing a bound
+    // actually removes the filter instead of turning it into 0.
+    _numberOrNull(e) {
+        const raw = e.target.value.trim();
+        if (!raw)
+            return null;
+        const parsed = Number(raw);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    _renderFilterPanel(missingPairings) {
+        const foodOptions = this._foodOptions();
+        const countryOptions = this._countryOptions();
+        const grapeOptions = this._grapeOptions();
+        return b `
+      <div class="inv-filter-panel">
+        <label class="inv-filter-field">
+          <span>Ready to drink</span>
+          <select
+            @change=${(e) => {
+            this._dispositionFilter = e.target.value;
+            this._savePrefs();
+        }}
+          >
+            <option value="all" ?selected=${this._dispositionFilter === "all"}>Any</option>
+            <option value="D" ?selected=${this._dispositionFilter === "D"}>Drink now</option>
+            <option value="H" ?selected=${this._dispositionFilter === "H"}>Hold</option>
+            <option value="P" ?selected=${this._dispositionFilter === "P"}>Past peak</option>
+            <option value="none" ?selected=${this._dispositionFilter === "none"}>
+              Not analyzed
+            </option>
+          </select>
+        </label>
+
+        <label class="inv-filter-field">
+          <span>Pairs with</span>
+          <select
+            @change=${(e) => {
+            this._foodFilter = e.target.value;
+            this._savePrefs();
+        }}
+          >
+            <option value="all" ?selected=${this._foodFilter === "all"}>Any food</option>
+            ${foodOptions.map((f) => b `<option value=${f} ?selected=${this._foodFilter === f}>${f}</option>`)}
+          </select>
+          ${missingPairings
+            ? b `<small class="inv-filter-hint"
+                >${missingPairings} wine${missingPairings > 1 ? "s have" : " has"} no pairing
+                data — refresh them via Vivino or AI to make them findable here.</small
+              >`
+            : A}
+        </label>
+
+        <label class="inv-filter-field">
+          <span>Country</span>
+          <select
+            @change=${(e) => {
+            this._countryFilter = e.target.value;
+            this._savePrefs();
+        }}
+          >
+            <option value="all" ?selected=${this._countryFilter === "all"}>Any</option>
+            ${countryOptions.map((c) => b `<option value=${c} ?selected=${this._countryFilter === c}>${c}</option>`)}
+          </select>
+        </label>
+
+        <label class="inv-filter-field">
+          <span>Grape</span>
+          <select
+            @change=${(e) => {
+            this._grapeFilter = e.target.value;
+            this._savePrefs();
+        }}
+          >
+            <option value="all" ?selected=${this._grapeFilter === "all"}>Any</option>
+            ${grapeOptions.map((g) => b `<option value=${g} ?selected=${this._grapeFilter === g}>${g}</option>`)}
+          </select>
+        </label>
+
+        <label class="inv-filter-field">
+          <span>Cabinet</span>
+          <select
+            @change=${(e) => {
+            this._cabinetFilter = e.target.value;
+            this._savePrefs();
+        }}
+          >
+            <option value="all" ?selected=${this._cabinetFilter === "all"}>Any</option>
+            ${this.cabinets.map((c) => b `<option value=${c.id} ?selected=${this._cabinetFilter === c.id}>
+                  ${c.name}
+                </option>`)}
+            <option value="unassigned" ?selected=${this._cabinetFilter === "unassigned"}>
+              Unassigned
+            </option>
+          </select>
+        </label>
+
+        <label class="inv-filter-field">
+          <span>Min rating</span>
+          <select
+            @change=${(e) => {
+            this._minRating = Number(e.target.value);
+            this._savePrefs();
+        }}
+          >
+            ${[0, 3, 3.5, 4, 4.5].map((r) => b `<option value=${r} ?selected=${this._minRating === r}>
+                  ${r === 0 ? "Any" : `★ ${r}+`}
+                </option>`)}
+          </select>
+        </label>
+
+        <label class="inv-filter-field">
+          <span>Max price</span>
+          <input
+            type="number"
+            min="0"
+            placeholder="Any"
+            .value=${this._maxPrice === null ? "" : String(this._maxPrice)}
+            @change=${(e) => {
+            this._maxPrice = this._numberOrNull(e);
+            this._savePrefs();
+        }}
+          />
+          <small class="inv-filter-hint">Priced wines only.</small>
+        </label>
+
+        <label class="inv-filter-field">
+          <span>Vintage</span>
+          <div class="inv-filter-range">
+            <input
+              type="number"
+              placeholder="From"
+              .value=${this._vintageMin === null ? "" : String(this._vintageMin)}
+              @change=${(e) => {
+            this._vintageMin = this._numberOrNull(e);
+            this._savePrefs();
+        }}
+            />
+            <input
+              type="number"
+              placeholder="To"
+              .value=${this._vintageMax === null ? "" : String(this._vintageMax)}
+              @change=${(e) => {
+            this._vintageMax = this._numberOrNull(e);
+            this._savePrefs();
+        }}
+            />
+          </div>
+        </label>
+      </div>
+    `;
+    }
     _renderWineItem(wine) {
         const typeColor = WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red;
         const location = getWineLocation(wine, this.cabinets).text;
+        // Sorting by drink-by is useless if the value stays invisible.
+        const drinkBy = drinkByYear(wine);
         const displayPrice = wine.retail_price || wine.price;
         // A retail_price keeps the currency it was actually captured in — show
         // that instead of the globally selected one, or a stale price ends up
@@ -7833,6 +8340,8 @@ let InventoryDialog = class InventoryDialog extends i {
                         ? "Past Peak"
                         : ""}</span
                   >`
+            : A}${drinkBy
+            ? b ` · <span class="inv-drink-by">by ${drinkBy}</span>`
             : A}
           </div>
         </div>
@@ -7847,16 +8356,33 @@ let InventoryDialog = class InventoryDialog extends i {
         if (!this.open)
             return A;
         const filteredWines = this._getFilteredAndSortedWines();
-        const allStats = this._computeStats(this.wines);
+        const activeFilters = this._activeFilterCount();
+        const narrowed = activeFilters > 0 || !!this._searchQuery;
+        // With a filter on, cellar-wide totals are the wrong answer: the point of
+        // narrowing is to know what the *selection* holds and what it is worth.
+        const allStats = this._computeStats(narrowed ? filteredWines : this.wines);
+        const missingPairings = this._winesWithoutPairings();
         const sortOptions = [
             { value: "name", label: "Name" },
             { value: "winery", label: "Winery" },
             { value: "vintage", label: "Vintage" },
             { value: "type", label: "Type" },
             { value: "rating", label: "Rating" },
+            { value: "user_rating", label: "My Rating" },
             { value: "price", label: "Price" },
+            { value: "drink_by", label: "Drink By" },
+            { value: "urgency", label: "Urgency" },
+            { value: "purchase_date", label: "Purchase Date" },
             { value: "added_at", label: "Date Added" },
             { value: "cabinet", label: "Cabinet" },
+        ];
+        const presets = [
+            { id: "all", label: "All" },
+            { id: "drink_this_year", label: "Drink this year" },
+            { id: "past_peak", label: "Past peak" },
+            { id: "unrated", label: "Not rated" },
+            { id: "incomplete", label: "Incomplete" },
+            { id: "recent", label: "Added recently" },
         ];
         const filters = [
             { id: "all", label: "All" },
@@ -7892,7 +8418,8 @@ let InventoryDialog = class InventoryDialog extends i {
           <!-- Summary Stats -->
           <div class="inv-stats">
             <div class="stat">
-              <span class="stat-value">${allStats.count}</span> bottles
+              <span class="stat-value">${allStats.count}</span>
+              ${narrowed ? `of ${this.wines.length} bottles` : "bottles"}
             </div>
             ${allStats.totalValue
             ? b `
@@ -7933,6 +8460,7 @@ let InventoryDialog = class InventoryDialog extends i {
               <select
                 @change=${(e) => {
             this._sortField = e.target.value;
+            this._savePrefs();
         }}
               >
                 ${sortOptions.map((o) => b `<option value=${o.value} ?selected=${this._sortField === o.value}>
@@ -7943,12 +8471,39 @@ let InventoryDialog = class InventoryDialog extends i {
                 class="inv-sort-dir"
                 @click=${() => {
             this._sortDir = this._sortDir === "asc" ? "desc" : "asc";
+            this._savePrefs();
         }}
                 title="${this._sortDir === "asc" ? "Ascending" : "Descending"}"
               >
                 ${this._sortDir === "asc" ? "↑" : "↓"}
               </button>
+              <button
+                class="inv-filter-toggle ${activeFilters ? "active" : ""}"
+                @click=${() => {
+            this._showFilters = !this._showFilters;
+        }}
+                title="More filters"
+              >
+                ⚙︎ Filters${activeFilters
+            ? b `<span class="inv-filter-badge">${activeFilters}</span>`
+            : A}
+              </button>
             </div>
+          </div>
+
+          <!-- Quick views -->
+          <div class="inv-chips">
+            ${presets.map((p) => b `
+                <button
+                  class="inv-chip preset ${this._preset === p.id ? "active" : ""}"
+                  @click=${() => {
+            this._preset = p.id;
+            this._savePrefs();
+        }}
+                >
+                  ${p.label}
+                </button>
+              `)}
           </div>
 
           <!-- Type Filter Chips -->
@@ -7958,12 +8513,30 @@ let InventoryDialog = class InventoryDialog extends i {
                   class="inv-chip ${this._typeFilter === f.id ? "active" : ""}"
                   @click=${() => {
             this._typeFilter = f.id;
+            this._savePrefs();
         }}
                 >
                   ${f.label}
                 </button>
               `)}
           </div>
+
+          ${this._showFilters ? this._renderFilterPanel(missingPairings) : A}
+
+          ${narrowed
+            ? b `
+                <div class="inv-active-filters">
+                  <span
+                    >${filteredWines.length} of ${this.wines.length} wines shown${activeFilters
+                ? ` · ${activeFilters} filter${activeFilters > 1 ? "s" : ""} active`
+                : ""}</span
+                  >
+                  <button class="inv-clear-filters" @click=${this._clearFilters}>
+                    Clear all
+                  </button>
+                </div>
+              `
+            : A}
 
           <!-- Wine List -->
           <div class="inv-list">
@@ -8279,11 +8852,129 @@ InventoryDialog.styles = [
         background: var(--wc-hover);
       }
 
+      .inv-filter-toggle {
+        background: none;
+        border: 1px solid var(--wc-border);
+        border-radius: 14px;
+        padding: 5px 10px;
+        cursor: pointer;
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        white-space: nowrap;
+      }
+
+      .inv-filter-toggle:hover {
+        background: var(--wc-hover);
+      }
+
+      .inv-filter-toggle.active {
+        border-color: var(--wc-primary);
+        color: var(--wc-primary);
+      }
+
+      .inv-filter-badge {
+        background: var(--wc-primary);
+        color: #fff;
+        border-radius: 9px;
+        padding: 1px 6px;
+        font-size: 0.85em;
+        font-weight: 600;
+      }
+
+      .inv-filter-panel {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 10px 12px;
+        padding: 12px 16px;
+        margin: 0 16px 10px;
+        border: 1px solid var(--wc-border);
+        border-radius: 10px;
+        background: var(--wc-bg);
+      }
+
+      .inv-filter-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 0.75em;
+        color: var(--wc-text-secondary);
+      }
+
+      .inv-filter-field select,
+      .inv-filter-field input {
+        padding: 6px 8px;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        background: var(--wc-card-bg, var(--wc-bg));
+        color: var(--wc-text);
+        font-size: 1.05em;
+        width: 100%;
+        box-sizing: border-box;
+      }
+
+      .inv-filter-field select:focus,
+      .inv-filter-field input:focus {
+        outline: none;
+        border-color: var(--wc-primary);
+      }
+
+      .inv-filter-range {
+        display: flex;
+        gap: 6px;
+      }
+
+      .inv-filter-hint {
+        font-size: 0.9em;
+        opacity: 0.75;
+        line-height: 1.3;
+      }
+
+      .inv-active-filters {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin: 0 16px 10px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: rgba(114, 47, 55, 0.08);
+        font-size: 0.75em;
+        color: var(--wc-text-secondary);
+      }
+
+      .inv-clear-filters {
+        background: none;
+        border: none;
+        color: var(--wc-primary);
+        cursor: pointer;
+        font-size: 1em;
+        font-weight: 600;
+        padding: 2px 4px;
+        white-space: nowrap;
+      }
+
+      .inv-clear-filters:hover {
+        text-decoration: underline;
+      }
+
+      .inv-drink-by {
+        opacity: 0.8;
+      }
+
       .inv-chips {
         display: flex;
         gap: 4px;
         padding: 0 16px 10px;
         flex-wrap: wrap;
+      }
+
+      .inv-chip.preset.active {
+        background: var(--wc-text-secondary);
+        border-color: var(--wc-text-secondary);
       }
 
       .inv-chip {
@@ -8610,6 +9301,39 @@ __decorate([
 __decorate([
     r()
 ], InventoryDialog.prototype, "_typeFilter", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_dispositionFilter", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_countryFilter", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_grapeFilter", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_foodFilter", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_cabinetFilter", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_minRating", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_maxPrice", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_vintageMin", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_vintageMax", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_preset", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_showFilters", void 0);
 __decorate([
     r()
 ], InventoryDialog.prototype, "_sortField", void 0);
@@ -9017,15 +9741,11 @@ let WineCellarCard = class WineCellarCard extends i {
         if (this._searchFilter !== "all") {
             wines = wines.filter((w) => w.type === this._searchFilter);
         }
-        // Filter by search query
+        // Filter by search query — same matcher as the inventory dialog, so a
+        // query never gives different results depending on which screen it was
+        // typed into.
         if (this._searchQuery) {
-            const q = this._searchQuery.toLowerCase();
-            wines = wines.filter((w) => w.name.toLowerCase().includes(q) ||
-                w.winery.toLowerCase().includes(q) ||
-                (w.region || "").toLowerCase().includes(q) ||
-                (w.grape_variety || "").toLowerCase().includes(q) ||
-                (w.type || "").toLowerCase().includes(q) ||
-                (w.country || "").toLowerCase().includes(q));
+            wines = wines.filter((w) => matchesQuery(w, this._searchQuery, this._cabinets));
         }
         return wines;
     }

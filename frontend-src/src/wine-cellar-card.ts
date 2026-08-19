@@ -2,6 +2,7 @@ import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { sharedStyles } from "./styles";
 import { Wine, Cabinet, CellarStats, WINE_TYPE_COLORS, WineType, StorageRow, StorageRowType, BOX_SIZES, getRackSlots, getWineLocation } from "./models";
+import { matchesQuery } from "./utils/search";
 
 import "./components/cabinet-grid";
 import "./components/wine-detail-dialog";
@@ -479,18 +480,11 @@ export class WineCellarCard extends LitElement {
       wines = wines.filter((w) => w.type === this._searchFilter);
     }
 
-    // Filter by search query
+    // Filter by search query — same matcher as the inventory dialog, so a
+    // query never gives different results depending on which screen it was
+    // typed into.
     if (this._searchQuery) {
-      const q = this._searchQuery.toLowerCase();
-      wines = wines.filter(
-        (w) =>
-          w.name.toLowerCase().includes(q) ||
-          w.winery.toLowerCase().includes(q) ||
-          (w.region || "").toLowerCase().includes(q) ||
-          (w.grape_variety || "").toLowerCase().includes(q) ||
-          (w.type || "").toLowerCase().includes(q) ||
-          (w.country || "").toLowerCase().includes(q)
-      );
+      wines = wines.filter((w) => matchesQuery(w, this._searchQuery, this._cabinets));
     }
 
     return wines;
