@@ -163,6 +163,21 @@ const sharedStyles = i$3 `
     background: var(--wc-hover);
   }
 
+  /* Sits right after .manage-racks-btn with the tab-bar's normal gap — no
+     margin-left: auto of its own, or it would claim the remaining space and
+     drift away from it instead of staying grouped together. */
+  .settings-tab-btn {
+    border-color: transparent;
+    color: var(--wc-primary-text);
+    font-weight: 500;
+    font-size: 0.8em;
+    padding: 6px 12px;
+  }
+
+  .settings-tab-btn:hover {
+    background: var(--wc-hover);
+  }
+
   .btn {
     display: inline-flex;
     align-items: center;
@@ -234,6 +249,13 @@ const sharedStyles = i$3 `
     max-height: 85vh;
     overflow-y: auto;
     animation: slideUp 0.3s ease;
+    /* user-select is inherited, so it crosses the Shadow DOM boundary from
+       whatever wraps this card (e.g. Home Assistant's dashboard drag-reorder
+       chrome) — re-declare it explicitly so dialog text stays selectable
+       regardless of what the host page sets. */
+    user-select: text;
+    -webkit-user-select: text;
+    -webkit-touch-callout: default;
   }
 
   .dialog-header {
@@ -349,6 +371,12 @@ const sharedStyles = i$3 `
     animation: fadeIn 0.2s ease;
   }
 
+  /* While dragging a wine out of the panel, let the backdrop pass drag/drop
+     events through to the racks behind it instead of swallowing them. */
+  .depth-panel-backdrop.drag-through {
+    pointer-events: none;
+  }
+
   .depth-panel {
     position: fixed;
     right: 0;
@@ -415,6 +443,7 @@ const sharedStyles = i$3 `
   }
 
   .depth-slot {
+    position: relative;
     border-radius: 10px;
     cursor: pointer;
     transition: background 0.15s, box-shadow 0.15s;
@@ -422,6 +451,65 @@ const sharedStyles = i$3 `
 
   .depth-slot:hover {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+
+  .depth-slot.drag-over {
+    box-shadow: 0 0 0 2px rgba(66, 165, 245, 0.8);
+    background: rgba(66, 165, 245, 0.15);
+  }
+
+  .depth-slot.highlight {
+    animation: highlightPulse 1.2s ease-in-out 2;
+  }
+
+  @keyframes highlightPulse {
+    0%, 100% { box-shadow: 0 0 0 2px rgba(196, 139, 145, 0.9); }
+    50% { box-shadow: 0 0 0 5px rgba(196, 139, 145, 0.4); }
+  }
+
+  .depth-slot-delete {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8em;
+    line-height: 1;
+    color: var(--wc-text-secondary, #888);
+    background: rgba(0, 0, 0, 0.06);
+    z-index: 3;
+  }
+
+  .depth-slot-delete:hover {
+    background: #c62828;
+    color: #fff;
+  }
+
+  .depth-panel-add-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .depth-panel-add-box select {
+    flex: 1;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--wc-border, #ddd);
+    background: var(--wc-bg);
+    color: var(--wc-text, #333);
+    font-size: 0.85em;
+  }
+
+  .depth-panel-add-box .depth-panel-grow {
+    flex-shrink: 0;
+    padding: 8px 14px;
+    margin-top: 0;
   }
 
   .depth-slot-label {
@@ -443,6 +531,11 @@ const sharedStyles = i$3 `
     border-radius: 10px;
   }
 
+  .depth-slot-avatar {
+    position: relative;
+    flex-shrink: 0;
+  }
+
   .depth-slot-thumb {
     width: 32px;
     height: 44px;
@@ -456,6 +549,36 @@ const sharedStyles = i$3 `
     height: 12px;
     border-radius: 50%;
     flex-shrink: 0;
+  }
+
+  .depth-slot-disposition {
+    position: absolute;
+    bottom: -3px;
+    right: -4px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    font-size: 8px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    border: 1.5px solid var(--wc-bg, #fff);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    line-height: 1;
+  }
+
+  .depth-slot-disposition.drink {
+    background: #2e7d32;
+  }
+
+  .depth-slot-disposition.hold {
+    background: #1565c0;
+  }
+
+  .depth-slot-disposition.past {
+    background: #c62828;
   }
 
   .depth-slot-info {
@@ -509,6 +632,27 @@ const sharedStyles = i$3 `
   .depth-slot.empty:hover .depth-slot-plus {
     background: rgba(196, 139, 145, 0.2);
   }
+
+  .depth-panel-grow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px;
+    margin-top: 4px;
+    border-radius: 10px;
+    border: 1px dashed var(--wc-border, #ddd);
+    color: var(--wc-text-secondary, #888);
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 600;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .depth-panel-grow:hover {
+    border-color: var(--wc-primary-text);
+    color: var(--wc-primary-text);
+  }
 `;
 
 const STORAGE_ROW_TYPE_LABELS = {
@@ -538,6 +682,42 @@ const WINE_TYPE_LABELS = {
     sparkling: "Sparkling",
     dessert: "Dessert",
 };
+// Every physical (row, col) grid slot in a cabinet, in display order,
+// skipping rows configured as bulk/box storage zones.
+function getRackSlots(cabinet) {
+    const storageRowSet = new Set((cabinet.storage_rows || []).map((sr) => sr.row));
+    const slots = [];
+    for (let r = 0; r < cabinet.rows; r++) {
+        if (storageRowSet.has(r))
+            continue;
+        for (let c = 0; c < cabinet.cols; c++)
+            slots.push({ row: r, col: c });
+    }
+    return slots;
+}
+// A precise, human-readable location for a wine: cabinet name, plus the
+// zone name and slot number when it's in a bulk bin or wine box, or the
+// rack's linear slot number when it's in a grid cell.
+function getWineLocation(wine, cabinets) {
+    const cabinet = wine.cabinet_id ? cabinets.find((c) => c.id === wine.cabinet_id) || null : null;
+    if (!cabinet)
+        return { text: "Unassigned", cabinet: null, zone: "", storageRow: null };
+    if (wine.row !== null && wine.col !== null) {
+        const slotIdx = getRackSlots(cabinet).findIndex((s) => s.row === wine.row && s.col === wine.col);
+        const slotLabel = slotIdx >= 0 ? `Slot ${slotIdx + 1}` : `R${wine.row + 1}C${wine.col + 1}`;
+        return { text: `${cabinet.name} · ${slotLabel}`, cabinet, zone: "", storageRow: null };
+    }
+    if (wine.zone && wine.zone !== "bottom") {
+        const rowIdx = parseInt(wine.zone.replace("storage-", ""), 10);
+        const storageRow = (cabinet.storage_rows || []).find((sr) => sr.row === rowIdx) || null;
+        const zoneName = storageRow?.name || "Storage";
+        return { text: `${cabinet.name} · ${zoneName} · Slot ${(wine.depth || 0) + 1}`, cabinet, zone: wine.zone, storageRow };
+    }
+    if (wine.zone === "bottom") {
+        return { text: `${cabinet.name} · ${cabinet.bottom_zone_name || "Storage"}`, cabinet, zone: "bottom", storageRow: null };
+    }
+    return { text: cabinet.name, cabinet, zone: "", storageRow: null };
+}
 
 let CabinetGrid = class CabinetGrid extends i {
     constructor() {
@@ -565,7 +745,9 @@ let CabinetGrid = class CabinetGrid extends i {
         return this.wines.filter((w) => w.cabinet_id === this.cabinet.id && w.zone === "bottom");
     }
     _getStorageRowWines(row) {
-        return this.wines.filter((w) => w.cabinet_id === this.cabinet.id && w.zone === `storage-${row}`);
+        return this.wines
+            .filter((w) => w.cabinet_id === this.cabinet.id && w.zone === `storage-${row}`)
+            .sort((a, b) => (a.depth || 0) - (b.depth || 0));
     }
     _onCellClick(row, col, wine, wineCount = 0, cabinetDepth = 1, wines = []) {
         this.dispatchEvent(new CustomEvent("cell-click", {
@@ -664,13 +846,45 @@ let CabinetGrid = class CabinetGrid extends i {
     _onDragLeave(_e) {
         this._dragOverCell = null;
     }
-    _onDrop(e, targetRow, targetCol, targetZone) {
+    _onDrop(e, targetRow, targetCol, targetZone, targetWine) {
         e.preventDefault();
         this._dragOverCell = null;
         if (!e.dataTransfer)
             return;
         try {
             const source = JSON.parse(e.dataTransfer.getData("text/plain"));
+            // Bulk-zone reordering: figure out which bottle the drop landed
+            // nearest to (and which half of it), so dropping anywhere in the zone
+            // reorders sensibly instead of only working when the cursor lands
+            // exactly on a chip — small chips are hard to hit precisely.
+            let effectiveTargetWine = targetWine;
+            let insertBefore = true;
+            if (effectiveTargetWine) {
+                const rect = e.currentTarget.getBoundingClientRect();
+                insertBefore = e.clientX < rect.left + rect.width / 2;
+            }
+            else if (targetZone) {
+                const container = e.currentTarget;
+                const chips = Array.from(container.querySelectorAll(".zone-bottle"));
+                let nearest = null;
+                let nearestDist = Infinity;
+                for (const chip of chips) {
+                    if (chip.dataset.wineId === source.wineId)
+                        continue;
+                    const rect = chip.getBoundingClientRect();
+                    const cx = rect.left + rect.width / 2;
+                    const dist = Math.abs(e.clientX - cx);
+                    if (dist < nearestDist) {
+                        nearestDist = dist;
+                        nearest = chip;
+                    }
+                }
+                if (nearest) {
+                    const rect = nearest.getBoundingClientRect();
+                    insertBefore = e.clientX < rect.left + rect.width / 2;
+                    effectiveTargetWine = this.wines.find((w) => w.id === nearest.dataset.wineId);
+                }
+            }
             this.dispatchEvent(new CustomEvent("wine-drop", {
                 detail: {
                     wineId: source.wineId,
@@ -682,6 +896,13 @@ let CabinetGrid = class CabinetGrid extends i {
                     targetRow: targetRow ?? null,
                     targetCol: targetCol ?? null,
                     targetZone: targetZone || "",
+                    // When dropping on/near another bottle within the same bulk
+                    // zone, carry its id + which side the drop landed on, so the
+                    // card can insert relative to it instead of treating it as a
+                    // same-zone no-op.
+                    targetWineId: effectiveTargetWine?.id ?? null,
+                    targetDepth: effectiveTargetWine ? (effectiveTargetWine.depth ?? 0) : null,
+                    insertBefore,
                 },
                 bubbles: true,
                 composed: true,
@@ -712,22 +933,35 @@ let CabinetGrid = class CabinetGrid extends i {
         @dragleave=${(e) => this._onDragLeave(e)}
         @drop=${(e) => this._onDrop(e, undefined, undefined, zoneId)}>
         <div class="bottom-zone-label">◇ ${name} <span class="zone-count">${wines.length}/${capacity}</span></div>
-        ${wines.map((wine) => b `
+        ${wines.map((wine) => {
+            const disp = wine.disposition || "";
+            const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
+            const bottleKey = `${zoneKey}-${wine.id}`;
+            return b `
             <div
-              class="zone-bottle"
+              class="zone-bottle ${this._dragOverCell === bottleKey ? "drag-over" : ""}"
               style="background: ${WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red}"
+              data-wine-id="${wine.id}"
               draggable="true"
               @click=${(e) => {
-            e.stopPropagation();
-            this._onZoneClick(wine, zoneId);
-        }}
+                e.stopPropagation();
+                this._onZoneClick(wine, zoneId);
+            }}
               @dragstart=${(e) => { e.stopPropagation(); this._onDragStart(e, wine, undefined, undefined, zoneId); }}
               @dragend=${(e) => this._onDragEnd(e)}
-              title="${wine.name}"
+              @dragover=${(e) => { e.stopPropagation(); this._onDragOver(e, bottleKey); }}
+              @dragleave=${(e) => { e.stopPropagation(); this._onDragLeave(e); }}
+              @drop=${(e) => { e.stopPropagation(); this._onDrop(e, undefined, undefined, zoneId, wine); }}
+              @touchstart=${(e) => { e.stopPropagation(); this._onTouchStart(wine); }}
+              @touchend=${() => this._onTouchEnd()}
+              @touchmove=${() => this._onTouchMove()}
+              title="${wine.name} (${wine.vintage || "NV"})"
             >
               ${(wine.vintage || "NV").toString().slice(-2)}
+              ${dispClass ? b `<span class="disposition ${dispClass}">${disp}</span>` : A}
             </div>
-          `)}
+          `;
+        })}
       </div>
     `;
     }
@@ -906,12 +1140,24 @@ let CabinetGrid = class CabinetGrid extends i {
       </div>
     `;
     }
+    _onRackClick() {
+        this.dispatchEvent(new CustomEvent("rack-click", {
+            detail: { cabinet: this.cabinet },
+            bubbles: true,
+            composed: true,
+        }));
+    }
     render() {
         const { rows, cols } = this.cabinet;
         const storageRows = this._getStorageRowSet();
+        const hasGridRows = Array.from({ length: rows }, (_, row) => row).some((row) => !storageRows.has(row));
         return b `
       <div class="cabinet">
-        <div class="cabinet-name">${this.cabinet.name}</div>
+        <div
+          class="cabinet-name ${hasGridRows ? "clickable" : ""}"
+          @click=${hasGridRows ? () => this._onRackClick() : A}
+          title=${hasGridRows ? "Tap to view and reorder this rack" : ""}
+        >${this.cabinet.name}</div>
         <div class="grid-inner">
           ${Array.from({ length: rows }, (_, row) => storageRows.has(row)
             ? this._renderStorageZone(row)
@@ -972,6 +1218,15 @@ CabinetGrid.styles = [
         font-weight: 600;
         padding: 4px 0;
         text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+      }
+
+      .cabinet-name.clickable {
+        cursor: pointer;
+        border-radius: 6px;
+      }
+
+      .cabinet-name.clickable:hover {
+        background: rgba(255, 255, 255, 0.08);
       }
 
       .grid-inner {
@@ -1105,15 +1360,18 @@ CabinetGrid.styles = [
         box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
       }
 
-      .cell .disposition.drink {
+      .cell .disposition.drink,
+      .zone-bottle .disposition.drink {
         background: #2e7d32;
       }
 
-      .cell .disposition.hold {
+      .cell .disposition.hold,
+      .zone-bottle .disposition.hold {
         background: #1565c0;
       }
 
-      .cell .disposition.past {
+      .cell .disposition.past,
+      .zone-bottle .disposition.past {
         background: #c62828;
       }
 
@@ -1204,6 +1462,7 @@ CabinetGrid.styles = [
       }
 
       .zone-bottle {
+        position: relative;
         width: 28px;
         height: 28px;
         border-radius: 4px;
@@ -1216,6 +1475,27 @@ CabinetGrid.styles = [
         cursor: pointer;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
         transition: transform 0.2s;
+      }
+
+      .zone-bottle .disposition {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 68%;
+        height: 68%;
+        border-radius: 50%;
+        font-size: 9px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        z-index: 2;
+        pointer-events: none;
+        line-height: 1;
+        border: 1.5px solid rgba(255, 255, 255, 0.5);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
       }
 
       .zone-bottle:hover {
@@ -1425,6 +1705,36 @@ CabinetGrid = __decorate([
     t("cabinet-grid")
 ], CabinetGrid);
 
+/** Resize a base64 JPEG (no data: prefix) to a thumbnail data URL for storage.
+ *  640px/0.78 keeps back-label text (small print, appellation info) legible
+ *  while staying well within reason for a JSON-embedded data URI — roughly
+ *  10x the pixels of the old 200px/0.6 default, still only tens of KB. */
+function resizeImageForStorage(base64, maxDim = 640, quality = 0.78) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement("canvas");
+            let w = img.width, h = img.height;
+            if (w > h) {
+                h = Math.round(h * maxDim / w);
+                w = maxDim;
+            }
+            else {
+                w = Math.round(w * maxDim / h);
+                h = maxDim;
+            }
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, w, h);
+            const dataUrl = canvas.toDataURL("image/jpeg", quality);
+            resolve(dataUrl);
+        };
+        img.onerror = () => resolve("");
+        img.src = `data:image/jpeg;base64,${base64}`;
+    });
+}
+
 let StarRating = class StarRating extends i {
     constructor() {
         super(...arguments);
@@ -1548,1363 +1858,6 @@ __decorate([
 StarRating = __decorate([
     t("star-rating")
 ], StarRating);
-
-let WineDetailDialog = class WineDetailDialog extends i {
-    constructor() {
-        super(...arguments);
-        this.wine = null;
-        this.open = false;
-        this.mode = "cellar";
-        this._editing = false;
-        this._editingFields = false;
-        this._editData = {};
-        this._userRating = 0;
-        this._tastingNotes = { aroma: "", taste: "", finish: "", overall: "" };
-        this._saving = false;
-        this._refreshing = false;
-        this._analyzing = false;
-        this._showRemoveConfirm = false;
-        this.hasGemini = false;
-    }
-    updated(changedProps) {
-        if (changedProps.has("wine") && this.wine) {
-            this._userRating = this.wine.user_rating ?? 0;
-            this._tastingNotes = this.wine.tasting_notes
-                ? { ...this.wine.tasting_notes }
-                : { aroma: "", taste: "", finish: "", overall: "" };
-            this._editing = false;
-            this._editingFields = false;
-        }
-    }
-    _close() {
-        this.open = false;
-        this._editing = false;
-        this._editingFields = false;
-        this.dispatchEvent(new CustomEvent("close"));
-    }
-    _startEditingFields() {
-        if (!this.wine)
-            return;
-        this._editData = {
-            name: this.wine.name || "",
-            winery: this.wine.winery || "",
-            vintage: this.wine.vintage,
-            type: this.wine.type || "red",
-            region: this.wine.region || "",
-            country: this.wine.country || "",
-            grape_variety: this.wine.grape_variety || "",
-            price: this.wine.price,
-            retail_price: this.wine.retail_price,
-            purchase_date: this.wine.purchase_date || "",
-            drink_by: this.wine.drink_by || "",
-            notes: this.wine.notes || "",
-            alcohol: this.wine.alcohol || "",
-        };
-        this._editingFields = true;
-    }
-    _cancelEditingFields() {
-        this._editingFields = false;
-        this._editData = {};
-    }
-    _updateEditField(field, value) {
-        this._editData = { ...this._editData, [field]: value };
-    }
-    async _saveFields() {
-        if (!this.wine || !this.hass)
-            return;
-        this._saving = true;
-        try {
-            const updates = { ...this._editData };
-            // Convert empty strings to null for numeric fields
-            if (updates.vintage === "" || updates.vintage === null)
-                updates.vintage = null;
-            else
-                updates.vintage = parseInt(updates.vintage) || null;
-            if (updates.price === "" || updates.price === null)
-                updates.price = null;
-            else
-                updates.price = parseFloat(updates.price) || null;
-            if (updates.retail_price === "" || updates.retail_price === null)
-                updates.retail_price = null;
-            else
-                updates.retail_price = parseFloat(updates.retail_price) || null;
-            if (this.mode === "buylist") {
-                await this.hass.callWS({
-                    type: "wine_cellar/update_buy_list_item",
-                    item_id: this.wine.id,
-                    updates,
-                });
-                this.wine = { ...this.wine, ...updates };
-                this._editingFields = false;
-                this._editData = {};
-                this.dispatchEvent(new CustomEvent("buy-list-updated", { bubbles: true, composed: true }));
-            }
-            else {
-                await this.hass.callWS({
-                    type: "wine_cellar/update_wine",
-                    wine_id: this.wine.id,
-                    updates,
-                });
-                this.wine = { ...this.wine, ...updates };
-                this._editingFields = false;
-                this._editData = {};
-                this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
-            }
-        }
-        catch (err) {
-            console.error("Failed to save wine fields", err);
-        }
-        this._saving = false;
-    }
-    _onRemove() {
-        if (!this.wine)
-            return;
-        if (this.mode === "buylist") {
-            this.dispatchEvent(new CustomEvent("remove-buy-list-item", {
-                detail: { item_id: this.wine.id },
-                bubbles: true,
-                composed: true,
-            }));
-            this._close();
-        }
-        else {
-            // Show reason prompt for cellar wines
-            this._showRemoveConfirm = true;
-        }
-    }
-    _confirmRemove(reason) {
-        if (!this.wine)
-            return;
-        this.dispatchEvent(new CustomEvent("remove-wine", {
-            detail: { wine_id: this.wine.id, reason },
-            bubbles: true,
-            composed: true,
-        }));
-        this._showRemoveConfirm = false;
-        this._close();
-    }
-    _onMove() {
-        if (this.wine) {
-            this.dispatchEvent(new CustomEvent("move-wine", {
-                detail: { wine: this.wine },
-                bubbles: true,
-                composed: true,
-            }));
-            this._close();
-        }
-    }
-    _onCopy() {
-        if (this.wine) {
-            this.dispatchEvent(new CustomEvent("copy-wine", {
-                detail: { wine: this.wine },
-                bubbles: true,
-                composed: true,
-            }));
-            this._close();
-        }
-    }
-    _onRatingChange(e) {
-        this._userRating = e.detail.value;
-    }
-    _onTastingChange(field, e) {
-        const value = e.target.value;
-        this._tastingNotes = { ...this._tastingNotes, [field]: value };
-    }
-    async _saveRating() {
-        if (!this.wine || !this.hass)
-            return;
-        this._saving = true;
-        try {
-            const updates = {
-                user_rating: this._userRating || null,
-                tasting_notes: this._hasTastingNotes() ? this._tastingNotes : null,
-            };
-            if (this.mode === "buylist") {
-                await this.hass.callWS({
-                    type: "wine_cellar/update_buy_list_item",
-                    item_id: this.wine.id,
-                    updates,
-                });
-            }
-            else {
-                await this.hass.callWS({
-                    type: "wine_cellar/update_wine",
-                    wine_id: this.wine.id,
-                    updates,
-                });
-            }
-            this.wine = { ...this.wine, ...updates };
-            this._editing = false;
-            this.dispatchEvent(new CustomEvent(this.mode === "buylist" ? "buy-list-updated" : "wine-updated", { bubbles: true, composed: true }));
-        }
-        catch (err) {
-            console.error("Failed to save rating/notes", err);
-        }
-        this._saving = false;
-    }
-    async _refreshFromVivino() {
-        if (!this.wine || !this.hass)
-            return;
-        this._refreshing = true;
-        try {
-            const resp = await this.hass.callWS({
-                type: "wine_cellar/refresh_wine",
-                wine_id: this.wine.id,
-            });
-            if (resp.error) {
-                alert(resp.error);
-            }
-            else if (resp.wine) {
-                this.wine = { ...this.wine, ...resp.wine };
-                this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
-            }
-        }
-        catch (err) {
-            console.error("Vivino refresh failed", err);
-        }
-        this._refreshing = false;
-    }
-    async _analyzeWithAI() {
-        if (!this.wine || !this.hass)
-            return;
-        this._analyzing = true;
-        try {
-            const resp = await this.hass.callWS({
-                type: "wine_cellar/analyze_single_wine",
-                wine_id: this.wine.id,
-            });
-            if (resp.error) {
-                alert(resp.error);
-            }
-            else if (resp.wine) {
-                this.wine = { ...this.wine, ...resp.wine };
-                this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
-            }
-        }
-        catch (err) {
-            console.error("AI analysis failed", err);
-        }
-        this._analyzing = false;
-    }
-    _splitPairings(text) {
-        const result = [];
-        let depth = 0;
-        let current = "";
-        for (const ch of text) {
-            if (ch === "(")
-                depth++;
-            else if (ch === ")")
-                depth--;
-            if (ch === "," && depth === 0) {
-                if (current.trim())
-                    result.push(current.trim());
-                current = "";
-            }
-            else {
-                current += ch;
-            }
-        }
-        if (current.trim())
-            result.push(current.trim());
-        return result;
-    }
-    _hasTastingNotes() {
-        const n = this._tastingNotes;
-        return !!(n.aroma || n.taste || n.finish || n.overall);
-    }
-    _renderEditForm() {
-        const d = this._editData;
-        return b `
-      <div class="edit-form">
-        <div class="form-group">
-          <label>Wine Name</label>
-          <input type="text" .value=${d.name}
-            @input=${(e) => this._updateEditField("name", e.target.value)} />
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label>Winery</label>
-            <input type="text" .value=${d.winery}
-              @input=${(e) => this._updateEditField("winery", e.target.value)} />
-          </div>
-          <div class="form-group">
-            <label>Vintage</label>
-            <input type="number" .value=${d.vintage?.toString() || ""}
-              @input=${(e) => this._updateEditField("vintage", e.target.value)} />
-          </div>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label>Type</label>
-            <select .value=${d.type}
-              @change=${(e) => this._updateEditField("type", e.target.value)}>
-              ${Object.entries(WINE_TYPE_LABELS).map(([value, label]) => b `<option value=${value} ?selected=${d.type === value}>${label}</option>`)}
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Purchase Price</label>
-            <input type="number" step="0.01" .value=${d.price?.toString() || ""}
-              @input=${(e) => this._updateEditField("price", e.target.value)} />
-          </div>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label>Current Value</label>
-            <input type="number" step="0.01" .value=${d.retail_price?.toString() || ""}
-              @input=${(e) => this._updateEditField("retail_price", e.target.value)} />
-          </div>
-          <div class="form-group">
-            <label>Region</label>
-            <input type="text" .value=${d.region}
-              @input=${(e) => this._updateEditField("region", e.target.value)} />
-          </div>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label>Country</label>
-            <input type="text" .value=${d.country}
-              @input=${(e) => this._updateEditField("country", e.target.value)} />
-          </div>
-          <div class="form-group">
-            <label>Grape Variety</label>
-            <input type="text" .value=${d.grape_variety}
-              @input=${(e) => this._updateEditField("grape_variety", e.target.value)} />
-          </div>
-          <div class="form-group">
-            <label>Alcohol</label>
-            <input type="text" .value=${d.alcohol} placeholder="e.g. 13.5%"
-              @input=${(e) => this._updateEditField("alcohol", e.target.value)} />
-          </div>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label>Purchase Date</label>
-            <input type="date" .value=${d.purchase_date}
-              @input=${(e) => this._updateEditField("purchase_date", e.target.value)} />
-          </div>
-          <div class="form-group">
-            <label>Drink By</label>
-            <input type="text" placeholder="e.g. 2030" .value=${d.drink_by}
-              @input=${(e) => this._updateEditField("drink_by", e.target.value)} />
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label>Notes</label>
-          <textarea .value=${d.notes}
-            @input=${(e) => this._updateEditField("notes", e.target.value)}></textarea>
-        </div>
-      </div>
-
-      <div class="edit-actions">
-        <button class="btn btn-outline" @click=${this._cancelEditingFields}>Cancel</button>
-        <button class="btn btn-primary" ?disabled=${this._saving} @click=${this._saveFields}>
-          ${this._saving ? "Saving..." : "Save"}
-        </button>
-      </div>
-    `;
-    }
-    render() {
-        if (!this.open || !this.wine)
-            return A;
-        const wine = this.wine;
-        const typeColor = WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red;
-        const typeLabel = WINE_TYPE_LABELS[wine.type] || wine.type;
-        return b `
-      <div class="dialog-overlay" @click=${this._close}>
-        <div class="dialog" style="position:relative" @click=${(e) => e.stopPropagation()}>
-          <div class="dialog-top-bar">
-            ${this.mode !== "winelist"
-            ? b `<button class="icon-btn" title="Edit" @click=${this._startEditingFields}>✏️</button>`
-            : A}
-            <button class="icon-btn close-btn" title="Close" @click=${this._close}>✕</button>
-          </div>
-          <div class="wine-header">
-            ${wine.image_url
-            ? b `<img class="wine-image" src="${wine.image_url}" alt="${wine.name}" />`
-            : b `
-                  <div class="wine-image-placeholder" style="background: ${typeColor}">
-                    🍷
-                  </div>
-                `}
-            <div class="wine-title">
-              <div class="wine-name">${wine.name}</div>
-              <div class="wine-winery">${wine.winery}</div>
-              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                <span class="wine-type-badge" style="background: ${typeColor}">
-                  ${typeLabel}
-                </span>
-                ${wine.disposition
-            ? b `<span class="wine-type-badge" style="background: ${wine.disposition === "D" ? "#2e7d32" :
-                wine.disposition === "H" ? "#1565c0" :
-                    wine.disposition === "P" ? "#c62828" : "#666"}">${wine.disposition === "D" ? "Drink Now" :
-                wine.disposition === "H" ? "Hold" :
-                    wine.disposition === "P" ? "Past Peak" : wine.disposition}</span>`
-            : A}
-              </div>
-              ${wine.rating
-            ? b `
-                    <div class="wine-rating">
-                      <span class="rating-star">★</span>
-                      ${wine.rating.toFixed(1)}
-                      <span style="font-size:0.8em;color:var(--wc-text-secondary)">
-                        Vivino${wine.ratings_count ? ` (${wine.ratings_count.toLocaleString()} ratings)` : ""}
-                      </span>
-                    </div>
-                  `
-            : A}
-              ${this.mode !== "winelist"
-            ? b `
-                    <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:0.9em">
-                      <span style="font-size:0.8em;color:var(--wc-text-secondary)">My Rating</span>
-                      <star-rating
-                        .value=${this._userRating}
-                        .readonly=${!this._editing}
-                        .size=${20}
-                        @rating-change=${this._onRatingChange}
-                      ></star-rating>
-                      ${!this._editing && this._userRating === 0
-                ? b `<span class="no-rating" style="font-size:0.8em">Not rated</span>`
-                : A}
-                      <button class="edit-toggle" style="font-size:0.75em;padding:2px 6px" @click=${() => (this._editing = !this._editing)}>
-                        ${this._editing ? "Cancel" : "Edit"}
-                      </button>
-                    </div>
-                  `
-            : A}
-            </div>
-          </div>
-
-          ${this._editingFields
-            ? this._renderEditForm()
-            : b `
-                <!-- Drink by banner for disposition wines -->
-                ${wine.disposition
-                ? b `
-                      <div class="drink-by-banner ${wine.disposition === 'D' ? 'drink' : wine.disposition === 'H' ? 'hold' : wine.disposition === 'P' ? 'past' : ''}">
-                        ${wine.disposition === "D"
-                    ? (wine.drink_window ? `Drink now \u2022 ${wine.drink_window}` : "Drink now")
-                    : wine.disposition === "H"
-                        ? (wine.drink_window ? `Hold \u2022 drink ${wine.drink_window}` : wine.drink_by ? `Hold until ${wine.drink_by}` : "Hold")
-                        : (wine.drink_window ? `Past peak \u2022 was ${wine.drink_window}` : "Past peak")}
-                      </div>
-                    `
-                : A}
-
-                <!-- Description -->
-                ${wine.description
-                ? b `<div class="wine-description">${wine.description}</div>`
-                : A}
-
-                <!-- Info chips (grape, food, alcohol, etc.) -->
-                ${wine.food_pairings || wine.alcohol || wine.grape_variety
-                ? b `
-                      <div class="info-chips">
-                        ${wine.grape_variety
-                    ? b `<span class="info-chip"><span class="info-chip-icon">🍇</span> ${wine.grape_variety}</span>`
-                    : A}
-                        ${wine.alcohol
-                    ? b `<span class="info-chip"><span class="info-chip-icon">%</span> ${wine.alcohol}</span>`
-                    : A}
-                        ${wine.food_pairings
-                    ? this._splitPairings(wine.food_pairings).map((food) => b `<span class="info-chip">${food}</span>`)
-                    : A}
-                      </div>
-                    `
-                : A}
-
-                <!-- AI Ratings -->
-                ${wine.ai_ratings && Object.keys(wine.ai_ratings).length > 0
-                ? b `
-                      <div class="ai-ratings">
-                        ${wine.ai_ratings.rating_ws ? b `<span class="ai-rating-chip">${wine.ai_ratings.rating_ws} <span class="source">WS</span></span>` : A}
-                        ${wine.ai_ratings.rating_rp ? b `<span class="ai-rating-chip">${wine.ai_ratings.rating_rp} <span class="source">RP</span></span>` : A}
-                        ${wine.ai_ratings.rating_jd ? b `<span class="ai-rating-chip">${wine.ai_ratings.rating_jd} <span class="source">JD</span></span>` : A}
-                        ${wine.ai_ratings.rating_ag ? b `<span class="ai-rating-chip">${wine.ai_ratings.rating_ag} <span class="source">AG</span></span>` : A}
-                      </div>
-                    `
-                : A}
-
-                <!-- Drink window (shown when no disposition banner) -->
-                ${!(wine.disposition) && wine.drink_window
-                ? b `<div class="drink-window">Drink window: ${wine.drink_window}</div>`
-                : A}
-
-                <div class="details-grid">
-                  ${wine.vintage
-                ? b `<div class="detail-item"><span class="detail-label">Vintage</span><span class="detail-value">${wine.vintage}</span></div>`
-                : A}
-                  ${wine.region
-                ? b `<div class="detail-item"><span class="detail-label">Region</span><span class="detail-value">${wine.region}</span></div>`
-                : A}
-                  ${wine.country
-                ? b `<div class="detail-item"><span class="detail-label">Country</span><span class="detail-value">${wine.country}</span></div>`
-                : A}
-                  ${wine.grape_variety
-                ? b `<div class="detail-item"><span class="detail-label">Grape</span><span class="detail-value">${wine.grape_variety}</span></div>`
-                : A}
-                  ${wine.price
-                ? b `<div class="detail-item"><span class="detail-label">${this.mode === "winelist" ? "Price" : "Purchase Price"}</span><span class="detail-value">$${wine.price.toFixed(2)}</span></div>`
-                : A}
-                  ${wine.retail_price
-                ? b `<div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">$${wine.retail_price.toFixed(2)}</span></div>`
-                : A}
-                  ${wine.purchase_date && this.mode === "cellar"
-                ? b `<div class="detail-item"><span class="detail-label">Purchased</span><span class="detail-value">${wine.purchase_date}</span></div>`
-                : A}
-                  ${wine.drink_by
-                ? b `<div class="detail-item"><span class="detail-label">Drink By</span><span class="detail-value">${wine.drink_by}</span></div>`
-                : A}
-                  ${wine.barcode && this.mode === "cellar"
-                ? b `<div class="detail-item"><span class="detail-label">Barcode</span><span class="detail-value">${wine.barcode}</span></div>`
-                : A}
-                </div>
-
-                ${wine.notes
-                ? b `
-                      <div class="wine-notes">
-                        <div class="detail-label" style="margin-bottom: 4px">Notes</div>
-                        <div class="wine-notes-text">${wine.notes}</div>
-                      </div>
-                    `
-                : A}
-
-                ${this.mode !== "winelist" ? b `
-                <div class="divider"></div>
-
-                <!-- Tasting Notes section -->
-                <div class="section">
-                  <div class="section-header">
-                    <span class="section-title">Tasting Notes</span>
-                  </div>
-                  ${this._editing
-                ? b `
-                        <div class="tasting-grid">
-                          <div class="tasting-field">
-                            <label>Aroma</label>
-                            <textarea
-                              .value=${this._tastingNotes.aroma}
-                              placeholder="Berries, oak, vanilla..."
-                              @input=${(e) => this._onTastingChange("aroma", e)}
-                            ></textarea>
-                          </div>
-                          <div class="tasting-field">
-                            <label>Taste</label>
-                            <textarea
-                              .value=${this._tastingNotes.taste}
-                              placeholder="Full-bodied, tannic..."
-                              @input=${(e) => this._onTastingChange("taste", e)}
-                            ></textarea>
-                          </div>
-                          <div class="tasting-field">
-                            <label>Finish</label>
-                            <textarea
-                              .value=${this._tastingNotes.finish}
-                              placeholder="Long, smooth..."
-                              @input=${(e) => this._onTastingChange("finish", e)}
-                            ></textarea>
-                          </div>
-                          <div class="tasting-field">
-                            <label>Overall</label>
-                            <textarea
-                              .value=${this._tastingNotes.overall}
-                              placeholder="Overall impression..."
-                              @input=${(e) => this._onTastingChange("overall", e)}
-                            ></textarea>
-                          </div>
-                        </div>
-                        <div style="margin-top: 12px; text-align: right">
-                          <button
-                            class="btn btn-primary"
-                            ?disabled=${this._saving}
-                            @click=${this._saveRating}
-                          >
-                            ${this._saving ? "Saving..." : "Save"}
-                          </button>
-                        </div>
-                      `
-                : this._hasTastingNotes()
-                    ? b `
-                          <div class="tasting-grid">
-                            ${this._tastingNotes.aroma
-                        ? b `<div class="tasting-field"><label>Aroma</label><div class="tasting-value">${this._tastingNotes.aroma}</div></div>`
-                        : A}
-                            ${this._tastingNotes.taste
-                        ? b `<div class="tasting-field"><label>Taste</label><div class="tasting-value">${this._tastingNotes.taste}</div></div>`
-                        : A}
-                            ${this._tastingNotes.finish
-                        ? b `<div class="tasting-field"><label>Finish</label><div class="tasting-value">${this._tastingNotes.finish}</div></div>`
-                        : A}
-                            ${this._tastingNotes.overall
-                        ? b `<div class="tasting-field full-width"><label>Overall</label><div class="tasting-value">${this._tastingNotes.overall}</div></div>`
-                        : A}
-                          </div>
-                        `
-                    : b `<div class="no-rating">No tasting notes yet. Tap Edit to add your thoughts.</div>`}
-                </div>
-                ` : A}
-
-                ${this.mode === "cellar" ? b `
-                <div class="actions">
-                  <button class="btn btn-primary" style="background:#8e24aa"
-                    ?disabled=${this._refreshing} @click=${this._refreshFromVivino}>
-                    ${this._refreshing ? "..." : "🍇 Vivino"}
-                  </button>
-                  ${this.hasGemini
-                ? b `<button class="btn btn-primary" style="background:#1565c0"
-                        ?disabled=${this._analyzing} @click=${this._analyzeWithAI}>
-                        ${this._analyzing ? "..." : "🤖 AI Scan"}
-                      </button>`
-                : A}
-                  <button class="btn btn-primary" style="background:#546e7a" @click=${this._onCopy}>📋 Copy</button>
-                  <button class="btn btn-primary" style="background:#6d4c41" @click=${this._onMove}>↔ Move</button>
-                  <button class="btn btn-primary" style="background:#c62828"
-                    @click=${this._onRemove}>✕ Remove</button>
-                </div>
-                ` : A}
-
-                ${this.mode === "buylist" ? b `
-                <div class="actions">
-                  <button class="btn btn-primary" style="background:#8e24aa"
-                    ?disabled=${this._refreshing} @click=${this._refreshFromVivino}>
-                    ${this._refreshing ? "..." : "🍇 Vivino"}
-                  </button>
-                  ${this.hasGemini
-                ? b `<button class="btn btn-primary" style="background:#1565c0"
-                        ?disabled=${this._analyzing} @click=${this._analyzeWithAI}>
-                        ${this._analyzing ? "..." : "🤖 AI Scan"}
-                      </button>`
-                : A}
-                  <button class="btn btn-primary" style="background:#c62828"
-                    @click=${this._onRemove}>✕ Remove</button>
-                </div>
-                ` : A}
-              `}
-          ${this._showRemoveConfirm ? b `
-            <div style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px">
-              <div style="background:var(--wc-bg);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center" @click=${(e) => e.stopPropagation()}>
-                <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">Remove Wine</h3>
-                <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">Why are you removing this bottle?</p>
-                <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center">
-                  ${REMOVAL_REASONS.map(r => b `
-                    <button
-                      style="padding:8px 16px;border-radius:20px;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text);cursor:pointer;font-size:0.85em;transition:all 0.15s"
-                      @click=${() => this._confirmRemove(r.id)}
-                    >${r.label}</button>
-                  `)}
-                </div>
-                <button
-                  style="margin-top:12px;padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.8em"
-                  @click=${() => (this._showRemoveConfirm = false)}
-                >Cancel</button>
-              </div>
-            </div>
-          ` : A}
-        </div>
-      </div>
-    `;
-    }
-};
-WineDetailDialog.styles = [
-    sharedStyles,
-    i$3 `
-      .dialog-top-bar {
-        display: flex;
-        justify-content: flex-end;
-        align-items: center;
-        gap: 4px;
-        padding: 8px 12px 0;
-      }
-
-      .icon-btn {
-        background: none;
-        border: none;
-        cursor: pointer;
-        font-size: 1.1em;
-        padding: 6px 8px;
-        border-radius: 6px;
-        color: var(--wc-text-secondary);
-        transition: background 0.2s;
-        line-height: 1;
-      }
-
-      .icon-btn:hover {
-        background: rgba(255, 255, 255, 0.1);
-      }
-
-      .icon-btn.close-btn {
-        font-size: 1.3em;
-        font-weight: 600;
-      }
-
-      .wine-header {
-        display: flex;
-        gap: 16px;
-        padding: 4px 20px 20px;
-      }
-
-      .wine-image {
-        width: 90px;
-        height: 130px;
-        border-radius: 8px;
-        object-fit: cover;
-        background: #f0f0f0;
-        flex-shrink: 0;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-      }
-
-      .wine-image-placeholder {
-        width: 90px;
-        height: 130px;
-        border-radius: 8px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 2em;
-        flex-shrink: 0;
-        color: #fff;
-        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-      }
-
-      .wine-title {
-        flex: 1;
-        min-width: 0;
-      }
-
-      .wine-name {
-        font-size: 1.2em;
-        font-weight: 600;
-        color: var(--wc-text);
-        margin-bottom: 4px;
-      }
-
-      .wine-winery {
-        font-size: 0.9em;
-        color: var(--wc-text-secondary);
-        margin-bottom: 8px;
-      }
-
-      .wine-type-badge {
-        display: inline-block;
-        padding: 2px 10px;
-        border-radius: 12px;
-        font-size: 0.75em;
-        font-weight: 600;
-        color: #fff;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-      }
-
-      .wine-rating {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        margin-top: 8px;
-        font-size: 0.9em;
-      }
-
-      .rating-star {
-        color: #f5a623;
-      }
-
-      .drink-by-banner {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 10px 20px;
-        font-size: 0.9em;
-        font-weight: 500;
-      }
-
-      .drink-by-banner.drink {
-        background: rgba(46, 125, 50, 0.12);
-        color: #2e7d32;
-      }
-
-      .drink-by-banner.hold {
-        background: rgba(21, 101, 192, 0.12);
-        color: #1565c0;
-      }
-
-      .drink-by-banner.past {
-        background: rgba(198, 40, 40, 0.12);
-        color: #c62828;
-      }
-
-      .wine-description {
-        padding: 0 20px 12px;
-        font-size: 0.85em;
-        color: var(--wc-text-secondary);
-        line-height: 1.4;
-        font-style: italic;
-      }
-
-      .info-chips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        padding: 0 20px 12px;
-      }
-
-      .info-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        padding: 4px 10px;
-        border-radius: 16px;
-        font-size: 0.75em;
-        background: rgba(255, 255, 255, 0.08);
-        border: 1px solid var(--wc-border);
-        color: var(--wc-text-secondary);
-      }
-
-      .info-chip-icon {
-        font-size: 1.1em;
-      }
-
-      .details-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
-        padding: 0 20px 16px;
-      }
-
-      .detail-item {
-        display: flex;
-        flex-direction: column;
-      }
-
-      .detail-label {
-        font-size: 0.75em;
-        color: var(--wc-text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 2px;
-      }
-
-      .detail-value {
-        font-size: 0.95em;
-        color: var(--wc-text);
-        font-weight: 500;
-      }
-
-      .wine-notes {
-        padding: 0 20px 16px;
-      }
-
-      .wine-notes-text {
-        font-size: 0.9em;
-        color: var(--wc-text-secondary);
-        font-style: italic;
-        background: rgba(128, 128, 128, 0.08);
-        padding: 10px;
-        border-radius: 8px;
-      }
-
-      /* Rating & Tasting Notes section */
-      .section {
-        padding: 0 20px 16px;
-      }
-
-      .section-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 8px;
-      }
-
-      .section-title {
-        font-size: 0.85em;
-        font-weight: 600;
-        color: var(--wc-text);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-      }
-
-      .edit-toggle {
-        background: none;
-        border: none;
-        color: var(--wc-primary-text);
-        cursor: pointer;
-        font-size: 0.85em;
-        font-weight: 500;
-        padding: 4px 8px;
-        border-radius: 6px;
-        transition: background 0.2s;
-      }
-
-      .edit-toggle:hover {
-        background: rgba(109, 76, 65, 0.1);
-      }
-
-      .rating-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 6px;
-      }
-
-      .rating-label {
-        font-size: 0.8em;
-        color: var(--wc-text-secondary);
-        min-width: 70px;
-      }
-
-      .no-rating {
-        font-size: 0.85em;
-        color: var(--wc-text-secondary);
-        font-style: italic;
-      }
-
-      .tasting-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-      }
-
-      .tasting-field {
-        display: flex;
-        flex-direction: column;
-      }
-
-      .tasting-field.full-width {
-        grid-column: 1 / -1;
-      }
-
-      .tasting-field label {
-        font-size: 0.75em;
-        color: var(--wc-text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 4px;
-      }
-
-      .tasting-field textarea {
-        font-family: inherit;
-        font-size: 0.85em;
-        padding: 8px;
-        border: 1px solid var(--wc-border, #e0e0e0);
-        border-radius: 8px;
-        resize: vertical;
-        min-height: 50px;
-        background: var(--wc-bg);
-        color: var(--wc-text);
-      }
-
-      .tasting-field textarea:focus {
-        outline: none;
-        border-color: var(--wc-primary-text);
-      }
-
-      .tasting-value {
-        font-size: 0.85em;
-        color: var(--wc-text);
-        background: rgba(128, 128, 128, 0.08);
-        padding: 8px;
-        border-radius: 8px;
-        min-height: 20px;
-      }
-
-      .ai-ratings {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        padding: 0 20px 12px;
-      }
-
-      .ai-rating-chip {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        padding: 4px 10px;
-        border-radius: 16px;
-        font-size: 0.75em;
-        background: rgba(245, 166, 35, 0.12);
-        border: 1px solid rgba(245, 166, 35, 0.3);
-        color: #f5a623;
-        font-weight: 600;
-      }
-
-      .ai-rating-chip .source {
-        font-weight: 400;
-        opacity: 0.8;
-      }
-
-      .drink-window {
-        font-size: 0.8em;
-        color: var(--wc-text-secondary);
-        padding: 0 20px 8px;
-      }
-
-      .divider {
-        height: 1px;
-        background: var(--wc-border, #e0e0e0);
-        margin: 0 20px 16px;
-      }
-
-      .actions {
-        display: flex;
-        gap: 6px;
-        padding: 10px 16px 16px;
-        border-top: 1px solid var(--wc-border);
-        justify-content: center;
-      }
-
-      .actions .btn {
-        font-size: 0.8em;
-        padding: 6px 10px;
-        white-space: nowrap;
-      }
-
-      /* Edit form styles */
-      .edit-form {
-        padding: 0 20px 16px;
-      }
-
-      .edit-form .form-group {
-        margin-bottom: 12px;
-      }
-
-      .edit-form .form-group label {
-        display: block;
-        font-size: 0.75em;
-        font-weight: 500;
-        color: var(--wc-text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 4px;
-      }
-
-      .edit-form .form-group input,
-      .edit-form .form-group select,
-      .edit-form .form-group textarea {
-        width: 100%;
-        padding: 8px 12px;
-        border: 1px solid var(--wc-border);
-        border-radius: 8px;
-        font-size: 0.9em;
-        background: var(--wc-bg);
-        color: var(--wc-text);
-        box-sizing: border-box;
-        font-family: inherit;
-      }
-
-      .edit-form .form-group textarea {
-        min-height: 60px;
-        resize: vertical;
-      }
-
-      .edit-form .form-group input:focus,
-      .edit-form .form-group select:focus,
-      .edit-form .form-group textarea:focus {
-        outline: none;
-        border-color: var(--wc-primary);
-      }
-
-      .edit-form .form-row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
-      }
-
-      .edit-actions {
-        display: flex;
-        gap: 8px;
-        justify-content: flex-end;
-        padding: 12px 20px 20px;
-        border-top: 1px solid var(--wc-border);
-      }
-
-      @media (max-width: 599px) {
-        .tasting-grid {
-          grid-template-columns: 1fr;
-        }
-        .tasting-field.full-width {
-          grid-column: 1;
-        }
-        .edit-form .form-row {
-          grid-template-columns: 1fr;
-        }
-      }
-    `,
-];
-__decorate([
-    n({ attribute: false })
-], WineDetailDialog.prototype, "wine", void 0);
-__decorate([
-    n({ attribute: false })
-], WineDetailDialog.prototype, "hass", void 0);
-__decorate([
-    n({ type: Boolean })
-], WineDetailDialog.prototype, "open", void 0);
-__decorate([
-    n({ type: String })
-], WineDetailDialog.prototype, "mode", void 0);
-__decorate([
-    r()
-], WineDetailDialog.prototype, "_editing", void 0);
-__decorate([
-    r()
-], WineDetailDialog.prototype, "_editingFields", void 0);
-__decorate([
-    r()
-], WineDetailDialog.prototype, "_editData", void 0);
-__decorate([
-    r()
-], WineDetailDialog.prototype, "_userRating", void 0);
-__decorate([
-    r()
-], WineDetailDialog.prototype, "_tastingNotes", void 0);
-__decorate([
-    r()
-], WineDetailDialog.prototype, "_saving", void 0);
-__decorate([
-    r()
-], WineDetailDialog.prototype, "_refreshing", void 0);
-__decorate([
-    r()
-], WineDetailDialog.prototype, "_analyzing", void 0);
-__decorate([
-    r()
-], WineDetailDialog.prototype, "_showRemoveConfirm", void 0);
-__decorate([
-    n({ type: Boolean })
-], WineDetailDialog.prototype, "hasGemini", void 0);
-WineDetailDialog = __decorate([
-    t("wine-detail-dialog")
-], WineDetailDialog);
-
-let BarcodeScanner = class BarcodeScanner extends i {
-    constructor() {
-        super(...arguments);
-        this.active = false;
-        this._error = "";
-        this._scanning = false;
-        this._stream = null;
-        this._detector = null;
-        this._rafId = 0;
-    }
-    updated(changedProps) {
-        if (changedProps.has("active")) {
-            if (this.active) {
-                this._startScanning();
-            }
-            else {
-                this._stopScanning();
-            }
-        }
-    }
-    disconnectedCallback() {
-        super.disconnectedCallback();
-        this._stopScanning();
-    }
-    async _startScanning() {
-        if (this._scanning)
-            return;
-        this._error = "";
-        // Check for BarcodeDetector support
-        if (!("BarcodeDetector" in window)) {
-            this._error = "Barcode scanning is not supported on this browser. Please enter the barcode manually below.";
-            this.dispatchEvent(new CustomEvent("scanner-error", {
-                detail: { error: this._error },
-                bubbles: true,
-                composed: true,
-            }));
-            return;
-        }
-        try {
-            this._stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
-                audio: false,
-            });
-            await this.updateComplete;
-            const video = this.renderRoot.querySelector("video");
-            if (video && this._stream) {
-                video.srcObject = this._stream;
-                await video.play();
-            }
-            this._detector = new window.BarcodeDetector({
-                formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128"],
-            });
-            this._scanning = true;
-            this._scanFrame();
-        }
-        catch (err) {
-            const msg = err?.message || String(err);
-            if (msg.includes("NotAllowed") || msg.includes("Permission")) {
-                this._error = "Camera access denied. Please allow camera access in your browser settings.";
-            }
-            else if (msg.includes("NotFound") || msg.includes("no camera")) {
-                this._error = "No camera found on this device.";
-            }
-            else {
-                this._error = `Camera error: ${msg}`;
-            }
-            this.dispatchEvent(new CustomEvent("scanner-error", {
-                detail: { error: this._error },
-                bubbles: true,
-                composed: true,
-            }));
-        }
-    }
-    async _scanFrame() {
-        if (!this._scanning || !this._detector)
-            return;
-        const video = this.renderRoot.querySelector("video");
-        if (!video || video.readyState < 2) {
-            this._rafId = requestAnimationFrame(() => this._scanFrame());
-            return;
-        }
-        try {
-            const barcodes = await this._detector.detect(video);
-            if (barcodes.length > 0) {
-                this._onDetected(barcodes[0].rawValue);
-                return;
-            }
-        }
-        catch {
-            // Detection error on this frame, continue
-        }
-        this._rafId = requestAnimationFrame(() => this._scanFrame());
-    }
-    _stopScanning() {
-        this._scanning = false;
-        if (this._rafId) {
-            cancelAnimationFrame(this._rafId);
-            this._rafId = 0;
-        }
-        if (this._stream) {
-            this._stream.getTracks().forEach((t) => t.stop());
-            this._stream = null;
-        }
-        this._detector = null;
-    }
-    _onDetected(barcode) {
-        this._stopScanning();
-        this.dispatchEvent(new CustomEvent("barcode-detected", {
-            detail: { barcode },
-            bubbles: true,
-            composed: true,
-        }));
-    }
-    render() {
-        if (!this.active)
-            return A;
-        return b `
-      ${this._error
-            ? b `<div class="error-message">${this._error}</div>`
-            : b `
-            <div class="scanner-container">
-              <video autoplay playsinline muted></video>
-              <div class="scan-overlay">
-                <div class="scan-corners"></div>
-                <div class="scan-line"></div>
-              </div>
-            </div>
-            <div class="hint">Point the camera at the barcode on the bottle</div>
-          `}
-    `;
-    }
-};
-BarcodeScanner.styles = [
-    sharedStyles,
-    i$3 `
-      :host {
-        display: block;
-      }
-
-      .scanner-container {
-        position: relative;
-        width: 100%;
-        border-radius: 12px;
-        overflow: hidden;
-        background: #000;
-        max-height: 300px;
-      }
-
-      video {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        display: block;
-        max-height: 300px;
-      }
-
-      .scan-overlay {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        pointer-events: none;
-        z-index: 10;
-      }
-
-      .scan-line {
-        position: absolute;
-        left: 10%;
-        right: 10%;
-        height: 2px;
-        background: rgba(255, 50, 50, 0.8);
-        box-shadow: 0 0 8px rgba(255, 50, 50, 0.5);
-        animation: scanMove 2s ease-in-out infinite;
-      }
-
-      @keyframes scanMove {
-        0%, 100% { top: 20%; }
-        50% { top: 80%; }
-      }
-
-      .scan-corners {
-        position: absolute;
-        top: 15%;
-        left: 15%;
-        right: 15%;
-        bottom: 15%;
-        border: 2px solid rgba(255, 255, 255, 0.6);
-        border-radius: 8px;
-      }
-
-      .error-message {
-        padding: 16px;
-        text-align: center;
-        color: #ef5350;
-        font-size: 0.9em;
-      }
-
-      .hint {
-        text-align: center;
-        padding: 8px;
-        font-size: 0.8em;
-        color: var(--wc-text-secondary);
-      }
-
-      .fallback-note {
-        text-align: center;
-        padding: 12px;
-        font-size: 0.85em;
-        color: var(--wc-text-secondary);
-        font-style: italic;
-      }
-    `,
-];
-__decorate([
-    n({ type: Boolean })
-], BarcodeScanner.prototype, "active", void 0);
-__decorate([
-    r()
-], BarcodeScanner.prototype, "_error", void 0);
-__decorate([
-    r()
-], BarcodeScanner.prototype, "_scanning", void 0);
-BarcodeScanner = __decorate([
-    t("barcode-scanner")
-], BarcodeScanner);
 
 let LabelCamera = class LabelCamera extends i {
     constructor() {
@@ -3212,11 +2165,1743 @@ LabelCamera = __decorate([
     t("label-camera")
 ], LabelCamera);
 
+let WineDetailDialog = class WineDetailDialog extends i {
+    constructor() {
+        super(...arguments);
+        this.wine = null;
+        this.cabinets = [];
+        this.open = false;
+        this.mode = "cellar";
+        this._editing = false;
+        this._editingFields = false;
+        this._editData = {};
+        this._userRating = 0;
+        this._tastingNotes = { aroma: "", taste: "", finish: "", overall: "" };
+        this._saving = false;
+        this._refreshing = false;
+        this._analyzing = false;
+        this._showRemoveConfirm = false;
+        this._pendingVivinoImage = null;
+        this._showPhotoCamera = false;
+        this._photoBusy = false;
+        this._photoSide = "front";
+        this._photoSwipeStartX = null;
+        this._aiFallbackReason = null;
+        this.hasGemini = false;
+        this.aiFallbackAlways = false;
+        this.currency = "USD";
+    }
+    updated(changedProps) {
+        if (changedProps.has("wine") && this.wine) {
+            this._userRating = this.wine.user_rating ?? 0;
+            this._tastingNotes = this.wine.tasting_notes
+                ? { ...this.wine.tasting_notes }
+                : { aroma: "", taste: "", finish: "", overall: "" };
+            this._editing = false;
+            this._editingFields = false;
+            this._photoSide = "front";
+        }
+    }
+    _close() {
+        this.open = false;
+        this._editing = false;
+        this._editingFields = false;
+        this.dispatchEvent(new CustomEvent("close"));
+    }
+    _startEditingFields() {
+        if (!this.wine)
+            return;
+        this._editData = {
+            name: this.wine.name || "",
+            winery: this.wine.winery || "",
+            vintage: this.wine.vintage,
+            type: this.wine.type || "red",
+            region: this.wine.region || "",
+            country: this.wine.country || "",
+            grape_variety: this.wine.grape_variety || "",
+            price: this.wine.price,
+            retail_price: this.wine.retail_price,
+            purchase_date: this.wine.purchase_date || "",
+            drink_by: this.wine.drink_by || "",
+            notes: this.wine.notes || "",
+            alcohol: this.wine.alcohol || "",
+        };
+        this._editingFields = true;
+    }
+    _cancelEditingFields() {
+        this._editingFields = false;
+        this._editData = {};
+    }
+    _updateEditField(field, value) {
+        this._editData = { ...this._editData, [field]: value };
+    }
+    async _saveFields() {
+        if (!this.wine || !this.hass)
+            return;
+        this._saving = true;
+        try {
+            const updates = { ...this._editData };
+            // Convert empty strings to null for numeric fields
+            if (updates.vintage === "" || updates.vintage === null)
+                updates.vintage = null;
+            else
+                updates.vintage = parseInt(updates.vintage) || null;
+            if (updates.price === "" || updates.price === null)
+                updates.price = null;
+            else
+                updates.price = parseFloat(updates.price) || null;
+            if (updates.retail_price === "" || updates.retail_price === null)
+                updates.retail_price = null;
+            else
+                updates.retail_price = parseFloat(updates.retail_price) || null;
+            if (this.mode === "buylist") {
+                await this.hass.callWS({
+                    type: "wine_cellar/update_buy_list_item",
+                    item_id: this.wine.id,
+                    updates,
+                });
+                this.wine = { ...this.wine, ...updates };
+                this._editingFields = false;
+                this._editData = {};
+                this.dispatchEvent(new CustomEvent("buy-list-updated", { bubbles: true, composed: true }));
+            }
+            else {
+                await this.hass.callWS({
+                    type: "wine_cellar/update_wine",
+                    wine_id: this.wine.id,
+                    updates,
+                });
+                this.wine = { ...this.wine, ...updates };
+                this._editingFields = false;
+                this._editData = {};
+                this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+            }
+        }
+        catch (err) {
+            console.error("Failed to save wine fields", err);
+        }
+        this._saving = false;
+    }
+    _onRemove() {
+        if (!this.wine)
+            return;
+        if (this.mode === "buylist") {
+            this.dispatchEvent(new CustomEvent("remove-buy-list-item", {
+                detail: { item_id: this.wine.id },
+                bubbles: true,
+                composed: true,
+            }));
+            this._close();
+        }
+        else {
+            // Show reason prompt for cellar wines
+            this._showRemoveConfirm = true;
+        }
+    }
+    _confirmRemove(reason) {
+        if (!this.wine)
+            return;
+        this.dispatchEvent(new CustomEvent("remove-wine", {
+            detail: { wine_id: this.wine.id, reason },
+            bubbles: true,
+            composed: true,
+        }));
+        this._showRemoveConfirm = false;
+        this._close();
+    }
+    _onLocate() {
+        if (this.wine) {
+            this.dispatchEvent(new CustomEvent("locate-wine", {
+                detail: { wine: this.wine },
+                bubbles: true,
+                composed: true,
+            }));
+            this._close();
+        }
+    }
+    _onMove() {
+        if (this.wine) {
+            this.dispatchEvent(new CustomEvent("move-wine", {
+                detail: { wine: this.wine },
+                bubbles: true,
+                composed: true,
+            }));
+            this._close();
+        }
+    }
+    _onCopy() {
+        if (this.wine) {
+            this.dispatchEvent(new CustomEvent("copy-wine", {
+                detail: { wine: this.wine },
+                bubbles: true,
+                composed: true,
+            }));
+            this._close();
+        }
+    }
+    _onRatingChange(e) {
+        this._userRating = e.detail.value;
+    }
+    _onTastingChange(field, e) {
+        const value = e.target.value;
+        this._tastingNotes = { ...this._tastingNotes, [field]: value };
+    }
+    async _saveRating() {
+        if (!this.wine || !this.hass)
+            return;
+        this._saving = true;
+        try {
+            const updates = {
+                user_rating: this._userRating || null,
+                tasting_notes: this._hasTastingNotes() ? this._tastingNotes : null,
+            };
+            if (this.mode === "buylist") {
+                await this.hass.callWS({
+                    type: "wine_cellar/update_buy_list_item",
+                    item_id: this.wine.id,
+                    updates,
+                });
+            }
+            else {
+                await this.hass.callWS({
+                    type: "wine_cellar/update_wine",
+                    wine_id: this.wine.id,
+                    updates,
+                });
+            }
+            this.wine = { ...this.wine, ...updates };
+            this._editing = false;
+            this.dispatchEvent(new CustomEvent(this.mode === "buylist" ? "buy-list-updated" : "wine-updated", { bubbles: true, composed: true }));
+        }
+        catch (err) {
+            console.error("Failed to save rating/notes", err);
+        }
+        this._saving = false;
+    }
+    async _refreshFromVivino() {
+        if (!this.wine || !this.hass)
+            return;
+        this._refreshing = true;
+        try {
+            const resp = await this.hass.callWS({
+                type: "wine_cellar/refresh_wine",
+                wine_id: this.wine.id,
+            });
+            if (resp.no_vivino_match) {
+                this._refreshing = false;
+                if (!resp.ai_available) {
+                    alert(resp.error);
+                    return;
+                }
+                if (this.aiFallbackAlways) {
+                    await this._analyzeWithAI();
+                }
+                else {
+                    this._aiFallbackReason = "no_match";
+                }
+                return;
+            }
+            if (resp.error) {
+                alert(resp.error);
+            }
+            else if (resp.wine) {
+                this.wine = { ...this.wine, ...resp.wine };
+                this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+                if (resp.vivino_image_url) {
+                    this._pendingVivinoImage = resp.vivino_image_url;
+                }
+                if (resp.price_needs_ai) {
+                    this._aiFallbackReason = "no_price";
+                }
+            }
+        }
+        catch (err) {
+            console.error("Vivino refresh failed", err);
+        }
+        this._refreshing = false;
+    }
+    async _confirmAiFallback(remember) {
+        this._aiFallbackReason = null;
+        if (remember) {
+            this.dispatchEvent(new CustomEvent("set-ai-fallback-always", {
+                detail: { value: true },
+                bubbles: true,
+                composed: true,
+            }));
+        }
+        await this._analyzeWithAI();
+    }
+    _dismissAiFallback() {
+        this._aiFallbackReason = null;
+    }
+    async _updatePhoto(image_url, field = "image_url") {
+        if (!this.wine || !this.hass)
+            return;
+        this._photoBusy = true;
+        try {
+            const updates = { [field]: image_url };
+            if (this.mode === "buylist") {
+                await this.hass.callWS({ type: "wine_cellar/update_buy_list_item", item_id: this.wine.id, updates });
+            }
+            else {
+                await this.hass.callWS({ type: "wine_cellar/update_wine", wine_id: this.wine.id, updates });
+            }
+            this.wine = { ...this.wine, [field]: image_url };
+            this.dispatchEvent(new CustomEvent(this.mode === "buylist" ? "buy-list-updated" : "wine-updated", { bubbles: true, composed: true }));
+        }
+        catch (err) {
+            console.error("Failed to update photo", err);
+        }
+        this._photoBusy = false;
+    }
+    _onImageSwipeStart(e) {
+        this._photoSwipeStartX = e.clientX;
+    }
+    _onImageSwipeEnd(e) {
+        if (this._photoSwipeStartX === null)
+            return;
+        const dx = e.clientX - this._photoSwipeStartX;
+        this._photoSwipeStartX = null;
+        const THRESHOLD = 30;
+        if (dx <= -THRESHOLD) {
+            this._photoSide = "back";
+        }
+        else if (dx >= THRESHOLD) {
+            this._photoSide = "front";
+        }
+    }
+    _applyVivinoPhoto() {
+        if (!this._pendingVivinoImage)
+            return;
+        const image_url = this._pendingVivinoImage;
+        this._pendingVivinoImage = null;
+        this._updatePhoto(image_url);
+    }
+    _dismissVivinoPhoto() {
+        this._pendingVivinoImage = null;
+    }
+    _onDeletePhoto() {
+        const field = this._photoSide === "back" ? "back_image_url" : "image_url";
+        if (!this.wine?.[field])
+            return;
+        if (!window.confirm(this._photoSide === "back" ? "Delete this bottle's back label photo?" : "Delete this bottle's photo?"))
+            return;
+        this._updatePhoto("", field);
+    }
+    async _onPhotoReplaced(e) {
+        this._showPhotoCamera = false;
+        const thumbUrl = await resizeImageForStorage(e.detail.image);
+        if (thumbUrl) {
+            this._updatePhoto(thumbUrl, this._photoSide === "back" ? "back_image_url" : "image_url");
+        }
+    }
+    async _analyzeWithAI() {
+        if (!this.wine || !this.hass)
+            return;
+        this._analyzing = true;
+        try {
+            const resp = await this.hass.callWS({
+                type: "wine_cellar/analyze_single_wine",
+                wine_id: this.wine.id,
+            });
+            if (resp.error) {
+                alert(resp.error);
+            }
+            else if (resp.wine) {
+                this.wine = { ...this.wine, ...resp.wine };
+                this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+            }
+        }
+        catch (err) {
+            console.error("AI analysis failed", err);
+        }
+        this._analyzing = false;
+    }
+    _splitPairings(text) {
+        const result = [];
+        let depth = 0;
+        let current = "";
+        for (const ch of text) {
+            if (ch === "(")
+                depth++;
+            else if (ch === ")")
+                depth--;
+            if (ch === "," && depth === 0) {
+                if (current.trim())
+                    result.push(current.trim());
+                current = "";
+            }
+            else {
+                current += ch;
+            }
+        }
+        if (current.trim())
+            result.push(current.trim());
+        return result;
+    }
+    _hasTastingNotes() {
+        const n = this._tastingNotes;
+        return !!(n.aroma || n.taste || n.finish || n.overall);
+    }
+    _formatUpdatedAt(iso) {
+        if (!iso)
+            return "";
+        const d = new Date(iso);
+        if (isNaN(d.getTime()))
+            return "";
+        return d.toLocaleString(undefined, {
+            dateStyle: "medium",
+            timeStyle: "short",
+        });
+    }
+    _renderEditForm() {
+        const d = this._editData;
+        return b `
+      <div class="edit-form">
+        <div class="form-group">
+          <label>Wine Name</label>
+          <input type="text" .value=${d.name}
+            @input=${(e) => this._updateEditField("name", e.target.value)} />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Winery</label>
+            <input type="text" .value=${d.winery}
+              @input=${(e) => this._updateEditField("winery", e.target.value)} />
+          </div>
+          <div class="form-group">
+            <label>Vintage</label>
+            <input type="number" .value=${d.vintage?.toString() || ""}
+              @input=${(e) => this._updateEditField("vintage", e.target.value)} />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Type</label>
+            <select .value=${d.type}
+              @change=${(e) => this._updateEditField("type", e.target.value)}>
+              ${Object.entries(WINE_TYPE_LABELS).map(([value, label]) => b `<option value=${value} ?selected=${d.type === value}>${label}</option>`)}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Purchase Price</label>
+            <input type="number" step="0.01" .value=${d.price?.toString() || ""}
+              @input=${(e) => this._updateEditField("price", e.target.value)} />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Current Value</label>
+            <input type="number" step="0.01" .value=${d.retail_price?.toString() || ""}
+              @input=${(e) => this._updateEditField("retail_price", e.target.value)} />
+          </div>
+          <div class="form-group">
+            <label>Region</label>
+            <input type="text" .value=${d.region}
+              @input=${(e) => this._updateEditField("region", e.target.value)} />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Country</label>
+            <input type="text" .value=${d.country}
+              @input=${(e) => this._updateEditField("country", e.target.value)} />
+          </div>
+          <div class="form-group">
+            <label>Grape Variety</label>
+            <input type="text" .value=${d.grape_variety}
+              @input=${(e) => this._updateEditField("grape_variety", e.target.value)} />
+          </div>
+          <div class="form-group">
+            <label>Alcohol</label>
+            <input type="text" .value=${d.alcohol} placeholder="e.g. 13.5%"
+              @input=${(e) => this._updateEditField("alcohol", e.target.value)} />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Purchase Date</label>
+            <input type="date" .value=${d.purchase_date}
+              @input=${(e) => this._updateEditField("purchase_date", e.target.value)} />
+          </div>
+          <div class="form-group">
+            <label>Drink By</label>
+            <input type="text" placeholder="e.g. 2030" .value=${d.drink_by}
+              @input=${(e) => this._updateEditField("drink_by", e.target.value)} />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Notes</label>
+          <textarea .value=${d.notes}
+            @input=${(e) => this._updateEditField("notes", e.target.value)}></textarea>
+        </div>
+      </div>
+
+      <div class="edit-actions">
+        <button class="btn btn-outline" @click=${this._cancelEditingFields}>Cancel</button>
+        <button class="btn btn-primary" ?disabled=${this._saving} @click=${this._saveFields}>
+          ${this._saving ? "Saving..." : "Save"}
+        </button>
+      </div>
+    `;
+    }
+    render() {
+        if (!this.open || !this.wine)
+            return A;
+        const wine = this.wine;
+        const typeColor = WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red;
+        const typeLabel = WINE_TYPE_LABELS[wine.type] || wine.type;
+        const showingBack = this._photoSide === "back";
+        const currentImageUrl = showingBack ? wine.back_image_url : wine.image_url;
+        return b `
+      <div class="dialog-overlay" @click=${this._close}>
+        <div class="dialog" style="position:relative" @click=${(e) => e.stopPropagation()}>
+          <div class="dialog-top-bar">
+            ${this.mode !== "winelist"
+            ? b `<button class="icon-btn" title="Edit" @click=${this._startEditingFields}>✏️</button>`
+            : A}
+            <button class="icon-btn close-btn" title="Close" @click=${this._close}>✕</button>
+          </div>
+          <div class="wine-header">
+            <div class="wine-image-col">
+              <div
+                class="wine-image-wrap"
+                @pointerdown=${this._onImageSwipeStart}
+                @pointerup=${this._onImageSwipeEnd}
+              >
+                ${currentImageUrl
+            ? b `<img class="wine-image" src="${currentImageUrl}" alt="${wine.name}${showingBack ? " (back label)" : ""}" />`
+            : b `
+                      <div class="wine-image-placeholder" style="background: ${typeColor}">
+                        🍷
+                      </div>
+                    `}
+                ${showingBack ? b `<div class="photo-side-badge">Back label</div>` : A}
+                <div class="photo-dots">
+                  <span
+                    class="photo-dot ${this._photoSide === "front" ? "active" : ""}"
+                    title="Front label"
+                    @click=${() => (this._photoSide = "front")}
+                  ></span>
+                  <span
+                    class="photo-dot ${showingBack ? "active" : ""}"
+                    title="Back label"
+                    @click=${() => (this._photoSide = "back")}
+                  ></span>
+                </div>
+                ${this.mode !== "winelist"
+            ? b `
+                      <div class="photo-actions">
+                        <button
+                          class="photo-action-btn"
+                          title="Replace ${showingBack ? "back label " : ""}photo"
+                          ?disabled=${this._photoBusy}
+                          @click=${() => (this._showPhotoCamera = true)}
+                        >📷</button>
+                        ${currentImageUrl
+                ? b `<button
+                              class="photo-action-btn"
+                              title="Delete ${showingBack ? "back label " : ""}photo"
+                              ?disabled=${this._photoBusy}
+                              @click=${this._onDeletePhoto}
+                            >🗑️</button>`
+                : A}
+                      </div>
+                    `
+            : A}
+              </div>
+              ${this.mode === "cellar"
+            ? b `
+                    <div class="wine-location" title="Tap to locate" @click=${this._onLocate}>
+                      📍 ${getWineLocation(wine, this.cabinets).text}
+                    </div>
+                  `
+            : A}
+            </div>
+            <div class="wine-title">
+              <div class="wine-name">${wine.name}</div>
+              <div class="wine-winery">${wine.winery}</div>
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                <span class="wine-type-badge" style="background: ${typeColor}">
+                  ${typeLabel}
+                </span>
+                ${wine.disposition
+            ? b `<span class="wine-type-badge" style="background: ${wine.disposition === "D" ? "#2e7d32" :
+                wine.disposition === "H" ? "#1565c0" :
+                    wine.disposition === "P" ? "#c62828" : "#666"}">${wine.disposition === "D" ? "Drink Now" :
+                wine.disposition === "H" ? "Hold" :
+                    wine.disposition === "P" ? "Past Peak" : wine.disposition}</span>`
+            : A}
+              </div>
+              ${wine.rating
+            ? b `
+                    <div class="wine-rating">
+                      <span class="rating-star">★</span>
+                      ${wine.rating.toFixed(1)}
+                      <span style="font-size:0.8em;color:var(--wc-text-secondary)">
+                        Vivino${wine.ratings_count ? ` (${wine.ratings_count.toLocaleString()} ratings)` : ""}
+                      </span>
+                    </div>
+                  `
+            : A}
+              ${this.mode !== "winelist"
+            ? b `
+                    <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:0.9em">
+                      <span style="font-size:0.8em;color:var(--wc-text-secondary)">My Rating</span>
+                      <star-rating
+                        .value=${this._userRating}
+                        .readonly=${!this._editing}
+                        .size=${20}
+                        @rating-change=${this._onRatingChange}
+                      ></star-rating>
+                      ${!this._editing && this._userRating === 0
+                ? b `<span class="no-rating" style="font-size:0.8em">Not rated</span>`
+                : A}
+                      <button class="edit-toggle" style="font-size:0.75em;padding:2px 6px" @click=${() => (this._editing = !this._editing)}>
+                        ${this._editing ? "Cancel" : "Edit"}
+                      </button>
+                    </div>
+                  `
+            : A}
+            </div>
+          </div>
+
+          ${!this._editingFields && (this.mode === "cellar" || this.mode === "buylist")
+            ? b `
+                <div class="actions">
+                  <button class="btn btn-primary" style="background:#8e24aa"
+                    ?disabled=${this._refreshing} @click=${this._refreshFromVivino}>
+                    ${this._refreshing ? "..." : "🍇 Vivino"}
+                  </button>
+                  ${this.hasGemini
+                ? b `<button class="btn btn-primary" style="background:#1565c0"
+                        ?disabled=${this._analyzing} @click=${this._analyzeWithAI}>
+                        ${this._analyzing ? "..." : "🤖 AI Scan"}
+                      </button>`
+                : A}
+                  ${this.mode === "cellar"
+                ? b `
+                        <button class="btn btn-primary" style="background:#546e7a" @click=${this._onCopy}>📋 Copy</button>
+                        <button class="btn btn-primary" style="background:#6d4c41" @click=${this._onMove}>↔ Move</button>
+                      `
+                : A}
+                  <button class="btn btn-primary" style="background:#c62828"
+                    @click=${this._onRemove}>✕ Remove</button>
+                </div>
+                ${wine.vivino_updated_at || wine.ai_updated_at
+                ? b `
+                      <div style="text-align:center;font-size:0.68em;color:var(--wc-text-secondary);margin-top:-6px;padding-bottom:10px">
+                        ${wine.vivino_updated_at
+                    ? b `${wine.vivino_id
+                        ? b `<a
+                                  href="https://www.vivino.com/w/${wine.vivino_id}"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style="color:inherit;text-decoration:underline"
+                                  @click=${(e) => e.stopPropagation()}
+                                >Vivino</a>`
+                        : b `Vivino`}: ${this._formatUpdatedAt(wine.vivino_updated_at)}`
+                    : A}
+                        ${wine.vivino_updated_at && wine.ai_updated_at ? " · " : A}
+                        ${wine.ai_updated_at ? b `AI: ${this._formatUpdatedAt(wine.ai_updated_at)}` : A}
+                      </div>
+                    `
+                : A}
+              `
+            : A}
+
+          ${this._editingFields
+            ? this._renderEditForm()
+            : b `
+                <!-- Drink by banner for disposition wines -->
+                ${wine.disposition
+                ? b `
+                      <div class="drink-by-banner ${wine.disposition === 'D' ? 'drink' : wine.disposition === 'H' ? 'hold' : wine.disposition === 'P' ? 'past' : ''}">
+                        ${wine.disposition === "D"
+                    ? (wine.drink_window ? `Drink now \u2022 ${wine.drink_window}` : "Drink now")
+                    : wine.disposition === "H"
+                        ? (wine.drink_window ? `Hold \u2022 drink ${wine.drink_window}` : wine.drink_by ? `Hold until ${wine.drink_by}` : "Hold")
+                        : (wine.drink_window ? `Past peak \u2022 was ${wine.drink_window}` : "Past peak")}
+                      </div>
+                    `
+                : A}
+
+                <!-- Description -->
+                ${wine.description
+                ? b `<div class="wine-description">${wine.description}</div>`
+                : A}
+
+                <!-- Info chips (grape, food, alcohol, etc.) -->
+                ${wine.food_pairings || wine.alcohol || wine.grape_variety
+                ? b `
+                      <div class="info-chips">
+                        ${wine.grape_variety
+                    ? b `<span class="info-chip"><span class="info-chip-icon">🍇</span> ${wine.grape_variety}</span>`
+                    : A}
+                        ${wine.alcohol
+                    ? b `<span class="info-chip"><span class="info-chip-icon">%</span> ${wine.alcohol}</span>`
+                    : A}
+                        ${wine.food_pairings
+                    ? this._splitPairings(wine.food_pairings).map((food) => b `<span class="info-chip">${food}</span>`)
+                    : A}
+                      </div>
+                    `
+                : A}
+
+                <!-- AI Ratings -->
+                ${wine.ai_ratings && Object.keys(wine.ai_ratings).length > 0
+                ? b `
+                      <div class="ai-ratings">
+                        ${wine.ai_ratings.rating_ws ? b `<span class="ai-rating-chip">${wine.ai_ratings.rating_ws} <span class="source">WS</span></span>` : A}
+                        ${wine.ai_ratings.rating_rp ? b `<span class="ai-rating-chip">${wine.ai_ratings.rating_rp} <span class="source">RP</span></span>` : A}
+                        ${wine.ai_ratings.rating_jd ? b `<span class="ai-rating-chip">${wine.ai_ratings.rating_jd} <span class="source">JD</span></span>` : A}
+                        ${wine.ai_ratings.rating_ag ? b `<span class="ai-rating-chip">${wine.ai_ratings.rating_ag} <span class="source">AG</span></span>` : A}
+                      </div>
+                    `
+                : A}
+
+                <!-- Drink window (shown when no disposition banner) -->
+                ${!(wine.disposition) && wine.drink_window
+                ? b `<div class="drink-window">Drink window: ${wine.drink_window}</div>`
+                : A}
+
+                <div class="details-grid">
+                  ${wine.vintage
+                ? b `<div class="detail-item"><span class="detail-label">Vintage</span><span class="detail-value">${wine.vintage}</span></div>`
+                : A}
+                  ${wine.region
+                ? b `<div class="detail-item"><span class="detail-label">Region</span><span class="detail-value">${wine.region}</span></div>`
+                : A}
+                  ${wine.country
+                ? b `<div class="detail-item"><span class="detail-label">Country</span><span class="detail-value">${wine.country}</span></div>`
+                : A}
+                  ${wine.grape_variety
+                ? b `<div class="detail-item"><span class="detail-label">Grape</span><span class="detail-value">${wine.grape_variety}</span></div>`
+                : A}
+                  ${wine.price
+                ? b `<div class="detail-item"><span class="detail-label">${this.mode === "winelist" ? "Price" : "Purchase Price"}</span><span class="detail-value">${this.currency} ${wine.price.toFixed(2)}</span></div>`
+                : A}
+                  ${wine.retail_price
+                ? b `<div class="detail-item"><span class="detail-label">Current Value</span><span class="detail-value">${wine.retail_price_currency || this.currency} ${wine.retail_price.toFixed(2)}</span></div>`
+                : A}
+                  ${wine.purchase_date && this.mode === "cellar"
+                ? b `<div class="detail-item"><span class="detail-label">Purchased</span><span class="detail-value">${wine.purchase_date}</span></div>`
+                : A}
+                  ${wine.drink_by
+                ? b `<div class="detail-item"><span class="detail-label">Drink By</span><span class="detail-value">${wine.drink_by}</span></div>`
+                : A}
+                  ${wine.barcode && this.mode === "cellar"
+                ? b `<div class="detail-item"><span class="detail-label">Barcode</span><span class="detail-value">${wine.barcode}</span></div>`
+                : A}
+                </div>
+
+                ${wine.notes
+                ? b `
+                      <div class="wine-notes">
+                        <div class="detail-label" style="margin-bottom: 4px">Notes</div>
+                        <div class="wine-notes-text">${wine.notes}</div>
+                      </div>
+                    `
+                : A}
+
+                ${this.mode !== "winelist" ? b `
+                <div class="divider"></div>
+
+                <!-- Tasting Notes section -->
+                <div class="section">
+                  <div class="section-header">
+                    <span class="section-title">Tasting Notes</span>
+                  </div>
+                  ${this._editing
+                ? b `
+                        <div class="tasting-grid">
+                          <div class="tasting-field">
+                            <label>Aroma</label>
+                            <textarea
+                              .value=${this._tastingNotes.aroma}
+                              placeholder="Berries, oak, vanilla..."
+                              @input=${(e) => this._onTastingChange("aroma", e)}
+                            ></textarea>
+                          </div>
+                          <div class="tasting-field">
+                            <label>Taste</label>
+                            <textarea
+                              .value=${this._tastingNotes.taste}
+                              placeholder="Full-bodied, tannic..."
+                              @input=${(e) => this._onTastingChange("taste", e)}
+                            ></textarea>
+                          </div>
+                          <div class="tasting-field">
+                            <label>Finish</label>
+                            <textarea
+                              .value=${this._tastingNotes.finish}
+                              placeholder="Long, smooth..."
+                              @input=${(e) => this._onTastingChange("finish", e)}
+                            ></textarea>
+                          </div>
+                          <div class="tasting-field">
+                            <label>Overall</label>
+                            <textarea
+                              .value=${this._tastingNotes.overall}
+                              placeholder="Overall impression..."
+                              @input=${(e) => this._onTastingChange("overall", e)}
+                            ></textarea>
+                          </div>
+                        </div>
+                        <div style="margin-top: 12px; text-align: right">
+                          <button
+                            class="btn btn-primary"
+                            ?disabled=${this._saving}
+                            @click=${this._saveRating}
+                          >
+                            ${this._saving ? "Saving..." : "Save"}
+                          </button>
+                        </div>
+                      `
+                : this._hasTastingNotes()
+                    ? b `
+                          <div class="tasting-grid">
+                            ${this._tastingNotes.aroma
+                        ? b `<div class="tasting-field"><label>Aroma</label><div class="tasting-value">${this._tastingNotes.aroma}</div></div>`
+                        : A}
+                            ${this._tastingNotes.taste
+                        ? b `<div class="tasting-field"><label>Taste</label><div class="tasting-value">${this._tastingNotes.taste}</div></div>`
+                        : A}
+                            ${this._tastingNotes.finish
+                        ? b `<div class="tasting-field"><label>Finish</label><div class="tasting-value">${this._tastingNotes.finish}</div></div>`
+                        : A}
+                            ${this._tastingNotes.overall
+                        ? b `<div class="tasting-field full-width"><label>Overall</label><div class="tasting-value">${this._tastingNotes.overall}</div></div>`
+                        : A}
+                          </div>
+                        `
+                    : b `<div class="no-rating">No tasting notes yet. Tap Edit to add your thoughts.</div>`}
+                </div>
+                ` : A}
+
+              `}
+          ${this._showRemoveConfirm ? b `
+            <div style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px">
+              <div style="background:var(--wc-bg);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center" @click=${(e) => e.stopPropagation()}>
+                <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">Remove Wine</h3>
+                <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">Why are you removing this bottle?</p>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center">
+                  ${REMOVAL_REASONS.map(r => b `
+                    <button
+                      style="padding:8px 16px;border-radius:20px;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text);cursor:pointer;font-size:0.85em;transition:all 0.15s"
+                      @click=${() => this._confirmRemove(r.id)}
+                    >${r.label}</button>
+                  `)}
+                </div>
+                <button
+                  style="margin-top:12px;padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.8em"
+                  @click=${() => (this._showRemoveConfirm = false)}
+                >Cancel</button>
+              </div>
+            </div>
+          ` : A}
+          ${this._pendingVivinoImage ? b `
+            <div style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px">
+              <div style="background:var(--wc-bg);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center" @click=${(e) => e.stopPropagation()}>
+                <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">Vivino Photo Available</h3>
+                <p style="margin:0 0 12px;font-size:0.85em;color:var(--wc-text-secondary)">Vivino found a different bottle photo. Keep your current photo or use Vivino's?</p>
+                <div style="display:flex;gap:12px;justify-content:center;margin-bottom:16px">
+                  <div style="text-align:center">
+                    <img src="${wine.image_url}" style="width:70px;height:100px;object-fit:cover;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.2)" />
+                    <div style="font-size:0.7em;color:var(--wc-text-secondary);margin-top:4px">Current</div>
+                  </div>
+                  <div style="text-align:center">
+                    <img src="${this._pendingVivinoImage}" style="width:70px;height:100px;object-fit:cover;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.2)" />
+                    <div style="font-size:0.7em;color:var(--wc-text-secondary);margin-top:4px">Vivino</div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                  <button
+                    style="padding:8px 16px;border-radius:20px;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text);cursor:pointer;font-size:0.85em"
+                    @click=${this._dismissVivinoPhoto}
+                  >Keep My Photo</button>
+                  <button class="btn btn-primary" style="background:#8e24aa" @click=${this._applyVivinoPhoto}>Use Vivino's</button>
+                </div>
+              </div>
+            </div>
+          ` : A}
+          ${this._showPhotoCamera ? b `
+            <div
+              style="position:absolute;inset:0;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px;padding:16px"
+              @click=${() => (this._showPhotoCamera = false)}
+            >
+              <div style="width:100%" @click=${(e) => e.stopPropagation()}>
+                <label-camera .active=${this._showPhotoCamera} @photo-captured=${this._onPhotoReplaced}></label-camera>
+                <div style="text-align:center;margin-top:12px">
+                  <button
+                    style="padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.85em"
+                    @click=${() => (this._showPhotoCamera = false)}
+                  >Cancel</button>
+                </div>
+              </div>
+            </div>
+          ` : A}
+          ${this._aiFallbackReason ? b `
+            <div style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:10;border-radius:16px">
+              <div style="background:var(--wc-bg);border-radius:12px;padding:24px;max-width:320px;width:90%;text-align:center" @click=${(e) => e.stopPropagation()}>
+                <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">${this._aiFallbackReason === "no_match" ? "No Vivino Match" : "No Price Found"}</h3>
+                <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">${this._aiFallbackReason === "no_match"
+            ? "Vivino couldn't find a confident match for this wine. Try AI instead?"
+            : "Vivino has no price for this wine in the selected currency. Estimate it with AI?"}</p>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                  <button class="btn btn-primary" style="background:#1565c0" @click=${() => this._confirmAiFallback(false)}>Use AI Once</button>
+                  <button
+                    style="padding:8px 16px;border-radius:20px;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text);cursor:pointer;font-size:0.85em"
+                    @click=${() => this._confirmAiFallback(true)}
+                  >Always Use AI Automatically</button>
+                  <button
+                    style="margin-top:4px;padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.8em"
+                    @click=${this._dismissAiFallback}
+                  >Cancel</button>
+                </div>
+              </div>
+            </div>
+          ` : A}
+        </div>
+      </div>
+    `;
+    }
+};
+WineDetailDialog.styles = [
+    sharedStyles,
+    i$3 `
+      .dialog-top-bar {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 4px;
+        padding: 8px 12px 0;
+      }
+
+      .icon-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1.1em;
+        padding: 6px 8px;
+        border-radius: 6px;
+        color: var(--wc-text-secondary);
+        transition: background 0.2s;
+        line-height: 1;
+      }
+
+      .icon-btn:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      .icon-btn.close-btn {
+        font-size: 1.3em;
+        font-weight: 600;
+      }
+
+      .wine-header {
+        display: flex;
+        gap: 16px;
+        padding: 4px 20px 20px;
+      }
+
+      .wine-image {
+        width: 135px;
+        height: 195px;
+        border-radius: 8px;
+        object-fit: cover;
+        background: #f0f0f0;
+        flex-shrink: 0;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      }
+
+      .wine-image-wrap {
+        position: relative;
+        flex-shrink: 0;
+        touch-action: pan-y;
+      }
+
+      .photo-dots {
+        position: absolute;
+        top: 6px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 4px;
+      }
+
+      .photo-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.5);
+        border: 1px solid rgba(0, 0, 0, 0.25);
+        cursor: pointer;
+      }
+
+      .photo-dot.active {
+        background: #fff;
+      }
+
+      .photo-side-badge {
+        position: absolute;
+        bottom: 6px;
+        left: 6px;
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        font-size: 0.6em;
+        padding: 2px 6px;
+        border-radius: 10px;
+        pointer-events: none;
+      }
+
+      .photo-actions {
+        position: absolute;
+        bottom: 6px;
+        right: 6px;
+        display: flex;
+        gap: 6px;
+      }
+
+      .photo-action-btn {
+        border: 1px solid rgba(0, 0, 0, 0.15);
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.95);
+        color: #333;
+        cursor: pointer;
+        font-size: 1em;
+        line-height: 1;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+        transition: background 0.15s, transform 0.15s;
+      }
+
+      .photo-action-btn:hover {
+        background: #fff;
+        transform: scale(1.06);
+      }
+
+      .photo-action-btn:disabled {
+        opacity: 0.5;
+        cursor: default;
+        transform: none;
+      }
+
+      .wine-image-placeholder {
+        width: 135px;
+        height: 195px;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2em;
+        flex-shrink: 0;
+        color: #fff;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+      }
+
+      .wine-image-col {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+
+      .wine-location {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        width: 90px;
+        font-size: 0.68em;
+        line-height: 1.3;
+        text-align: center;
+        color: var(--wc-text-secondary, #888);
+        cursor: pointer;
+      }
+
+      .wine-location:hover {
+        color: var(--wc-primary-text);
+        text-decoration: underline;
+      }
+
+      .wine-title {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .wine-name {
+        font-size: 1.2em;
+        font-weight: 600;
+        color: var(--wc-text);
+        margin-bottom: 4px;
+      }
+
+      .wine-winery {
+        font-size: 0.9em;
+        color: var(--wc-text-secondary);
+        margin-bottom: 8px;
+      }
+
+      .wine-type-badge {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 12px;
+        font-size: 0.75em;
+        font-weight: 600;
+        color: #fff;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .wine-rating {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-top: 8px;
+        font-size: 0.9em;
+      }
+
+      .rating-star {
+        color: #f5a623;
+      }
+
+      .drink-by-banner {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 20px;
+        font-size: 0.9em;
+        font-weight: 500;
+      }
+
+      .drink-by-banner.drink {
+        background: rgba(46, 125, 50, 0.12);
+        color: #2e7d32;
+      }
+
+      .drink-by-banner.hold {
+        background: rgba(21, 101, 192, 0.12);
+        color: #1565c0;
+      }
+
+      .drink-by-banner.past {
+        background: rgba(198, 40, 40, 0.12);
+        color: #c62828;
+      }
+
+      .wine-description {
+        padding: 0 20px 12px;
+        font-size: 0.85em;
+        color: var(--wc-text-secondary);
+        line-height: 1.4;
+        font-style: italic;
+      }
+
+      .info-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 0 20px 12px;
+      }
+
+      .info-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 16px;
+        font-size: 0.75em;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid var(--wc-border);
+        color: var(--wc-text-secondary);
+      }
+
+      .info-chip-icon {
+        font-size: 1.1em;
+      }
+
+      .details-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        padding: 0 20px 16px;
+      }
+
+      .detail-item {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .detail-label {
+        font-size: 0.75em;
+        color: var(--wc-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 2px;
+      }
+
+      .detail-value {
+        font-size: 0.95em;
+        color: var(--wc-text);
+        font-weight: 500;
+      }
+
+      .wine-notes {
+        padding: 0 20px 16px;
+      }
+
+      .wine-notes-text {
+        font-size: 0.9em;
+        color: var(--wc-text-secondary);
+        font-style: italic;
+        background: rgba(128, 128, 128, 0.08);
+        padding: 10px;
+        border-radius: 8px;
+      }
+
+      /* Rating & Tasting Notes section */
+      .section {
+        padding: 0 20px 16px;
+      }
+
+      .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+      }
+
+      .section-title {
+        font-size: 0.85em;
+        font-weight: 600;
+        color: var(--wc-text);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .edit-toggle {
+        background: none;
+        border: none;
+        color: var(--wc-primary-text);
+        cursor: pointer;
+        font-size: 0.85em;
+        font-weight: 500;
+        padding: 4px 8px;
+        border-radius: 6px;
+        transition: background 0.2s;
+      }
+
+      .edit-toggle:hover {
+        background: rgba(109, 76, 65, 0.1);
+      }
+
+      .rating-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+
+      .rating-label {
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+        min-width: 70px;
+      }
+
+      .no-rating {
+        font-size: 0.85em;
+        color: var(--wc-text-secondary);
+        font-style: italic;
+      }
+
+      .tasting-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .tasting-field {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .tasting-field.full-width {
+        grid-column: 1 / -1;
+      }
+
+      .tasting-field label {
+        font-size: 0.75em;
+        color: var(--wc-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+      }
+
+      .tasting-field textarea {
+        font-family: inherit;
+        font-size: 0.85em;
+        padding: 8px;
+        border: 1px solid var(--wc-border, #e0e0e0);
+        border-radius: 8px;
+        resize: vertical;
+        min-height: 50px;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+      }
+
+      .tasting-field textarea:focus {
+        outline: none;
+        border-color: var(--wc-primary-text);
+      }
+
+      .tasting-value {
+        font-size: 0.85em;
+        color: var(--wc-text);
+        background: rgba(128, 128, 128, 0.08);
+        padding: 8px;
+        border-radius: 8px;
+        min-height: 20px;
+      }
+
+      .ai-ratings {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 0 20px 12px;
+      }
+
+      .ai-rating-chip {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 16px;
+        font-size: 0.75em;
+        background: rgba(245, 166, 35, 0.12);
+        border: 1px solid rgba(245, 166, 35, 0.3);
+        color: #f5a623;
+        font-weight: 600;
+      }
+
+      .ai-rating-chip .source {
+        font-weight: 400;
+        opacity: 0.8;
+      }
+
+      .drink-window {
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+        padding: 0 20px 8px;
+      }
+
+      .divider {
+        height: 1px;
+        background: var(--wc-border, #e0e0e0);
+        margin: 0 20px 16px;
+      }
+
+      .actions {
+        display: flex;
+        gap: 6px;
+        padding: 0 16px 16px;
+        border-bottom: 1px solid var(--wc-border);
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+
+      .actions .btn {
+        font-size: 0.8em;
+        padding: 6px 10px;
+        white-space: nowrap;
+      }
+
+      /* Edit form styles */
+      .edit-form {
+        padding: 0 20px 16px;
+      }
+
+      .edit-form .form-group {
+        margin-bottom: 12px;
+      }
+
+      .edit-form .form-group label {
+        display: block;
+        font-size: 0.75em;
+        font-weight: 500;
+        color: var(--wc-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+      }
+
+      .edit-form .form-group input,
+      .edit-form .form-group select,
+      .edit-form .form-group textarea {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        font-size: 0.9em;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        box-sizing: border-box;
+        font-family: inherit;
+      }
+
+      .edit-form .form-group textarea {
+        min-height: 60px;
+        resize: vertical;
+      }
+
+      .edit-form .form-group input:focus,
+      .edit-form .form-group select:focus,
+      .edit-form .form-group textarea:focus {
+        outline: none;
+        border-color: var(--wc-primary);
+      }
+
+      .edit-form .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .edit-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        padding: 12px 20px 20px;
+        border-top: 1px solid var(--wc-border);
+      }
+
+      @media (max-width: 599px) {
+        .tasting-grid {
+          grid-template-columns: 1fr;
+        }
+        .tasting-field.full-width {
+          grid-column: 1;
+        }
+        .edit-form .form-row {
+          grid-template-columns: 1fr;
+        }
+      }
+    `,
+];
+__decorate([
+    n({ attribute: false })
+], WineDetailDialog.prototype, "wine", void 0);
+__decorate([
+    n({ attribute: false })
+], WineDetailDialog.prototype, "hass", void 0);
+__decorate([
+    n({ attribute: false })
+], WineDetailDialog.prototype, "cabinets", void 0);
+__decorate([
+    n({ type: Boolean })
+], WineDetailDialog.prototype, "open", void 0);
+__decorate([
+    n({ type: String })
+], WineDetailDialog.prototype, "mode", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_editing", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_editingFields", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_editData", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_userRating", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_tastingNotes", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_saving", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_refreshing", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_analyzing", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_showRemoveConfirm", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_pendingVivinoImage", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_showPhotoCamera", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_photoBusy", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_photoSide", void 0);
+__decorate([
+    r()
+], WineDetailDialog.prototype, "_aiFallbackReason", void 0);
+__decorate([
+    n({ type: Boolean })
+], WineDetailDialog.prototype, "hasGemini", void 0);
+__decorate([
+    n({ type: Boolean })
+], WineDetailDialog.prototype, "aiFallbackAlways", void 0);
+__decorate([
+    n({ type: String })
+], WineDetailDialog.prototype, "currency", void 0);
+WineDetailDialog = __decorate([
+    t("wine-detail-dialog")
+], WineDetailDialog);
+
+let BarcodeScanner = class BarcodeScanner extends i {
+    constructor() {
+        super(...arguments);
+        this.active = false;
+        this._error = "";
+        this._scanning = false;
+        this._stream = null;
+        this._detector = null;
+        this._rafId = 0;
+    }
+    updated(changedProps) {
+        if (changedProps.has("active")) {
+            if (this.active) {
+                this._startScanning();
+            }
+            else {
+                this._stopScanning();
+            }
+        }
+    }
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this._stopScanning();
+    }
+    async _startScanning() {
+        if (this._scanning)
+            return;
+        this._error = "";
+        // Check for BarcodeDetector support
+        if (!("BarcodeDetector" in window)) {
+            this._error = "Barcode scanning is not supported on this browser. Please enter the barcode manually below.";
+            this.dispatchEvent(new CustomEvent("scanner-error", {
+                detail: { error: this._error },
+                bubbles: true,
+                composed: true,
+            }));
+            return;
+        }
+        try {
+            this._stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+                audio: false,
+            });
+            await this.updateComplete;
+            const video = this.renderRoot.querySelector("video");
+            if (video && this._stream) {
+                video.srcObject = this._stream;
+                await video.play();
+            }
+            this._detector = new window.BarcodeDetector({
+                formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128"],
+            });
+            this._scanning = true;
+            this._scanFrame();
+        }
+        catch (err) {
+            const msg = err?.message || String(err);
+            if (msg.includes("NotAllowed") || msg.includes("Permission")) {
+                this._error = "Camera access denied. Please allow camera access in your browser settings.";
+            }
+            else if (msg.includes("NotFound") || msg.includes("no camera")) {
+                this._error = "No camera found on this device.";
+            }
+            else {
+                this._error = `Camera error: ${msg}`;
+            }
+            this.dispatchEvent(new CustomEvent("scanner-error", {
+                detail: { error: this._error },
+                bubbles: true,
+                composed: true,
+            }));
+        }
+    }
+    async _scanFrame() {
+        if (!this._scanning || !this._detector)
+            return;
+        const video = this.renderRoot.querySelector("video");
+        if (!video || video.readyState < 2) {
+            this._rafId = requestAnimationFrame(() => this._scanFrame());
+            return;
+        }
+        try {
+            const barcodes = await this._detector.detect(video);
+            if (barcodes.length > 0) {
+                this._onDetected(barcodes[0].rawValue);
+                return;
+            }
+        }
+        catch {
+            // Detection error on this frame, continue
+        }
+        this._rafId = requestAnimationFrame(() => this._scanFrame());
+    }
+    _stopScanning() {
+        this._scanning = false;
+        if (this._rafId) {
+            cancelAnimationFrame(this._rafId);
+            this._rafId = 0;
+        }
+        if (this._stream) {
+            this._stream.getTracks().forEach((t) => t.stop());
+            this._stream = null;
+        }
+        this._detector = null;
+    }
+    _onDetected(barcode) {
+        this._stopScanning();
+        this.dispatchEvent(new CustomEvent("barcode-detected", {
+            detail: { barcode },
+            bubbles: true,
+            composed: true,
+        }));
+    }
+    render() {
+        if (!this.active)
+            return A;
+        return b `
+      ${this._error
+            ? b `<div class="error-message">${this._error}</div>`
+            : b `
+            <div class="scanner-container">
+              <video autoplay playsinline muted></video>
+              <div class="scan-overlay">
+                <div class="scan-corners"></div>
+                <div class="scan-line"></div>
+              </div>
+            </div>
+            <div class="hint">Point the camera at the barcode on the bottle</div>
+          `}
+    `;
+    }
+};
+BarcodeScanner.styles = [
+    sharedStyles,
+    i$3 `
+      :host {
+        display: block;
+      }
+
+      .scanner-container {
+        position: relative;
+        width: 100%;
+        border-radius: 12px;
+        overflow: hidden;
+        background: #000;
+        max-height: 300px;
+      }
+
+      video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        max-height: 300px;
+      }
+
+      .scan-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        pointer-events: none;
+        z-index: 10;
+      }
+
+      .scan-line {
+        position: absolute;
+        left: 10%;
+        right: 10%;
+        height: 2px;
+        background: rgba(255, 50, 50, 0.8);
+        box-shadow: 0 0 8px rgba(255, 50, 50, 0.5);
+        animation: scanMove 2s ease-in-out infinite;
+      }
+
+      @keyframes scanMove {
+        0%, 100% { top: 20%; }
+        50% { top: 80%; }
+      }
+
+      .scan-corners {
+        position: absolute;
+        top: 15%;
+        left: 15%;
+        right: 15%;
+        bottom: 15%;
+        border: 2px solid rgba(255, 255, 255, 0.6);
+        border-radius: 8px;
+      }
+
+      .error-message {
+        padding: 16px;
+        text-align: center;
+        color: #ef5350;
+        font-size: 0.9em;
+      }
+
+      .hint {
+        text-align: center;
+        padding: 8px;
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+      }
+
+      .fallback-note {
+        text-align: center;
+        padding: 12px;
+        font-size: 0.85em;
+        color: var(--wc-text-secondary);
+        font-style: italic;
+      }
+    `,
+];
+__decorate([
+    n({ type: Boolean })
+], BarcodeScanner.prototype, "active", void 0);
+__decorate([
+    r()
+], BarcodeScanner.prototype, "_error", void 0);
+__decorate([
+    r()
+], BarcodeScanner.prototype, "_scanning", void 0);
+BarcodeScanner = __decorate([
+    t("barcode-scanner")
+], BarcodeScanner);
+
 let AddWineDialog = class AddWineDialog extends i {
     constructor() {
         super(...arguments);
         this.open = false;
         this.cabinets = [];
+        this.wines = [];
         this.preselectedCabinet = "";
         this.preselectedRow = null;
         this.preselectedCol = null;
@@ -3232,38 +3917,15 @@ let AddWineDialog = class AddWineDialog extends i {
         this._error = "";
         this._hasGemini = false;
         this._labelLoading = false;
+        this._captureStage = "front";
+        this._frontImageRaw = "";
+        this._showBackPrompt = false;
         this._searchResults = [];
     }
     get _steps() {
         return this.buyListMode
             ? ["scan", "details", "confirm"]
             : ["scan", "details", "location", "confirm"];
-    }
-    /** Resize a base64 JPEG to a small thumbnail for storage */
-    _resizeImageForStorage(base64, maxDim = 200, quality = 0.6) {
-        return new Promise((resolve) => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement("canvas");
-                let w = img.width, h = img.height;
-                if (w > h) {
-                    h = Math.round(h * maxDim / w);
-                    w = maxDim;
-                }
-                else {
-                    w = Math.round(w * maxDim / h);
-                    h = maxDim;
-                }
-                canvas.width = w;
-                canvas.height = h;
-                const ctx = canvas.getContext("2d");
-                ctx.drawImage(img, 0, 0, w, h);
-                const dataUrl = canvas.toDataURL("image/jpeg", quality);
-                resolve(dataUrl);
-            };
-            img.onerror = () => resolve("");
-            img.src = `data:image/jpeg;base64,${base64}`;
-        });
     }
     updated(changedProps) {
         if (changedProps.has("open")) {
@@ -3276,6 +3938,9 @@ let AddWineDialog = class AddWineDialog extends i {
                 this._loading = false;
                 this._labelLoading = false;
                 this._searchResults = [];
+                this._captureStage = "front";
+                this._frontImageRaw = "";
+                this._showBackPrompt = false;
                 this._wineData = {
                     name: "",
                     winery: "",
@@ -3347,18 +4012,36 @@ let AddWineDialog = class AddWineDialog extends i {
                     description: result.result.description || "",
                     food_pairings: result.result.food_pairings || "",
                     alcohol: result.result.alcohol || "",
+                    vivino_updated_at: result.result.source === "vivino" ? new Date().toISOString() : this._wineData.vivino_updated_at,
                 };
                 this._step = "details";
             }
             else {
-                this._error = "No results found. You can enter details manually.";
                 this._wineData = { ...this._wineData, barcode: this._barcode.trim() };
+                this._onBarcodeLookupFailed("No match for this barcode.");
             }
         }
         catch (err) {
-            this._error = "Lookup failed. You can enter details manually.";
+            this._wineData = { ...this._wineData, barcode: this._barcode.trim() };
+            this._onBarcodeLookupFailed("Barcode lookup failed.");
         }
         this._loading = false;
+    }
+    _onBarcodeLookupFailed(reason) {
+        // Not every bottle has a scannable/known barcode — fall back to AI
+        // label recognition automatically instead of dead-ending on "enter
+        // details manually" when it's available.
+        if (this._hasGemini) {
+            this._scanMode = "label";
+            this._labelLoading = false;
+            this._showBackPrompt = false;
+            this._captureStage = "front";
+            this._frontImageRaw = "";
+            this._error = `${reason} Take a photo of the label instead.`;
+        }
+        else {
+            this._error = `${reason} You can enter details manually.`;
+        }
     }
     async _searchWine() {
         const input = this.shadowRoot?.querySelector(".search-input");
@@ -3401,6 +4084,7 @@ let AddWineDialog = class AddWineDialog extends i {
             description: item.description || "",
             food_pairings: item.food_pairings || "",
             alcohol: item.alcohol || "",
+            vivino_updated_at: new Date().toISOString(),
         };
         this._searchResults = [];
         this._step = "details";
@@ -3410,17 +4094,29 @@ let AddWineDialog = class AddWineDialog extends i {
         this._scanMode = "idle";
         this._lookupBarcode();
     }
-    async _onPhotoCaptured(e) {
+    _onLabelPhotoCaptured(e) {
+        if (this._captureStage === "front") {
+            this._frontImageRaw = e.detail.image;
+            this._showBackPrompt = true;
+        }
+        else {
+            this._finishLabelScan(e.detail.image);
+        }
+    }
+    async _finishLabelScan(backImageRaw) {
+        this._showBackPrompt = false;
         this._labelLoading = true;
         this._error = "";
         try {
             const result = await this.hass.callWS({
                 type: "wine_cellar/recognize_label",
-                image: e.detail.image,
+                image: this._frontImageRaw,
+                ...(backImageRaw ? { back_image: backImageRaw } : {}),
             });
             if (result.result) {
-                // Resize captured photo to thumbnail for storage
-                const thumbUrl = await this._resizeImageForStorage(e.detail.image);
+                // Resize captured photos to thumbnails for storage
+                const thumbUrl = await resizeImageForStorage(this._frontImageRaw);
+                const backThumbUrl = backImageRaw ? await resizeImageForStorage(backImageRaw) : "";
                 const r = result.result;
                 this._wineData = {
                     ...this._wineData,
@@ -3438,10 +4134,15 @@ let AddWineDialog = class AddWineDialog extends i {
                     retail_price: r.estimated_price || null,
                     ai_ratings: r.ai_ratings || null,
                     notes: r.notes || "",
+                    barcode: r.barcode || this._wineData.barcode || "",
                     image_url: thumbUrl,
+                    back_image_url: backThumbUrl,
+                    ai_updated_at: new Date().toISOString(),
                 };
                 this._scanMode = "idle";
                 this._step = "details";
+                this._captureStage = "front";
+                this._frontImageRaw = "";
             }
             else {
                 // Show specific error from backend if available
@@ -3462,6 +4163,15 @@ let AddWineDialog = class AddWineDialog extends i {
     }
     _updateField(field, value) {
         this._wineData = { ...this._wineData, [field]: value };
+    }
+    _selectZone(zoneId) {
+        // Land after the last occupied depth in that zone instead of always
+        // depth 0 — otherwise a second bottle added to the same zone collides
+        // with whatever's already at depth 0.
+        const depth = this.wines
+            .filter((w) => w.cabinet_id === this._wineData.cabinet_id && w.zone === zoneId)
+            .reduce((max, w) => Math.max(max, w.depth || 0), -1) + 1;
+        this._wineData = { ...this._wineData, zone: zoneId, row: null, col: null, depth };
     }
     async _addWine() {
         this._loading = true;
@@ -3550,15 +4260,39 @@ let AddWineDialog = class AddWineDialog extends i {
                   <div style="margin-top: 8px">Analyzing label with AI...</div>
                 </div>
               `
-                : b `
-                <label-camera
-                  .active=${true}
-                  @photo-captured=${this._onPhotoCaptured}
-                ></label-camera>
-              `}
+                : this._showBackPrompt
+                    ? b `
+                  <div style="text-align:center;padding:24px 12px">
+                    <div style="font-size:2em;margin-bottom:8px">✅</div>
+                    <div style="margin-bottom:12px;font-weight:500">Front label captured</div>
+                    <p style="font-size:0.85em;color:var(--wc-text-secondary);margin-bottom:16px">
+                      Add a photo of the back label too? It often has the vintage year (and sometimes a barcode).
+                    </p>
+                    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                      <button class="btn btn-primary" @click=${() => { this._showBackPrompt = false; this._captureStage = "back"; }}>📷 Add Back Photo</button>
+                      <button class="btn btn-outline" @click=${() => this._finishLabelScan()}>Skip, Use Front Only</button>
+                    </div>
+                  </div>
+                `
+                    : b `
+                  ${this._captureStage === "back"
+                        ? b `<div class="hint" style="text-align:center;margin-bottom:6px">Now photograph the back label</div>`
+                        : A}
+                  <label-camera
+                    .active=${true}
+                    @photo-captured=${this._onLabelPhotoCaptured}
+                  ></label-camera>
+                `}
           ${this._error ? b `<div class="error-msg">${this._error}</div>` : A}
           <div class="camera-actions">
-            <button class="btn btn-outline" @click=${() => { this._scanMode = "idle"; this._error = ""; this._labelLoading = false; }}>Cancel</button>
+            <button class="btn btn-outline" @click=${() => {
+                this._scanMode = "idle";
+                this._error = "";
+                this._labelLoading = false;
+                this._showBackPrompt = false;
+                this._captureStage = "front";
+                this._frontImageRaw = "";
+            }}>Cancel</button>
           </div>
         </div>
         <div class="dialog-footer">
@@ -3843,6 +4577,9 @@ let AddWineDialog = class AddWineDialog extends i {
     `;
     }
     _renderLocationStep() {
+        const selectedCabinet = this.cabinets.find((c) => c.id === this._wineData.cabinet_id);
+        const zones = selectedCabinet?.storage_rows || [];
+        const hasZone = !!this._wineData.zone;
         return b `
       <div class="dialog-body">
         <div style="font-weight: 500; margin-bottom: 8px">Choose Location</div>
@@ -3854,7 +4591,9 @@ let AddWineDialog = class AddWineDialog extends i {
           ${this.cabinets.map((cab) => b `
               <div
                 class="location-cabinet ${this._wineData.cabinet_id === cab.id ? "selected" : ""}"
-                @click=${() => this._updateField("cabinet_id", cab.id)}
+                @click=${() => {
+            this._wineData = { ...this._wineData, cabinet_id: cab.id, row: null, col: null, zone: "" };
+        }}
               >
                 <div class="cab-name">${cab.name}</div>
                 <div class="cab-info">${cab.rows}×${cab.cols} slots</div>
@@ -3862,7 +4601,27 @@ let AddWineDialog = class AddWineDialog extends i {
             `)}
         </div>
 
-        ${this._wineData.cabinet_id
+        ${selectedCabinet && zones.length > 0 ? b `
+          <div style="margin-top:12px">
+            <label style="display:block;font-size:0.8em;color:var(--wc-text-secondary);margin-bottom:6px">Bulk / Box Zone</label>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              <button
+                class="btn ${!hasZone ? "btn-primary" : "btn-outline"}"
+                style="font-size:0.8em;padding:6px 10px"
+                @click=${() => this._updateField("zone", "")}
+              >None — use grid Row/Col</button>
+              ${zones.map((sr) => b `
+                <button
+                  class="btn ${this._wineData.zone === `storage-${sr.row}` ? "btn-primary" : "btn-outline"}"
+                  style="font-size:0.8em;padding:6px 10px"
+                  @click=${() => this._selectZone(`storage-${sr.row}`)}
+                >${sr.name || (sr.type === "box" ? "Box" : "Bulk Bin")}</button>
+              `)}
+            </div>
+          </div>
+        ` : A}
+
+        ${this._wineData.cabinet_id && !hasZone
             ? b `
               <div class="pos-inputs">
                 <div class="form-group">
@@ -3886,24 +4645,43 @@ let AddWineDialog = class AddWineDialog extends i {
               </div>
             `
             : A}
+        ${this._error ? b `<div class="error-msg">${this._error}</div>` : A}
       </div>
 
       <div class="dialog-footer">
         <button class="btn btn-outline" @click=${() => this._goToStep("details")}>
           ← Back
         </button>
-        <button class="btn btn-primary" @click=${() => this._goToStep("confirm")}>
+        <button class="btn btn-primary" @click=${() => this._onLocationNext()}>
           Next →
         </button>
       </div>
     `;
     }
+    _onLocationNext() {
+        const d = this._wineData;
+        // A cabinet with no zone and no complete row/col is a wine with no
+        // findable position — it silently vanishes (assigned to the cabinet,
+        // but rendered nowhere). Catch that here instead of at save time.
+        if (d.cabinet_id && !d.zone && (d.row == null || d.col == null || isNaN(d.row) || isNaN(d.col))) {
+            this._error = "Pick a zone, or enter both Row and Column, so the bottle has a findable spot.";
+            return;
+        }
+        this._error = "";
+        this._goToStep("confirm");
+    }
     _renderConfirmStep() {
         const cabinetName = this.cabinets.find((c) => c.id === this._wineData.cabinet_id)?.name ||
             "Unassigned";
-        const posLabel = this._wineData.row != null && this._wineData.col != null
-            ? `Row ${(this._wineData.row ?? 0) + 1}, Col ${(this._wineData.col ?? 0) + 1}`
-            : "Not specified";
+        const zoneCabinet = this.cabinets.find((c) => c.id === this._wineData.cabinet_id);
+        const zoneRow = this._wineData.zone
+            ? zoneCabinet?.storage_rows.find((sr) => `storage-${sr.row}` === this._wineData.zone)
+            : undefined;
+        const posLabel = zoneRow
+            ? zoneRow.name || (zoneRow.type === "box" ? "Box" : "Bulk Bin")
+            : this._wineData.row != null && this._wineData.col != null
+                ? `Row ${(this._wineData.row ?? 0) + 1}, Col ${(this._wineData.col ?? 0) + 1}`
+                : "Not specified";
         return b `
       <div class="dialog-body">
         <div style="font-weight: 500; margin-bottom: 12px">Confirm & Add</div>
@@ -4354,6 +5132,9 @@ __decorate([
 ], AddWineDialog.prototype, "cabinets", void 0);
 __decorate([
     n({ attribute: false })
+], AddWineDialog.prototype, "wines", void 0);
+__decorate([
+    n({ attribute: false })
 ], AddWineDialog.prototype, "preselectedCabinet", void 0);
 __decorate([
     n({ attribute: false })
@@ -4397,6 +5178,15 @@ __decorate([
 __decorate([
     r()
 ], AddWineDialog.prototype, "_labelLoading", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_captureStage", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_frontImageRaw", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_showBackPrompt", void 0);
 __decorate([
     r()
 ], AddWineDialog.prototype, "_searchResults", void 0);
@@ -6454,6 +7244,7 @@ let InventoryDialog = class InventoryDialog extends i {
         this.wines = [];
         this.cabinets = [];
         this.hasGemini = false;
+        this.currency = "USD";
         this._searchQuery = "";
         this._typeFilter = "all";
         this._sortField = "name";
@@ -6588,6 +7379,18 @@ let InventoryDialog = class InventoryDialog extends i {
             console.error("Failed to clear history", err);
         }
     }
+    async _restoreFromHistory(historyId) {
+        try {
+            await this.hass.callWS({ type: "wine_cellar/restore_wine", history_id: historyId });
+            this._historyItems = this._historyItems.filter((i) => i.id !== historyId);
+            this._statusMsg = "Wine restored to Unassigned";
+            this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+        }
+        catch (err) {
+            console.error("Failed to restore wine from history", err);
+            this._statusMsg = "Failed to restore wine";
+        }
+    }
     _formatReason(reason) {
         const map = {
             drank: "Drank", gifted: "Gifted", sold: "Sold",
@@ -6632,8 +7435,9 @@ let InventoryDialog = class InventoryDialog extends i {
               </div>
             </div>
             <div class="inv-right">
-              ${item.price ? b `<div class="inv-price">$${item.price.toFixed(0)}</div>` : A}
+              ${item.price ? b `<div class="inv-price">${this.currency} ${item.price.toFixed(0)}</div>` : A}
               <div class="inv-location">${this._formatDate(item.removed_at)}</div>
+              <button class="inv-btn" style="margin-top:4px" @click=${() => this._restoreFromHistory(item.id)}>Restore</button>
             </div>
           </div>
         `)}
@@ -6735,11 +7539,11 @@ let InventoryDialog = class InventoryDialog extends i {
         this._importing = false;
     }
     _parseCSV(text) {
-        const lines = text.split("\n").filter((l) => l.trim());
-        if (lines.length < 2)
+        const rows = this._parseCSVRows(text);
+        if (rows.length < 2)
             return [];
         // Parse header row
-        const headers = this._parseCSVRow(lines[0]).map((h) => h.trim().toLowerCase());
+        const headers = rows[0].map((h) => h.trim().toLowerCase());
         // Map CSV headers to wine fields
         const fieldMap = {
             name: "name",
@@ -6779,8 +7583,8 @@ let InventoryDialog = class InventoryDialog extends i {
             "retail_price", "user_rating",
         ]);
         const wines = [];
-        for (let i = 1; i < lines.length; i++) {
-            const values = this._parseCSVRow(lines[i]);
+        for (let i = 1; i < rows.length; i++) {
+            const values = rows[i];
             if (values.length === 0)
                 continue;
             const wine = {};
@@ -6817,16 +7621,29 @@ let InventoryDialog = class InventoryDialog extends i {
         }
         return wines;
     }
-    _parseCSVRow(line) {
-        const result = [];
-        let current = "";
+    // Quote-aware: a comma or newline inside a quoted field (as produced by
+    // escapeCSV for multi-line Notes/Description) does not end the field/row.
+    _parseCSVRows(text) {
+        const rows = [];
+        let row = [];
+        let field = "";
         let inQuotes = false;
-        for (let i = 0; i < line.length; i++) {
-            const ch = line[i];
+        const endField = () => {
+            row.push(field);
+            field = "";
+        };
+        const endRow = () => {
+            endField();
+            if (row.some((v) => v.trim() !== ""))
+                rows.push(row);
+            row = [];
+        };
+        for (let i = 0; i < text.length; i++) {
+            const ch = text[i];
             if (inQuotes) {
                 if (ch === '"') {
-                    if (i + 1 < line.length && line[i + 1] === '"') {
-                        current += '"';
+                    if (text[i + 1] === '"') {
+                        field += '"';
                         i++;
                     }
                     else {
@@ -6834,24 +7651,26 @@ let InventoryDialog = class InventoryDialog extends i {
                     }
                 }
                 else {
-                    current += ch;
+                    field += ch;
                 }
+            }
+            else if (ch === '"') {
+                inQuotes = true;
+            }
+            else if (ch === ",") {
+                endField();
+            }
+            else if (ch === "\r") ;
+            else if (ch === "\n") {
+                endRow();
             }
             else {
-                if (ch === '"') {
-                    inQuotes = true;
-                }
-                else if (ch === ",") {
-                    result.push(current);
-                    current = "";
-                }
-                else {
-                    current += ch;
-                }
+                field += ch;
             }
         }
-        result.push(current);
-        return result;
+        if (field !== "" || row.length > 0)
+            endRow();
+        return rows;
     }
     // ── Restore JSON ──────────────────────────────────────────────
     _triggerRestore() {
@@ -6980,20 +7799,12 @@ let InventoryDialog = class InventoryDialog extends i {
     }
     _renderWineItem(wine) {
         const typeColor = WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red;
-        const cabinetName = this.cabinets.find((c) => c.id === wine.cabinet_id)?.name || "";
-        let location = "Unassigned";
-        if (cabinetName) {
-            if (wine.row !== null && wine.col !== null) {
-                location = `${cabinetName} R${wine.row + 1}C${wine.col + 1}`;
-            }
-            else if (wine.zone) {
-                location = `${cabinetName}`;
-            }
-            else {
-                location = cabinetName;
-            }
-        }
+        const location = getWineLocation(wine, this.cabinets).text;
         const displayPrice = wine.retail_price || wine.price;
+        // A retail_price keeps the currency it was actually captured in — show
+        // that instead of the globally selected one, or a stale price ends up
+        // mislabeled as if it were in the new currency.
+        const displayCurrency = wine.retail_price ? (wine.retail_price_currency || this.currency) : this.currency;
         return b `
       <div class="inv-item" @click=${() => this._showWineDetail(wine)}>
         ${wine.image_url
@@ -7026,7 +7837,7 @@ let InventoryDialog = class InventoryDialog extends i {
           </div>
         </div>
         <div class="inv-right">
-          ${displayPrice ? b `<div class="inv-price">$${displayPrice.toFixed(0)}</div>` : A}
+          ${displayPrice ? b `<div class="inv-price">${displayCurrency} ${displayPrice.toFixed(0)}</div>` : A}
           <div class="inv-location">${location}</div>
         </div>
       </div>
@@ -7087,7 +7898,7 @@ let InventoryDialog = class InventoryDialog extends i {
             ? b `
                   <div class="stat">
                     <span class="stat-value"
-                      >$${allStats.totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span
+                      >${this.currency} ${allStats.totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span
                     >
                     est. value
                   </div>
@@ -7312,12 +8123,29 @@ let InventoryDialog = class InventoryDialog extends i {
       <wine-detail-dialog
         .wine=${this._detailWine}
         .hass=${this.hass}
+        .cabinets=${this.cabinets}
         .open=${this._showDetail}
         .hasGemini=${this.hasGemini}
         .mode=${"cellar"}
         @close=${() => (this._showDetail = false)}
         @wine-updated=${() => {
             this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+        }}
+        @locate-wine=${(e) => {
+            this._showDetail = false;
+            this.dispatchEvent(new CustomEvent("locate-wine", { detail: e.detail, bubbles: true, composed: true }));
+        }}
+        @copy-wine=${(e) => {
+            this._showDetail = false;
+            this.dispatchEvent(new CustomEvent("copy-wine", { detail: e.detail, bubbles: true, composed: true }));
+        }}
+        @move-wine=${(e) => {
+            this._showDetail = false;
+            this.dispatchEvent(new CustomEvent("move-wine", { detail: e.detail, bubbles: true, composed: true }));
+        }}
+        @remove-wine=${(e) => {
+            this._showDetail = false;
+            this.dispatchEvent(new CustomEvent("remove-wine", { detail: e.detail, bubbles: true, composed: true }));
         }}
       ></wine-detail-dialog>
     `;
@@ -7505,8 +8333,8 @@ InventoryDialog.styles = [
       }
 
       .inv-thumb {
-        width: 32px;
-        height: 44px;
+        width: 48px;
+        height: 66px;
         border-radius: 4px;
         object-fit: cover;
         flex-shrink: 0;
@@ -7774,6 +8602,9 @@ __decorate([
     n({ type: Boolean })
 ], InventoryDialog.prototype, "hasGemini", void 0);
 __decorate([
+    n({ type: String })
+], InventoryDialog.prototype, "currency", void 0);
+__decorate([
     r()
 ], InventoryDialog.prototype, "_searchQuery", void 0);
 __decorate([
@@ -7837,6 +8668,220 @@ InventoryDialog = __decorate([
     t("inventory-dialog")
 ], InventoryDialog);
 
+let VivinoAiSettingsDialog = class VivinoAiSettingsDialog extends i {
+    constructor() {
+        super(...arguments);
+        this.open = false;
+        this.aiFallbackAlways = false;
+        this.metadataLanguage = "en";
+        this.supportedLanguages = ["en", "fr", "de"];
+        this.metadataCurrency = "USD";
+        this.supportedCurrencies = ["USD", "EUR", "GBP", "CHF"];
+    }
+    _close() {
+        this.dispatchEvent(new CustomEvent("close"));
+    }
+    _setFallback(value) {
+        this.dispatchEvent(new CustomEvent("set-ai-fallback-always", { detail: { value } }));
+    }
+    _setLanguage(lang) {
+        this.dispatchEvent(new CustomEvent("set-metadata-language", { detail: { value: lang } }));
+    }
+    _setCurrency(currency) {
+        this.dispatchEvent(new CustomEvent("set-metadata-currency", { detail: { value: currency } }));
+    }
+    render() {
+        if (!this.open)
+            return A;
+        return b `
+      <div class="dialog-overlay" @click=${this._close}>
+        <div class="dialog" style="max-width:420px;padding:20px 24px" @click=${(e) => e.stopPropagation()}>
+          <div class="dialog-top-bar" style="justify-content:space-between;padding:0 0 8px">
+            <span style="font-weight:600;color:var(--wc-text)">Vivino / AI Settings</span>
+            <button class="icon-btn close-btn" title="Close" @click=${this._close}>✕</button>
+          </div>
+
+          <div class="settings-row">
+            <label class="fallback-label">
+              <input
+                type="checkbox"
+                .checked=${this.aiFallbackAlways}
+                @change=${(e) => this._setFallback(e.target.checked)}
+              />
+              Always try AI when Vivino finds no match
+            </label>
+          </div>
+
+          <div class="settings-row">
+            <span class="settings-label">Vivino/AI language</span>
+            <div class="pill-group">
+              ${this.supportedLanguages.map((lang) => b `
+                <button
+                  class="pill ${this.metadataLanguage === lang ? "active" : ""}"
+                  @click=${() => this._setLanguage(lang)}
+                >${lang.toUpperCase()}</button>
+              `)}
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <span class="settings-label">Currency</span>
+            <div class="pill-group">
+              ${this.supportedCurrencies.map((cur) => b `
+                <button
+                  class="pill ${this.metadataCurrency === cur ? "active" : ""}"
+                  @click=${() => this._setCurrency(cur)}
+                >${cur}</button>
+              `)}
+            </div>
+          </div>
+
+          <div class="info-section">
+            <h3 class="info-title">🍇 Vivino vs 🤖 AI — What Each Provides</h3>
+
+            <div class="info-block">
+              <div class="info-block-title">🍇 Vivino provides:</div>
+              <ul>
+                <li>Bottle photo</li>
+                <li>Community rating (★) and number of ratings</li>
+                <li>Market price</li>
+                <li>Food pairings</li>
+                <li>Alcohol %</li>
+                <li>Grape variety, region, country, type (when found)</li>
+              </ul>
+            </div>
+
+            <div class="info-block">
+              <div class="info-block-title">🤖 AI provides:</div>
+              <ul>
+                <li>Estimated price (only fills in when Vivino has none)</li>
+                <li>Tasting description</li>
+                <li>Critic scores (Wine Spectator, Robert Parker, Jeb Dunnuck, Antonio Galloni)</li>
+                <li>Drink Now / Hold / Past Peak + drinking window</li>
+                <li>Grape variety, region, country, type — only when scanning a label photo, not on a refresh</li>
+              </ul>
+            </div>
+
+            <p class="info-note">
+              AI never provides a photo, a Vivino community rating, or food pairings — when Vivino can't find a confident match, AI fills in what it can (mainly price, description, and critic scores), not everything Vivino would have.
+            </p>
+          </div>
+        </div>
+      </div>
+    `;
+    }
+};
+VivinoAiSettingsDialog.styles = [
+    sharedStyles,
+    i$3 `
+      .settings-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--wc-border);
+        font-size: 0.85em;
+      }
+
+      .settings-row:last-of-type {
+        border-bottom: none;
+      }
+
+      .settings-label {
+        color: var(--wc-text);
+      }
+
+      .pill-group {
+        display: flex;
+        gap: 4px;
+      }
+
+      .pill {
+        padding: 3px 10px;
+        border-radius: 12px;
+        border: 1px solid var(--wc-border);
+        cursor: pointer;
+        background: transparent;
+        color: var(--wc-text-secondary);
+        font-size: 0.9em;
+      }
+
+      .pill.active {
+        background: var(--wc-primary-text);
+        color: #fff;
+        border-color: var(--wc-primary-text);
+      }
+
+      .fallback-label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        color: var(--wc-text);
+      }
+
+      .info-section {
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--wc-border);
+      }
+
+      .info-title {
+        margin: 0 0 12px;
+        font-size: 0.95em;
+        color: var(--wc-text);
+      }
+
+      .info-block {
+        margin-bottom: 16px;
+      }
+
+      .info-block-title {
+        font-weight: 600;
+        font-size: 0.85em;
+        color: var(--wc-text);
+        margin-bottom: 6px;
+      }
+
+      .info-block ul {
+        margin: 0;
+        padding-left: 20px;
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+        line-height: 1.7;
+      }
+
+      .info-note {
+        margin: 0;
+        font-size: 0.78em;
+        color: var(--wc-text-secondary);
+        font-style: italic;
+      }
+    `,
+];
+__decorate([
+    n({ type: Boolean })
+], VivinoAiSettingsDialog.prototype, "open", void 0);
+__decorate([
+    n({ type: Boolean })
+], VivinoAiSettingsDialog.prototype, "aiFallbackAlways", void 0);
+__decorate([
+    n({ type: String })
+], VivinoAiSettingsDialog.prototype, "metadataLanguage", void 0);
+__decorate([
+    n({ attribute: false })
+], VivinoAiSettingsDialog.prototype, "supportedLanguages", void 0);
+__decorate([
+    n({ type: String })
+], VivinoAiSettingsDialog.prototype, "metadataCurrency", void 0);
+__decorate([
+    n({ attribute: false })
+], VivinoAiSettingsDialog.prototype, "supportedCurrencies", void 0);
+VivinoAiSettingsDialog = __decorate([
+    t("vivino-ai-settings-dialog")
+], VivinoAiSettingsDialog);
+
 let WineCellarCard = class WineCellarCard extends i {
     constructor() {
         super(...arguments);
@@ -7857,8 +8902,17 @@ let WineCellarCard = class WineCellarCard extends i {
         this._movingWine = null;
         this._analyzing = false;
         this._batchVivino = false;
+        this._showBatchVivinoConfirm = false;
+        this._showBatchAiConfirm = false;
+        this._batchAiFallback = false;
         this._toast = "";
         this._hasGemini = false;
+        this._metadataLanguage = "en";
+        this._supportedLanguages = ["en", "fr", "de"];
+        this._metadataCurrency = "USD";
+        this._supportedCurrencies = ["USD", "EUR", "GBP", "CHF"];
+        this._aiFallbackAlways = false;
+        this._showVivinoAiSettings = false;
         this._showWineList = false;
         this._showInventory = false;
         this._buyList = [];
@@ -7880,6 +8934,17 @@ let WineCellarCard = class WineCellarCard extends i {
         this._zonePanelName = "";
         this._zonePanelWines = [];
         this._zonePanelStorageRow = null;
+        this._zonePanelDragWineId = null;
+        this._zonePanelDragOverKey = null;
+        this._zonePanelNewBoxSize = 6;
+        // Rack panel (grid-slot cabinets: list + reorder)
+        this._rackPanelOpen = false;
+        this._rackPanelCabinet = null;
+        this._rackPanelWines = [];
+        this._rackPanelDragWineId = null;
+        this._rackPanelDragOverKey = null;
+        // Briefly highlights a wine's slot after "locate" is used from the detail dialog.
+        this._highlightWineId = null;
     }
     setConfig(config) {
         this._config = config;
@@ -7918,6 +8983,11 @@ let WineCellarCard = class WineCellarCard extends i {
             this._cabinets = (cabinetsResult.cabinets || []).sort((a, b) => a.order - b.order);
             this._stats = statsResult;
             this._hasGemini = capResult?.has_gemini || false;
+            this._metadataLanguage = capResult?.metadata_language || "en";
+            this._supportedLanguages = capResult?.supported_languages || ["en", "fr", "de"];
+            this._metadataCurrency = capResult?.metadata_currency || "USD";
+            this._supportedCurrencies = capResult?.supported_currencies || ["USD", "EUR", "GBP", "CHF"];
+            this._aiFallbackAlways = capResult?.ai_fallback_always || false;
             this._buyList = buyListResult?.buy_list || [];
             // Refresh selected wine if detail dialog is open
             if (this._selectedWine) {
@@ -7929,6 +8999,8 @@ let WineCellarCard = class WineCellarCard extends i {
             this._refreshDepthPanel();
             // Refresh zone panel if open
             this._refreshZonePanel();
+            // Refresh rack panel if open
+            this._refreshRackPanel();
         }
         catch (err) {
             console.error("Cork Dork: Failed to load data", err);
@@ -8037,6 +9109,12 @@ let WineCellarCard = class WineCellarCard extends i {
     }
     _onZoneClick(e) {
         const { wine, cabinet, zone } = e.detail;
+        // If we have a copied wine and clicked empty zone space, paste it here
+        if (this._copiedWine && !wine) {
+            const nextDepth = this._wines.filter((w) => w.cabinet_id === cabinet.id && w.zone === (zone || "bottom")).length;
+            this._pasteWine(cabinet.id, null, null, nextDepth, zone || "bottom");
+            return;
+        }
         // If we're moving a wine, place it in this zone
         if (this._movingWine && !wine) {
             this._executeMoveWine(cabinet.id, null, null, zone || "bottom");
@@ -8060,12 +9138,31 @@ let WineCellarCard = class WineCellarCard extends i {
     // --- Zone side panel (boxes, bulk bins) ---
     _onZoneContainerClick(e) {
         const { cabinet, zone, storageRow } = e.detail;
+        const nextDepth = this._wines.filter((w) => w.cabinet_id === cabinet.id && w.zone === zone).length;
+        const hasRoom = nextDepth < (storageRow.capacity || 20);
+        // If we have a copied wine, paste it in this zone instead of opening panel
+        if (this._copiedWine) {
+            if (!hasRoom) {
+                this._showToast(`"${storageRow.name || "Zone"}" is full — cannot paste here.`);
+                return;
+            }
+            this._pasteWine(cabinet.id, null, null, nextDepth, zone);
+            return;
+        }
         // If moving wine, drop it in this zone instead of opening panel
         if (this._movingWine) {
+            if (!hasRoom) {
+                this._showToast(`"${storageRow.name || "Zone"}" is full — cannot move here.`);
+                return;
+            }
             this._executeMoveWine(cabinet.id, null, null, zone);
             return;
         }
         if (this._movingBuyListItem) {
+            if (!hasRoom) {
+                this._showToast(`"${storageRow.name || "Zone"}" is full — cannot move here.`);
+                return;
+            }
             this._executeMoveTocellar(cabinet.id, null, null, zone);
             return;
         }
@@ -8089,40 +9186,450 @@ let WineCellarCard = class WineCellarCard extends i {
     _refreshZonePanel() {
         if (!this._zonePanelOpen || !this._zonePanelCabinet)
             return;
+        // Re-derive from the freshly loaded cabinet so capacity/box changes show up.
+        const freshCabinet = this._cabinets.find((c) => c.id === this._zonePanelCabinet.id);
+        if (freshCabinet) {
+            this._zonePanelCabinet = freshCabinet;
+            const rowIdx = parseInt(this._zonePanelZone.replace("storage-", ""), 10);
+            const sr = (freshCabinet.storage_rows || []).find((s) => s.row === rowIdx);
+            if (sr) {
+                this._zonePanelType = sr.type || "bulk";
+                this._zonePanelCapacity = sr.capacity || 20;
+                this._zonePanelName = sr.name || "Storage";
+                this._zonePanelStorageRow = sr;
+            }
+        }
         this._zonePanelWines = this._wines
             .filter((w) => w.cabinet_id === this._zonePanelCabinet.id && w.zone === this._zonePanelZone)
             .sort((a, b) => (a.depth || 0) - (b.depth || 0));
+    }
+    // Grow a bulk/box zone's capacity by editing its StorageRow entry.
+    async _updateStorageRow(updates) {
+        if (!this._zonePanelCabinet || !this._zonePanelStorageRow)
+            return;
+        const newStorageRows = (this._zonePanelCabinet.storage_rows || []).map((sr) => sr.row === this._zonePanelStorageRow.row ? { ...sr, ...updates } : sr);
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/update_cabinet",
+                cabinet_id: this._zonePanelCabinet.id,
+                updates: { storage_rows: newStorageRows },
+            });
+            await this._loadData();
+        }
+        catch (err) {
+            console.error("Failed to resize zone:", err);
+            this._showToast("Failed to resize zone");
+        }
+    }
+    _addBulkSlot() {
+        if (!this._zonePanelStorageRow)
+            return;
+        this._updateStorageRow({ capacity: (this._zonePanelStorageRow.capacity || 0) + 1 });
+    }
+    _addBoxSlot() {
+        if (!this._zonePanelStorageRow)
+            return;
+        // Append a whole new box of the chosen preset size, so box sizes always
+        // stay one of BOX_SIZES (1/3/6/12/24) — the Manage Racks dialog's size
+        // dropdown can only display values from that list.
+        const boxes = [...(this._zonePanelStorageRow.boxes || [this._zonePanelStorageRow.capacity || 0]), this._zonePanelNewBoxSize];
+        this._updateStorageRow({ boxes, capacity: boxes.reduce((sum, b) => sum + b, 0) });
+    }
+    // Delete a single bulk/box slot: unassign its wine (if any) rather than
+    // deleting it, shift every later slot down to close the gap, and shrink
+    // the zone's capacity (or the specific box, for box mode) by one.
+    async _deleteZoneSlot(slotIndex) {
+        if (!this._zonePanelCabinet || !this._zonePanelStorageRow)
+            return;
+        const wineAtSlot = this._zonePanelWines[slotIndex];
+        const warning = wineAtSlot
+            ? `Delete Slot ${slotIndex + 1}? "${wineAtSlot.name}" will be moved to Unassigned.`
+            : `Delete Slot ${slotIndex + 1}?`;
+        if (!window.confirm(warning))
+            return;
+        try {
+            if (wineAtSlot) {
+                await this.hass.callWS({
+                    type: "wine_cellar/update_wine",
+                    wine_id: wineAtSlot.id,
+                    updates: { cabinet_id: "", row: null, col: null, zone: "", depth: 0 },
+                });
+            }
+            for (let i = slotIndex + 1; i < this._zonePanelWines.length; i++) {
+                await this.hass.callWS({
+                    type: "wine_cellar/move_wine",
+                    wine_id: this._zonePanelWines[i].id,
+                    cabinet_id: this._zonePanelCabinet.id,
+                    zone: this._zonePanelZone,
+                    depth: i - 1,
+                });
+            }
+            if (this._zonePanelType === "box") {
+                const boxes = [...(this._zonePanelStorageRow.boxes || [this._zonePanelStorageRow.capacity || 0])];
+                let offset = 0;
+                for (let i = 0; i < boxes.length; i++) {
+                    if (slotIndex < offset + boxes[i]) {
+                        boxes[i] -= 1;
+                        if (boxes[i] <= 0)
+                            boxes.splice(i, 1);
+                        break;
+                    }
+                    offset += boxes[i];
+                }
+                await this._updateStorageRow({ boxes, capacity: boxes.reduce((sum, b) => sum + b, 0) });
+            }
+            else {
+                await this._updateStorageRow({ capacity: Math.max(0, (this._zonePanelStorageRow.capacity || 1) - 1) });
+            }
+            this._showToast(wineAtSlot ? "Slot deleted, wine unassigned" : "Slot deleted");
+        }
+        catch (err) {
+            console.error("Failed to delete slot:", err);
+            this._showToast("Failed to delete slot");
+        }
     }
     _onZonePanelSlotClick(slotIndex, wine) {
         if (wine) {
             this._selectedWine = wine;
             this._detailMode = "cellar";
             this._showDetail = true;
+            return;
         }
-        else {
-            this._addPreselect = {
-                cabinet: this._zonePanelCabinet.id,
-                row: null,
-                col: null,
-                zone: this._zonePanelZone,
-                depth: slotIndex,
-            };
-            this._showAddDialog = true;
+        if (this._copiedWine) {
+            this._pasteWine(this._zonePanelCabinet.id, null, null, slotIndex, this._zonePanelZone);
+            return;
         }
-    }
-    _onZonePanelBulkAdd() {
-        const nextDepth = this._zonePanelWines.length;
+        if (this._movingWine) {
+            this._executeMoveWine(this._zonePanelCabinet.id, null, null, this._zonePanelZone, slotIndex);
+            return;
+        }
         this._addPreselect = {
             cabinet: this._zonePanelCabinet.id,
             row: null,
             col: null,
             zone: this._zonePanelZone,
-            depth: nextDepth,
+            depth: slotIndex,
         };
         this._showAddDialog = true;
     }
+    // --- Zone side panel: drag-to-reorder ---
+    _onZonePanelDragStart(e, wine) {
+        this._zonePanelDragWineId = wine.id;
+        if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+            // Same payload shape cabinet-grid's _onDrop expects, so dragging out
+            // of the panel onto any rack/zone in the main grid works too.
+            e.dataTransfer.setData("text/plain", JSON.stringify({
+                wineId: wine.id,
+                cabinetId: wine.cabinet_id,
+                row: wine.row ?? null,
+                col: wine.col ?? null,
+                zone: wine.zone || "",
+            }));
+        }
+    }
+    _onZonePanelDragEnd() {
+        this._zonePanelDragWineId = null;
+        this._zonePanelDragOverKey = null;
+    }
+    _onZonePanelDragOver(e, key) {
+        e.preventDefault();
+        if (e.dataTransfer)
+            e.dataTransfer.dropEffect = "move";
+        this._zonePanelDragOverKey = key;
+    }
+    // Bulk mode: reflow to sequential depths matching the new visual order.
+    async _onZonePanelBulkReorder(e, targetIndex) {
+        e.preventDefault();
+        this._zonePanelDragOverKey = null;
+        const draggedId = this._zonePanelDragWineId;
+        this._zonePanelDragWineId = null;
+        if (!draggedId || !this._zonePanelCabinet)
+            return;
+        const wines = [...this._zonePanelWines];
+        const fromIndex = wines.findIndex((w) => w.id === draggedId);
+        if (fromIndex === -1 || fromIndex === targetIndex)
+            return;
+        const [moved] = wines.splice(fromIndex, 1);
+        wines.splice(targetIndex, 0, moved);
+        try {
+            for (let i = 0; i < wines.length; i++) {
+                if ((wines[i].depth || 0) !== i) {
+                    await this.hass.callWS({
+                        type: "wine_cellar/move_wine",
+                        wine_id: wines[i].id,
+                        cabinet_id: this._zonePanelCabinet.id,
+                        zone: this._zonePanelZone,
+                        depth: i,
+                    });
+                }
+            }
+            this._showToast("Wine reordered");
+            await this._loadData();
+        }
+        catch (err) {
+            console.error("Failed to reorder wine:", err);
+            this._showToast("Failed to reorder wine");
+        }
+    }
+    // Box mode: move/swap into a specific slot depth.
+    async _onZonePanelBoxReorder(e, targetDepth, targetWine) {
+        e.preventDefault();
+        this._zonePanelDragOverKey = null;
+        const draggedId = this._zonePanelDragWineId;
+        this._zonePanelDragWineId = null;
+        if (!draggedId || !this._zonePanelCabinet || draggedId === targetWine?.id)
+            return;
+        const draggedWine = this._zonePanelWines.find((w) => w.id === draggedId);
+        if (!draggedWine)
+            return;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/move_wine",
+                wine_id: draggedWine.id,
+                cabinet_id: this._zonePanelCabinet.id,
+                zone: this._zonePanelZone,
+                depth: targetDepth,
+            });
+            if (targetWine) {
+                await this.hass.callWS({
+                    type: "wine_cellar/move_wine",
+                    wine_id: targetWine.id,
+                    cabinet_id: this._zonePanelCabinet.id,
+                    zone: this._zonePanelZone,
+                    depth: draggedWine.depth || 0,
+                });
+            }
+            this._showToast("Wine reordered");
+            await this._loadData();
+        }
+        catch (err) {
+            console.error("Failed to reorder wine:", err);
+            this._showToast("Failed to reorder wine");
+        }
+    }
     _getZoneSlotLabel(_type, index) {
         return `Slot ${index + 1}`;
+    }
+    // Opens the right side panel for a wine's location and briefly highlights its slot.
+    _locateWine(wine) {
+        const loc = getWineLocation(wine, this._cabinets);
+        if (!loc.cabinet) {
+            this._showToast("This wine is unassigned");
+            return;
+        }
+        this._activeTab = "all";
+        if (wine.row !== null && wine.col !== null) {
+            this._openRackPanel(loc.cabinet);
+        }
+        else if (loc.zone && loc.zone !== "bottom" && loc.storageRow) {
+            this._openZonePanel(loc.cabinet, loc.zone, loc.storageRow);
+        }
+        else {
+            this._showToast(`In ${loc.text}`);
+            return;
+        }
+        this._highlightWineId = wine.id;
+        this.updateComplete.then(() => {
+            this.shadowRoot?.getElementById("highlight-slot")?.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+        setTimeout(() => {
+            if (this._highlightWineId === wine.id)
+                this._highlightWineId = null;
+        }, 2500);
+    }
+    // --- Rack panel (grid-slot cabinets: list + reorder) ---
+    _onRackClick(e) {
+        this._openRackPanel(e.detail.cabinet);
+    }
+    _openRackPanel(cabinet) {
+        this._rackPanelCabinet = cabinet;
+        this._rackPanelWines = this._wines.filter((w) => w.cabinet_id === cabinet.id && w.row !== null && w.col !== null);
+        this._rackPanelOpen = true;
+    }
+    _closeRackPanel() {
+        this._rackPanelOpen = false;
+    }
+    _refreshRackPanel() {
+        if (!this._rackPanelOpen || !this._rackPanelCabinet)
+            return;
+        const fresh = this._cabinets.find((c) => c.id === this._rackPanelCabinet.id);
+        if (fresh)
+            this._rackPanelCabinet = fresh;
+        this._rackPanelWines = this._wines.filter((w) => w.cabinet_id === this._rackPanelCabinet.id && w.row !== null && w.col !== null);
+    }
+    // Every physical (row, col) slot in the rack, skipping bulk/box storage rows.
+    _getRackSlots() {
+        return this._rackPanelCabinet ? getRackSlots(this._rackPanelCabinet) : [];
+    }
+    // Adds exactly one new slot. A rack is a strict rows×cols rectangle, so
+    // growing either axis by 1 adds that many slots (all of the other axis).
+    // Grow whichever axis is smaller to add as few slots as possible — for the
+    // common single-row rack (rows=1) this always adds exactly 1 slot.
+    _addRackSlot() {
+        if (!this._rackPanelCabinet)
+            return;
+        const { rows, cols } = this._rackPanelCabinet;
+        if (rows <= cols) {
+            this._resizeRack({ cols: cols + 1 });
+        }
+        else {
+            this._resizeRack({ rows: rows + 1 });
+        }
+    }
+    async _resizeRack(updates) {
+        if (!this._rackPanelCabinet)
+            return;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/update_cabinet",
+                cabinet_id: this._rackPanelCabinet.id,
+                updates,
+            });
+            await this._loadData();
+        }
+        catch (err) {
+            console.error("Failed to resize rack:", err);
+            this._showToast("Failed to resize rack");
+        }
+    }
+    // A rack is a strict rows×cols rectangle, so only the trailing slot can be
+    // removed without leaving a hole the grid can't represent.
+    _isLastRackSlot(row, col) {
+        const slots = this._getRackSlots();
+        if (slots.length === 0)
+            return false;
+        const last = slots[slots.length - 1];
+        return last.row === row && last.col === col;
+    }
+    async _deleteRackSlot(row, col) {
+        if (!this._rackPanelCabinet)
+            return;
+        const { rows, cols } = this._rackPanelCabinet;
+        if (rows <= 1 && cols <= 1) {
+            this._showToast("Rack can't get any smaller");
+            return;
+        }
+        const wine = this._rackPanelWines.find((w) => w.row === row && w.col === col);
+        const warning = wine
+            ? `Delete this slot? "${wine.name}" will be moved to Unassigned.`
+            : "Delete this slot?";
+        if (!window.confirm(warning))
+            return;
+        try {
+            if (wine) {
+                await this.hass.callWS({
+                    type: "wine_cellar/update_wine",
+                    wine_id: wine.id,
+                    updates: { cabinet_id: "", row: null, col: null, zone: "", depth: 0 },
+                });
+            }
+            if (cols >= rows && cols > 1) {
+                await this._resizeRack({ cols: cols - 1 });
+            }
+            else {
+                await this._resizeRack({ rows: rows - 1 });
+            }
+            this._showToast(wine ? "Slot deleted, wine unassigned" : "Slot deleted");
+        }
+        catch (err) {
+            console.error("Failed to delete slot:", err);
+            this._showToast("Failed to delete slot");
+        }
+    }
+    _onRackPanelSlotClick(row, col, wine) {
+        const cabinet = this._rackPanelCabinet;
+        if (!cabinet)
+            return;
+        const cabinetDepth = cabinet.depth || 1;
+        if (cabinetDepth >= 2) {
+            // Multi-depth cells are handled by the existing depth panel.
+            const wines = this._rackPanelWines.filter((w) => w.row === row && w.col === col);
+            this._closeRackPanel();
+            this._openDepthPanel(cabinet, row, col, wines, cabinetDepth);
+            return;
+        }
+        if (wine) {
+            this._selectedWine = wine;
+            this._detailMode = "cellar";
+            this._showDetail = true;
+            return;
+        }
+        if (this._copiedWine) {
+            this._pasteWine(cabinet.id, row, col, 0);
+            return;
+        }
+        if (this._movingWine) {
+            this._executeMoveWine(cabinet.id, row, col, "", 0);
+            return;
+        }
+        if (this._movingBuyListItem) {
+            this._executeMoveTocellar(cabinet.id, row, col, "", 0);
+            return;
+        }
+        this._addPreselect = { cabinet: cabinet.id, row, col, zone: "", depth: 0 };
+        this._showAddDialog = true;
+    }
+    _onRackPanelDragStart(e, wine) {
+        this._rackPanelDragWineId = wine.id;
+        if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/plain", JSON.stringify({
+                wineId: wine.id,
+                cabinetId: wine.cabinet_id,
+                row: wine.row ?? null,
+                col: wine.col ?? null,
+                zone: wine.zone || "",
+            }));
+        }
+    }
+    _onRackPanelDragEnd() {
+        this._rackPanelDragWineId = null;
+        this._rackPanelDragOverKey = null;
+    }
+    _onRackPanelDragOver(e, key) {
+        e.preventDefault();
+        if (e.dataTransfer)
+            e.dataTransfer.dropEffect = "move";
+        this._rackPanelDragOverKey = key;
+    }
+    // Swap/move the dragged wine into the target (row, col) slot.
+    async _onRackPanelReorder(e, targetRow, targetCol, targetWine) {
+        e.preventDefault();
+        this._rackPanelDragOverKey = null;
+        const draggedId = this._rackPanelDragWineId;
+        this._rackPanelDragWineId = null;
+        if (!draggedId || !this._rackPanelCabinet || draggedId === targetWine?.id)
+            return;
+        const draggedWine = this._rackPanelWines.find((w) => w.id === draggedId);
+        if (!draggedWine || (draggedWine.row === targetRow && draggedWine.col === targetCol))
+            return;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/move_wine",
+                wine_id: draggedWine.id,
+                cabinet_id: this._rackPanelCabinet.id,
+                row: targetRow,
+                col: targetCol,
+                zone: "",
+            });
+            if (targetWine) {
+                await this.hass.callWS({
+                    type: "wine_cellar/move_wine",
+                    wine_id: targetWine.id,
+                    cabinet_id: this._rackPanelCabinet.id,
+                    row: draggedWine.row,
+                    col: draggedWine.col,
+                    zone: "",
+                });
+            }
+            this._showToast("Wine reordered");
+            await this._loadData();
+        }
+        catch (err) {
+            console.error("Failed to reorder wine:", err);
+            this._showToast("Failed to reorder wine");
+        }
     }
     async _executeMoveWine(cabinetId, row, col, zone, depth = 0) {
         if (!this._movingWine)
@@ -8132,10 +9639,12 @@ let WineCellarCard = class WineCellarCard extends i {
                 type: "wine_cellar/move_wine",
                 wine_id: this._movingWine.id,
                 cabinet_id: cabinetId,
-                row,
-                col,
                 zone,
                 depth,
+                // Bulk/zone moves have no X/Y; the backend schema rejects row/col
+                // sent as null, so only include them when they're actually set.
+                ...(row !== null ? { row } : {}),
+                ...(col !== null ? { col } : {}),
             });
             this._showToast(`Moved "${this._movingWine.name}"`);
             this._movingWine = null;
@@ -8148,8 +9657,51 @@ let WineCellarCard = class WineCellarCard extends i {
     }
     async _onWineDrop(e) {
         const d = e.detail;
-        // Don't drop on same position
-        if (d.sourceCabinetId === d.targetCabinetId && d.sourceRow === d.targetRow && d.sourceCol === d.targetCol && d.sourceZone === d.targetZone)
+        // Reordering within the same bulk zone: dropped on/near another bottle
+        // there, so insert before/after it (whichever side the drop landed on)
+        // and reflow the whole zone to sequential depths — a straight two-item
+        // depth swap couldn't move a bottle to the front/back of a longer bin.
+        if (d.targetWineId &&
+            d.targetWineId !== d.wineId &&
+            d.sourceCabinetId === d.targetCabinetId &&
+            d.sourceZone &&
+            d.sourceZone === d.targetZone) {
+            try {
+                const zoneWines = this._wines
+                    .filter((w) => w.cabinet_id === d.targetCabinetId && w.zone === d.targetZone)
+                    .sort((a, b) => (a.depth || 0) - (b.depth || 0));
+                const fromIdx = zoneWines.findIndex((w) => w.id === d.wineId);
+                if (fromIdx === -1)
+                    return;
+                const [moved] = zoneWines.splice(fromIdx, 1);
+                const toIdx = zoneWines.findIndex((w) => w.id === d.targetWineId);
+                if (toIdx === -1)
+                    return;
+                zoneWines.splice(d.insertBefore ? toIdx : toIdx + 1, 0, moved);
+                for (let i = 0; i < zoneWines.length; i++) {
+                    if ((zoneWines[i].depth || 0) !== i) {
+                        await this.hass.callWS({
+                            type: "wine_cellar/move_wine",
+                            wine_id: zoneWines[i].id,
+                            cabinet_id: d.targetCabinetId,
+                            zone: d.targetZone,
+                            depth: i,
+                        });
+                    }
+                }
+                this._showToast("Wine reordered");
+                await this._loadData();
+            }
+            catch (err) {
+                console.error("Failed to reorder wine:", err);
+                this._showToast("Failed to reorder wine");
+            }
+            return;
+        }
+        // Don't drop on same position. Only meaningful for grid slots — bulk/box
+        // zones have no row/col (always null), so this would always match and
+        // silently block reordering within the same zone.
+        if (!d.targetZone && d.sourceCabinetId === d.targetCabinetId && d.sourceRow === d.targetRow && d.sourceCol === d.targetCol && d.sourceZone === d.targetZone)
             return;
         try {
             // Check if target cell has a wine (swap)
@@ -8163,21 +9715,45 @@ let WineCellarCard = class WineCellarCard extends i {
                     type: "wine_cellar/move_wine",
                     wine_id: targetWine.id,
                     cabinet_id: d.sourceCabinetId,
-                    row: d.sourceRow,
-                    col: d.sourceCol,
                     zone: d.sourceZone || "",
+                    // Slot targets carry real X/Y coordinates; Bulk/zone targets have
+                    // none, and the backend schema rejects row/col sent as null, so
+                    // only include them when they're actually set.
+                    ...(d.sourceRow !== null && d.sourceRow !== undefined ? { row: d.sourceRow } : {}),
+                    ...(d.sourceCol !== null && d.sourceCol !== undefined ? { col: d.sourceCol } : {}),
                 });
+            }
+            // Dropped into a bulk/box zone's general area (not swapped onto a
+            // specific bottle above): land past the last occupied depth instead
+            // of defaulting to 0, which would collide with whatever wine is
+            // already at depth 0 and — since depth-sorting is stable — look like
+            // the drop silently did nothing.
+            let targetDepth;
+            if (d.targetZone) {
+                const occupants = this._wines.filter((w) => w.cabinet_id === d.targetCabinetId && w.zone === d.targetZone && w.id !== d.wineId);
+                const targetCabinet = this._cabinets.find((c) => c.id === d.targetCabinetId);
+                const rowIdx = parseInt(d.targetZone.replace("storage-", ""), 10);
+                const storageRow = targetCabinet?.storage_rows?.find((s) => s.row === rowIdx);
+                if (storageRow && occupants.length >= (storageRow.capacity || 20)) {
+                    this._showToast(`"${storageRow.name || "Zone"}" is full — cannot move here.`);
+                    return;
+                }
+                targetDepth = occupants.reduce((max, w) => Math.max(max, w.depth || 0), -1) + 1;
             }
             // Move dragged wine to target
             await this.hass.callWS({
                 type: "wine_cellar/move_wine",
                 wine_id: d.wineId,
                 cabinet_id: d.targetCabinetId,
-                row: d.targetRow,
-                col: d.targetCol,
                 zone: d.targetZone || "",
+                ...(d.targetRow !== null && d.targetRow !== undefined ? { row: d.targetRow } : {}),
+                ...(d.targetCol !== null && d.targetCol !== undefined ? { col: d.targetCol } : {}),
+                ...(targetDepth !== undefined ? { depth: targetDepth } : {}),
             });
-            this._showToast(targetWine ? "Swapped wines" : "Wine moved");
+            // Same container (rack/bin/box) = reordering; a different one = an
+            // actual move between containers.
+            const sameContainer = d.sourceCabinetId === d.targetCabinetId;
+            this._showToast(sameContainer ? "Wine reordered" : targetWine ? "Swapped wines" : "Wine moved");
             await this._loadData();
         }
         catch (err) {
@@ -8187,10 +9763,15 @@ let WineCellarCard = class WineCellarCard extends i {
     }
     _copyWine(wine) {
         this._copiedWine = wine;
-        this._showToast(`Copied "${wine.name}" — tap empty cells to paste`);
+        this._showToast(`Copied "${wine.name}" — tap empty cells or bulk/box zones to paste`);
         this._showDetail = false;
+        // Close any open side panel and show every rack, so the whole cellar is reachable to paste into.
+        this._zonePanelOpen = false;
+        this._rackPanelOpen = false;
+        this._depthPanelOpen = false;
+        this._activeTab = "all";
     }
-    async _pasteWine(cabinetId, row, col, depth = 0) {
+    async _pasteWine(cabinetId, row, col, depth = 0, zone = "") {
         if (!this._copiedWine)
             return;
         try {
@@ -8207,7 +9788,11 @@ let WineCellarCard = class WineCellarCard extends i {
                     grape_variety: this._copiedWine.grape_variety,
                     rating: this._copiedWine.rating,
                     image_url: this._copiedWine.image_url,
+                    back_image_url: this._copiedWine.back_image_url,
                     price: this._copiedWine.price,
+                    retail_price: this._copiedWine.retail_price,
+                    retail_price_currency: this._copiedWine.retail_price_currency,
+                    purchase_date: this._copiedWine.purchase_date,
                     drink_by: this._copiedWine.drink_by,
                     notes: this._copiedWine.notes,
                     description: this._copiedWine.description,
@@ -8218,9 +9803,15 @@ let WineCellarCard = class WineCellarCard extends i {
                     row,
                     col,
                     depth,
-                    zone: "",
+                    zone,
                     user_rating: this._copiedWine.user_rating,
+                    tasting_notes: this._copiedWine.tasting_notes,
                     disposition: this._copiedWine.disposition,
+                    drink_window: this._copiedWine.drink_window,
+                    ai_ratings: this._copiedWine.ai_ratings,
+                    vivino_updated_at: this._copiedWine.vivino_updated_at,
+                    ai_updated_at: this._copiedWine.ai_updated_at,
+                    vivino_id: this._copiedWine.vivino_id,
                 },
             });
             this._showToast("Wine pasted! Tap more empty cells or click ✕ to stop.");
@@ -8231,7 +9822,15 @@ let WineCellarCard = class WineCellarCard extends i {
         }
     }
     // --- Batch AI Analysis ---
-    async _batchAnalyzeWines() {
+    _batchAnalyzeWines() {
+        if (this._wines.length > 5) {
+            this._showBatchAiConfirm = true;
+            return;
+        }
+        this._runBatchAnalyzeWines();
+    }
+    async _runBatchAnalyzeWines() {
+        this._showBatchAiConfirm = false;
         this._analyzing = true;
         this._showToast("Running full AI analysis on all wines...");
         try {
@@ -8254,22 +9853,87 @@ let WineCellarCard = class WineCellarCard extends i {
         }
         this._analyzing = false;
     }
+    // --- Metadata language (Vivino/AI) ---
+    async _setMetadataLanguage(lang) {
+        if (lang === this._metadataLanguage)
+            return;
+        const previous = this._metadataLanguage;
+        this._metadataLanguage = lang;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/update_settings",
+                updates: { metadata_language: lang },
+            });
+        }
+        catch (err) {
+            this._metadataLanguage = previous;
+            this._showToast("Failed to change language");
+        }
+    }
+    async _setMetadataCurrency(currency) {
+        if (currency === this._metadataCurrency)
+            return;
+        const previous = this._metadataCurrency;
+        this._metadataCurrency = currency;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/update_settings",
+                updates: { metadata_currency: currency },
+            });
+        }
+        catch (err) {
+            this._metadataCurrency = previous;
+            this._showToast("Failed to change currency");
+        }
+    }
+    async _setAiFallbackAlways(value) {
+        if (value === this._aiFallbackAlways)
+            return;
+        const previous = this._aiFallbackAlways;
+        this._aiFallbackAlways = value;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/update_settings",
+                updates: { ai_fallback_always: value },
+            });
+        }
+        catch (err) {
+            this._aiFallbackAlways = previous;
+            this._showToast("Failed to change AI fallback setting");
+        }
+    }
     // --- Batch Vivino Refresh ---
-    async _batchRefreshVivino() {
+    _batchRefreshVivino() {
+        this._batchAiFallback = this._aiFallbackAlways;
+        this._showBatchVivinoConfirm = true;
+    }
+    async _runBatchVivino(photoMode) {
+        this._showBatchVivinoConfirm = false;
         this._batchVivino = true;
         this._showToast("Refreshing all wines from Vivino...");
         try {
             const result = await this.hass.callWS({
                 type: "wine_cellar/batch_refresh_vivino",
+                photo_mode: photoMode,
+                ai_fallback: this._batchAiFallback ? "use" : "skip",
             });
             if (result.error) {
                 this._showToast(`Vivino Batch failed: ${result.error}`);
             }
             else {
                 const parts = [`Vivino Batch complete! ${result.updated}/${result.total} updated`];
+                if (result.photos_updated)
+                    parts.push(`${result.photos_updated} photos updated`);
+                if (result.photos_kept)
+                    parts.push(`${result.photos_kept} kept`);
+                if (result.ai_fallback_used)
+                    parts.push(`${result.ai_fallback_used} used AI instead`);
+                const unresolvedMismatch = (result.mismatched || 0) - (result.ai_fallback_used || 0);
+                if (unresolvedMismatch > 0)
+                    parts.push(`${unresolvedMismatch} no match at all`);
                 if (result.errors > 0)
                     parts.push(`(${result.errors} errors)`);
-                this._showToast(parts.join(" "));
+                this._showToast(parts.join(", "));
                 await this._loadData();
             }
         }
@@ -8372,7 +10036,10 @@ let WineCellarCard = class WineCellarCard extends i {
         <div class="header-row">
           <div class="title">
             <span class="title-icon">🍷</span>
-            ${title}
+            <div class="title-text">
+              <div>${title}</div>
+              <div class="title-credit">originally created by @BaconWappedBitcoin</div>
+            </div>
           </div>
           <div class="header-actions">
             ${this._hasGemini ? b `
@@ -8429,7 +10096,7 @@ let WineCellarCard = class WineCellarCard extends i {
         ${this._copiedWine
             ? b `
               <div class="copy-banner">
-                <span>📋 Copying "${this._copiedWine.name}" — tap empty cells to place copies</span>
+                <span>📋 Copying "${this._copiedWine.name}" — tap empty cells or bulk/box zones to place copies</span>
                 <button @click=${() => (this._copiedWine = null)}>✕ Done</button>
               </div>
             `
@@ -8474,10 +10141,10 @@ let WineCellarCard = class WineCellarCard extends i {
                 ${this._stats.total_value
                 ? b `
                       <div class="stat">
-                        <span class="stat-value">$${this._stats.total_value.toLocaleString()}</span>
+                        <span class="stat-value">${this._metadataCurrency} ${this._stats.total_value.toLocaleString()}</span>
                         value
                         ${this._stats.total_cost
-                    ? b `<span style="font-size:0.75em;color:${this._stats.total_value - this._stats.total_cost >= 0 ? '#2e7d32' : '#c62828'}">${this._stats.total_value - this._stats.total_cost >= 0 ? '+' : ''}$${(this._stats.total_value - this._stats.total_cost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>`
+                    ? b `<span style="font-size:0.75em;color:${this._stats.total_value - this._stats.total_cost >= 0 ? '#2e7d32' : '#c62828'}">${this._stats.total_value - this._stats.total_cost >= 0 ? '+' : ''}${this._metadataCurrency} ${(this._stats.total_value - this._stats.total_cost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>`
                     : A}
                       </div>
                     `
@@ -8527,6 +10194,12 @@ let WineCellarCard = class WineCellarCard extends i {
           >
             Manage Racks
           </button>
+          <button
+            class="tab settings-tab-btn"
+            @click=${() => (this._showVivinoAiSettings = true)}
+          >
+            ⚙️ Vivino/AI Settings
+          </button>
         </div>
 
         <!-- Search bar -->
@@ -8544,6 +10217,7 @@ let WineCellarCard = class WineCellarCard extends i {
                           @cell-click=${this._onCellClick}
                           @zone-click=${this._onZoneClick}
                           @zone-container-click=${this._onZoneContainerClick}
+                          @rack-click=${this._onRackClick}
                           @wine-drop=${this._onWineDrop}
                           @wine-longpress=${(e) => {
                     this._movingWine = e.detail.wine;
@@ -8560,6 +10234,13 @@ let WineCellarCard = class WineCellarCard extends i {
                             @cell-click=${this._onCellClick}
                             @zone-click=${this._onZoneClick}
                             @zone-container-click=${this._onZoneContainerClick}
+                            @rack-click=${this._onRackClick}
+                            @wine-drop=${this._onWineDrop}
+                            @wine-longpress=${(e) => {
+                    this._activeTab = "all";
+                    this._movingWine = e.detail.wine;
+                    this._showToast(`Tap a cell to move "${e.detail.wine.name}"`);
+                }}
                           ></cabinet-grid>
                         `)}
               </div>
@@ -8634,7 +10315,7 @@ let WineCellarCard = class WineCellarCard extends i {
                             <div class="bl-meta">
                               ${item.winery}${item.vintage ? ` · ${item.vintage}` : ""}
                               ${item.rating ? ` · ★${item.rating.toFixed(1)}` : ""}
-                              ${item.retail_price ? ` · $${item.retail_price}` : ""}
+                              ${item.retail_price ? ` · ${this._metadataCurrency} ${item.retail_price}` : ""}
                             </div>
                           </div>
                           <div class="bl-actions">
@@ -8778,12 +10459,71 @@ let WineCellarCard = class WineCellarCard extends i {
             `
             : A}
 
+        <!-- Batch Vivino Photo Mode Confirm -->
+        ${this._showBatchVivinoConfirm ? b `
+          <div class="dialog-overlay" @click=${() => (this._showBatchVivinoConfirm = false)}>
+            <div class="dialog" style="max-width:340px;padding:24px;text-align:center" @click=${(e) => e.stopPropagation()}>
+              <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">Vivino Batch Scan</h3>
+              <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">
+                Some wines already have a photo. What should happen to those photos?
+              </p>
+              ${this._hasGemini ? b `
+                <label style="display:flex;align-items:center;gap:6px;justify-content:center;font-size:0.8em;color:var(--wc-text-secondary);margin-bottom:16px;cursor:pointer">
+                  <input
+                    type="checkbox"
+                    .checked=${this._batchAiFallback}
+                    @change=${(e) => (this._batchAiFallback = e.target.checked)}
+                  />
+                  Try AI for wines with no confident Vivino match
+                </label>
+              ` : A}
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <button class="btn btn-primary" style="background:#8e24aa" @click=${() => this._runBatchVivino("keep")}>
+                  Keep My Existing Photos
+                </button>
+                <button
+                  style="padding:8px 16px;border-radius:20px;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text);cursor:pointer;font-size:0.85em"
+                  @click=${() => this._runBatchVivino("replace")}
+                >Replace With Vivino Photos</button>
+                <button
+                  style="margin-top:4px;padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.8em"
+                  @click=${() => (this._showBatchVivinoConfirm = false)}
+                >Cancel</button>
+              </div>
+            </div>
+          </div>
+        ` : A}
+
+        <!-- Batch AI Analysis Confirm -->
+        ${this._showBatchAiConfirm ? b `
+          <div class="dialog-overlay" @click=${() => (this._showBatchAiConfirm = false)}>
+            <div class="dialog" style="max-width:340px;padding:24px;text-align:center" @click=${(e) => e.stopPropagation()}>
+              <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">Run AI Batch Scan?</h3>
+              <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">
+                This will run a full AI analysis on all ${this._wines.length} wines, one API call per bottle. It may take a while and use significant AI quota.
+              </p>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <button class="btn btn-primary" style="background:#1565c0" @click=${this._runBatchAnalyzeWines}>
+                  Run on ${this._wines.length} Wines
+                </button>
+                <button
+                  style="margin-top:4px;padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.8em"
+                  @click=${() => (this._showBatchAiConfirm = false)}
+                >Cancel</button>
+              </div>
+            </div>
+          </div>
+        ` : A}
+
         <!-- Wine Detail Dialog -->
         <wine-detail-dialog
           .wine=${this._selectedWine}
           .hass=${this.hass}
+          .cabinets=${this._cabinets}
           .open=${this._showDetail}
           .hasGemini=${this._hasGemini}
+          .aiFallbackAlways=${this._aiFallbackAlways}
+          .currency=${this._metadataCurrency}
           .mode=${this._detailMode}
           @close=${() => (this._showDetail = false)}
           @remove-wine=${this._onRemoveWine}
@@ -8793,8 +10533,15 @@ let WineCellarCard = class WineCellarCard extends i {
           @wine-updated=${() => this._loadData()}
           @buy-list-updated=${() => this._loadData()}
           @copy-wine=${(e) => this._copyWine(e.detail.wine)}
+          @locate-wine=${(e) => this._locateWine(e.detail.wine)}
+          @set-ai-fallback-always=${(e) => this._setAiFallbackAlways(e.detail.value)}
           @move-wine=${(e) => {
             this._showDetail = false;
+            // Close any open side panel and show every rack, so any rack/zone in the cellar is reachable as a target.
+            this._zonePanelOpen = false;
+            this._rackPanelOpen = false;
+            this._depthPanelOpen = false;
+            this._activeTab = "all";
             this._movingWine = e.detail.wine;
             this._showToast(`Tap a cell to move "${e.detail.wine.name}"`);
         }}
@@ -8805,6 +10552,7 @@ let WineCellarCard = class WineCellarCard extends i {
           .open=${this._showAddDialog}
           .hass=${this.hass}
           .cabinets=${this._cabinets}
+          .wines=${this._wines}
           .preselectedCabinet=${this._addPreselect.cabinet}
           .preselectedRow=${this._addPreselect.row}
           .preselectedCol=${this._addPreselect.col}
@@ -8834,8 +10582,27 @@ let WineCellarCard = class WineCellarCard extends i {
           .wines=${this._wines}
           .cabinets=${this._cabinets}
           .hasGemini=${this._hasGemini}
+          .currency=${this._metadataCurrency}
           @close=${() => (this._showInventory = false)}
           @wine-updated=${() => this._loadData()}
+          @locate-wine=${(e) => {
+            this._showInventory = false;
+            this._locateWine(e.detail.wine);
+        }}
+          @copy-wine=${(e) => {
+            this._showInventory = false;
+            this._copyWine(e.detail.wine);
+        }}
+          @move-wine=${(e) => {
+            this._showInventory = false;
+            this._zonePanelOpen = false;
+            this._rackPanelOpen = false;
+            this._depthPanelOpen = false;
+            this._activeTab = "all";
+            this._movingWine = e.detail.wine;
+            this._showToast(`Tap a cell to move "${e.detail.wine.name}"`);
+        }}
+          @remove-wine=${this._onRemoveWine}
         ></inventory-dialog>
 
         <!-- Rack Settings Dialog -->
@@ -8847,6 +10614,19 @@ let WineCellarCard = class WineCellarCard extends i {
           @close=${() => (this._showRackSettings = false)}
           @racks-updated=${() => this._loadData()}
         ></rack-settings-dialog>
+
+        <vivino-ai-settings-dialog
+          .open=${this._showVivinoAiSettings}
+          .aiFallbackAlways=${this._aiFallbackAlways}
+          .metadataLanguage=${this._metadataLanguage}
+          .supportedLanguages=${this._supportedLanguages}
+          .metadataCurrency=${this._metadataCurrency}
+          .supportedCurrencies=${this._supportedCurrencies}
+          @close=${() => (this._showVivinoAiSettings = false)}
+          @set-ai-fallback-always=${(e) => this._setAiFallbackAlways(e.detail.value)}
+          @set-metadata-language=${(e) => this._setMetadataLanguage(e.detail.value)}
+          @set-metadata-currency=${(e) => this._setMetadataCurrency(e.detail.value)}
+        ></vivino-ai-settings-dialog>
 
         <!-- Depth Side Panel -->
         ${this._depthPanelOpen
@@ -8866,6 +10646,8 @@ let WineCellarCard = class WineCellarCard extends i {
                   ${Array.from({ length: this._depthPanelMaxDepth }, (_, i) => {
                 const wine = this._depthPanelWines.find((w) => (w.depth || 0) === i);
                 const typeColor = wine ? WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red : "";
+                const disp = wine?.disposition || "";
+                const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
                 return b `
                       <div
                         class="depth-slot ${wine ? "filled" : "empty"}"
@@ -8875,15 +10657,18 @@ let WineCellarCard = class WineCellarCard extends i {
                         ${wine
                     ? b `
                               <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
-                                ${wine.image_url
+                                <div class="depth-slot-avatar">
+                                  ${wine.image_url
                         ? b `<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
                         : b `<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                  ${dispClass ? b `<span class="depth-slot-disposition ${dispClass}">${disp}</span>` : A}
+                                </div>
                                 <div class="depth-slot-info">
                                   <div class="depth-slot-name">${wine.name}</div>
                                   <div class="depth-slot-meta">
                                     ${wine.vintage || "NV"}
                                     ${wine.rating ? b ` · ★${wine.rating}` : A}
-                                    ${wine.price ? b ` · $${wine.price}` : A}
+                                    ${wine.price ? b ` · ${this._metadataCurrency} ${wine.price}` : A}
                                   </div>
                                 </div>
                               </div>
@@ -8905,7 +10690,7 @@ let WineCellarCard = class WineCellarCard extends i {
         <!-- Zone Side Panel (Boxes, Bulk Bins) -->
         ${this._zonePanelOpen
             ? b `
-              <div class="depth-panel-backdrop" @click=${this._closeZonePanel}></div>
+              <div class="depth-panel-backdrop ${this._zonePanelDragWineId ? "drag-through" : ""}" @click=${this._closeZonePanel}></div>
               <div class="depth-panel open">
                 <div class="depth-panel-header">
                   <span class="depth-panel-title">
@@ -8920,43 +10705,63 @@ let WineCellarCard = class WineCellarCard extends i {
                 <div class="depth-panel-slots">
                   ${this._zonePanelType === "bulk"
                 ? b `
-                        <!-- Bulk mode: scrollable wine list + add button -->
-                        ${this._zonePanelWines.map((wine) => {
-                    const typeColor = WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red;
+                        <!-- Bulk mode: numbered slots, harmonized with Box mode -->
+                        ${Array.from({ length: this._zonePanelCapacity }, (_, slotIdx) => {
+                    const wine = this._zonePanelWines[slotIdx];
+                    const typeColor = wine ? WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red : "";
+                    const disp = wine?.disposition || "";
+                    const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
+                    const dragKey = `bulk-${slotIdx}`;
+                    const highlighted = wine?.id === this._highlightWineId;
                     return b `
                             <div
-                              class="depth-slot filled"
-                              @click=${() => this._onZonePanelSlotClick(0, wine)}
+                              id=${highlighted ? "highlight-slot" : A}
+                              class="depth-slot ${wine ? "filled" : "empty"} ${this._zonePanelDragOverKey === dragKey ? "drag-over" : ""} ${highlighted ? "highlight" : ""}"
+                              draggable=${wine ? "true" : "false"}
+                              @click=${() => this._onZonePanelSlotClick(slotIdx, wine)}
+                              @dragstart=${wine ? (e) => this._onZonePanelDragStart(e, wine) : A}
+                              @dragend=${wine ? () => this._onZonePanelDragEnd() : A}
+                              @dragover=${(e) => this._onZonePanelDragOver(e, dragKey)}
+                              @dragleave=${() => (this._zonePanelDragOverKey = null)}
+                              @drop=${(e) => this._onZonePanelBulkReorder(e, slotIdx)}
                             >
-                              <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
-                                ${wine.image_url
-                        ? b `<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
-                        : b `<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
-                                <div class="depth-slot-info">
-                                  <div class="depth-slot-name">${wine.name}</div>
-                                  <div class="depth-slot-meta">
-                                    ${wine.vintage || "NV"}
-                                    ${wine.rating ? b ` · ★${wine.rating}` : A}
-                                    ${wine.price ? b ` · $${wine.price}` : A}
-                                  </div>
-                                </div>
-                              </div>
+                              <span
+                                class="depth-slot-delete"
+                                title="Delete this slot"
+                                @click=${(e) => { e.stopPropagation(); this._deleteZoneSlot(slotIdx); }}
+                              >✕</span>
+                              <div class="depth-slot-label">Slot ${slotIdx + 1}</div>
+                              ${wine
+                        ? b `
+                                    <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
+                                      <div class="depth-slot-avatar">
+                                        ${wine.image_url
+                            ? b `<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
+                            : b `<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                        ${dispClass ? b `<span class="depth-slot-disposition ${dispClass}">${disp}</span>` : A}
+                                      </div>
+                                      <div class="depth-slot-info">
+                                        <div class="depth-slot-name">${wine.name}</div>
+                                        <div class="depth-slot-meta">
+                                          ${wine.vintage || "NV"}
+                                          ${wine.rating ? b ` · ★${wine.rating}` : A}
+                                          ${wine.price ? b ` · ${this._metadataCurrency} ${wine.price}` : A}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  `
+                        : b `
+                                    <div class="depth-slot-empty">
+                                      <span class="depth-slot-plus">+</span>
+                                      <span>Empty</span>
+                                    </div>
+                                  `}
                             </div>
                           `;
                 })}
-                        ${this._zonePanelWines.length < this._zonePanelCapacity
-                    ? b `
-                              <div
-                                class="depth-slot empty"
-                                @click=${this._onZonePanelBulkAdd}
-                              >
-                                <div class="depth-slot-empty">
-                                  <span class="depth-slot-plus">+</span>
-                                  <span>Add Wine</span>
-                                </div>
-                              </div>
-                            `
-                    : A}
+                        <div class="depth-panel-grow" @click=${this._addBulkSlot}>
+                          <span class="depth-slot-plus">+</span> Add Slot
+                        </div>
                       `
                 : b `
                         <!-- Box mode: slots grouped by box -->
@@ -8976,24 +10781,43 @@ let WineCellarCard = class WineCellarCard extends i {
                             const depthIdx = start + slotInBox;
                             const wine = this._zonePanelWines.find((w) => (w.depth || 0) === depthIdx);
                             const typeColor = wine ? WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red : "";
+                            const disp = wine?.disposition || "";
+                            const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
+                            const dragKey = `box-${depthIdx}`;
+                            const highlighted = wine?.id === this._highlightWineId;
                             return b `
                                   <div
-                                    class="depth-slot ${wine ? "filled" : "empty"}"
+                                    id=${highlighted ? "highlight-slot" : A}
+                                    class="depth-slot ${wine ? "filled" : "empty"} ${this._zonePanelDragOverKey === dragKey ? "drag-over" : ""} ${highlighted ? "highlight" : ""}"
+                                    draggable=${wine ? "true" : "false"}
                                     @click=${() => this._onZonePanelSlotClick(depthIdx, wine)}
+                                    @dragstart=${wine ? (e) => this._onZonePanelDragStart(e, wine) : A}
+                                    @dragend=${wine ? () => this._onZonePanelDragEnd() : A}
+                                    @dragover=${(e) => this._onZonePanelDragOver(e, dragKey)}
+                                    @dragleave=${() => (this._zonePanelDragOverKey = null)}
+                                    @drop=${(e) => this._onZonePanelBoxReorder(e, depthIdx, wine)}
                                   >
+                                    <span
+                                      class="depth-slot-delete"
+                                      title="Delete this slot"
+                                      @click=${(e) => { e.stopPropagation(); this._deleteZoneSlot(depthIdx); }}
+                                    >✕</span>
                                     <div class="depth-slot-label">Slot ${slotInBox + 1}</div>
                                     ${wine
                                 ? b `
                                           <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
-                                            ${wine.image_url
+                                            <div class="depth-slot-avatar">
+                                              ${wine.image_url
                                     ? b `<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
                                     : b `<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                              ${dispClass ? b `<span class="depth-slot-disposition ${dispClass}">${disp}</span>` : A}
+                                            </div>
                                             <div class="depth-slot-info">
                                               <div class="depth-slot-name">${wine.name}</div>
                                               <div class="depth-slot-meta">
                                                 ${wine.vintage || "NV"}
                                                 ${wine.rating ? b ` · ★${wine.rating}` : A}
-                                                ${wine.price ? b ` · $${wine.price}` : A}
+                                                ${wine.price ? b ` · ${this._metadataCurrency} ${wine.price}` : A}
                                               </div>
                                             </div>
                                           </div>
@@ -9010,7 +10834,99 @@ let WineCellarCard = class WineCellarCard extends i {
                             `;
                     });
                 })()}
+                        <div class="depth-panel-add-box">
+                          <select
+                            .value=${String(this._zonePanelNewBoxSize)}
+                            @change=${(e) => (this._zonePanelNewBoxSize = parseInt(e.target.value, 10))}
+                          >
+                            ${BOX_SIZES.map((s) => b `<option value=${s} ?selected=${s === this._zonePanelNewBoxSize}>${s}-pk</option>`)}
+                          </select>
+                          <div class="depth-panel-grow" @click=${this._addBoxSlot}>
+                            <span class="depth-slot-plus">+</span> Add Box
+                          </div>
+                        </div>
                       `}
+                </div>
+              </div>
+            `
+            : A}
+
+        <!-- Rack Panel (grid-slot cabinets: list + reorder), harmonized with Bulk/Box -->
+        ${this._rackPanelOpen
+            ? b `
+              <div class="depth-panel-backdrop ${this._rackPanelDragWineId ? "drag-through" : ""}" @click=${this._closeRackPanel}></div>
+              <div class="depth-panel open">
+                <div class="depth-panel-header">
+                  <span class="depth-panel-title">
+                    ${this._rackPanelCabinet?.name}
+                    <span class="depth-panel-subtitle">
+                      ${this._rackPanelWines.length}/${this._getRackSlots().length} bottles
+                    </span>
+                  </span>
+                  <button class="depth-panel-close" @click=${this._closeRackPanel}>✕</button>
+                </div>
+                <div class="depth-panel-slots">
+                  ${this._getRackSlots().map(({ row, col }, slotIdx) => {
+                const wines = this._rackPanelWines.filter((w) => w.row === row && w.col === col);
+                const wine = wines.length > 0 ? wines.sort((a, b) => (a.depth || 0) - (b.depth || 0))[0] : undefined;
+                const typeColor = wine ? WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red : "";
+                const disp = wine?.disposition || "";
+                const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
+                const dragKey = `rack-${row}-${col}`;
+                const highlighted = wines.some((w) => w.id === this._highlightWineId);
+                return b `
+                      <div
+                        id=${highlighted ? "highlight-slot" : A}
+                        class="depth-slot ${wine ? "filled" : "empty"} ${this._rackPanelDragOverKey === dragKey ? "drag-over" : ""} ${highlighted ? "highlight" : ""}"
+                        draggable=${wine ? "true" : "false"}
+                        @click=${() => this._onRackPanelSlotClick(row, col, wine)}
+                        @dragstart=${wine ? (e) => this._onRackPanelDragStart(e, wine) : A}
+                        @dragend=${wine ? () => this._onRackPanelDragEnd() : A}
+                        @dragover=${(e) => this._onRackPanelDragOver(e, dragKey)}
+                        @dragleave=${() => (this._rackPanelDragOverKey = null)}
+                        @drop=${(e) => this._onRackPanelReorder(e, row, col, wine)}
+                      >
+                        ${this._isLastRackSlot(row, col)
+                    ? b `
+                              <span
+                                class="depth-slot-delete"
+                                title="Delete this slot"
+                                @click=${(e) => { e.stopPropagation(); this._deleteRackSlot(row, col); }}
+                              >✕</span>
+                            `
+                    : A}
+                        <div class="depth-slot-label">Slot ${slotIdx + 1}</div>
+                        ${wine
+                    ? b `
+                              <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
+                                <div class="depth-slot-avatar">
+                                  ${wine.image_url
+                        ? b `<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
+                        : b `<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                  ${dispClass ? b `<span class="depth-slot-disposition ${dispClass}">${disp}</span>` : A}
+                                </div>
+                                <div class="depth-slot-info">
+                                  <div class="depth-slot-name">${wine.name}</div>
+                                  <div class="depth-slot-meta">
+                                    ${wine.vintage || "NV"}
+                                    ${wine.rating ? b ` · ★${wine.rating}` : A}
+                                    ${wines.length > 1 ? b ` · ${wines.length} deep` : A}
+                                  </div>
+                                </div>
+                              </div>
+                            `
+                    : b `
+                              <div class="depth-slot-empty">
+                                <span class="depth-slot-plus">+</span>
+                                <span>Empty</span>
+                              </div>
+                            `}
+                      </div>
+                    `;
+            })}
+                  <div class="depth-panel-grow" @click=${this._addRackSlot}>
+                    <span class="depth-slot-plus">+</span> Add Slot
+                  </div>
                 </div>
               </div>
             `
@@ -9054,6 +10970,18 @@ WineCellarCard.styles = [
 
       .title-icon {
         font-size: 1.2em;
+      }
+
+      .title-text {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+
+      .title-credit {
+        font-size: 0.45em;
+        font-weight: 400;
+        color: var(--wc-text-secondary);
       }
 
       .header-actions {
@@ -9378,10 +11306,37 @@ __decorate([
 ], WineCellarCard.prototype, "_batchVivino", void 0);
 __decorate([
     r()
+], WineCellarCard.prototype, "_showBatchVivinoConfirm", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_showBatchAiConfirm", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_batchAiFallback", void 0);
+__decorate([
+    r()
 ], WineCellarCard.prototype, "_toast", void 0);
 __decorate([
     r()
 ], WineCellarCard.prototype, "_hasGemini", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_metadataLanguage", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_supportedLanguages", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_metadataCurrency", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_supportedCurrencies", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_aiFallbackAlways", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_showVivinoAiSettings", void 0);
 __decorate([
     r()
 ], WineCellarCard.prototype, "_showWineList", void 0);
@@ -9439,6 +11394,33 @@ __decorate([
 __decorate([
     r()
 ], WineCellarCard.prototype, "_zonePanelStorageRow", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_zonePanelDragWineId", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_zonePanelDragOverKey", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_zonePanelNewBoxSize", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_rackPanelOpen", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_rackPanelCabinet", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_rackPanelWines", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_rackPanelDragWineId", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_rackPanelDragOverKey", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_highlightWineId", void 0);
 WineCellarCard = __decorate([
     t("wine-cellar-card")
 ], WineCellarCard);

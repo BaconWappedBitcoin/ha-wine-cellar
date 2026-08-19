@@ -1,7 +1,7 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { sharedStyles } from "./styles";
-import { Wine, Cabinet, CellarStats, WINE_TYPE_COLORS, WineType, StorageRow, StorageRowType } from "./models";
+import { Wine, Cabinet, CellarStats, WINE_TYPE_COLORS, WineType, StorageRow, StorageRowType, BOX_SIZES, getRackSlots, getWineLocation } from "./models";
 
 import "./components/cabinet-grid";
 import "./components/wine-detail-dialog";
@@ -10,6 +10,7 @@ import "./components/search-bar";
 import "./components/rack-settings-dialog";
 import "./components/wine-list-dialog";
 import "./components/inventory-dialog";
+import "./components/vivino-ai-settings-dialog";
 
 interface WineCellarCardConfig {
   type: string;
@@ -38,8 +39,17 @@ export class WineCellarCard extends LitElement {
   @state() private _movingWine: Wine | null = null;
   @state() private _analyzing = false;
   @state() private _batchVivino = false;
+  @state() private _showBatchVivinoConfirm = false;
+  @state() private _showBatchAiConfirm = false;
+  @state() private _batchAiFallback = false;
   @state() private _toast = "";
   @state() private _hasGemini = false;
+  @state() private _metadataLanguage = "en";
+  @state() private _supportedLanguages: string[] = ["en", "fr", "de"];
+  @state() private _metadataCurrency = "USD";
+  @state() private _supportedCurrencies: string[] = ["USD", "EUR", "GBP", "CHF"];
+  @state() private _aiFallbackAlways = false;
+  @state() private _showVivinoAiSettings = false;
   @state() private _showWineList = false;
   @state() private _showInventory = false;
   @state() private _buyList: Wine[] = [];
@@ -63,6 +73,19 @@ export class WineCellarCard extends LitElement {
   @state() private _zonePanelName = "";
   @state() private _zonePanelWines: Wine[] = [];
   @state() private _zonePanelStorageRow: StorageRow | null = null;
+  @state() private _zonePanelDragWineId: string | null = null;
+  @state() private _zonePanelDragOverKey: string | null = null;
+  @state() private _zonePanelNewBoxSize = 6;
+
+  // Rack panel (grid-slot cabinets: list + reorder)
+  @state() private _rackPanelOpen = false;
+  @state() private _rackPanelCabinet: Cabinet | null = null;
+  @state() private _rackPanelWines: Wine[] = [];
+  @state() private _rackPanelDragWineId: string | null = null;
+  @state() private _rackPanelDragOverKey: string | null = null;
+
+  // Briefly highlights a wine's slot after "locate" is used from the detail dialog.
+  @state() private _highlightWineId: string | null = null;
 
   static styles = [
     sharedStyles,
@@ -93,6 +116,18 @@ export class WineCellarCard extends LitElement {
 
       .title-icon {
         font-size: 1.2em;
+      }
+
+      .title-text {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+
+      .title-credit {
+        font-size: 0.45em;
+        font-weight: 400;
+        color: var(--wc-text-secondary);
       }
 
       .header-actions {
@@ -406,6 +441,11 @@ export class WineCellarCard extends LitElement {
       );
       this._stats = statsResult;
       this._hasGemini = capResult?.has_gemini || false;
+      this._metadataLanguage = capResult?.metadata_language || "en";
+      this._supportedLanguages = capResult?.supported_languages || ["en", "fr", "de"];
+      this._metadataCurrency = capResult?.metadata_currency || "USD";
+      this._supportedCurrencies = capResult?.supported_currencies || ["USD", "EUR", "GBP", "CHF"];
+      this._aiFallbackAlways = capResult?.ai_fallback_always || false;
       this._buyList = buyListResult?.buy_list || [];
 
       // Refresh selected wine if detail dialog is open
@@ -418,6 +458,8 @@ export class WineCellarCard extends LitElement {
       this._refreshDepthPanel();
       // Refresh zone panel if open
       this._refreshZonePanel();
+      // Refresh rack panel if open
+      this._refreshRackPanel();
     } catch (err) {
       console.error("Cork Dork: Failed to load data", err);
     }
@@ -546,6 +588,13 @@ export class WineCellarCard extends LitElement {
   private _onZoneClick(e: CustomEvent) {
     const { wine, cabinet, zone } = e.detail;
 
+    // If we have a copied wine and clicked empty zone space, paste it here
+    if (this._copiedWine && !wine) {
+      const nextDepth = this._wines.filter((w) => w.cabinet_id === cabinet.id && w.zone === (zone || "bottom")).length;
+      this._pasteWine(cabinet.id, null, null, nextDepth, zone || "bottom");
+      return;
+    }
+
     // If we're moving a wine, place it in this zone
     if (this._movingWine && !wine) {
       this._executeMoveWine(cabinet.id, null, null, zone || "bottom");
@@ -571,13 +620,33 @@ export class WineCellarCard extends LitElement {
   // --- Zone side panel (boxes, bulk bins) ---
   private _onZoneContainerClick(e: CustomEvent) {
     const { cabinet, zone, storageRow } = e.detail;
+    const nextDepth = this._wines.filter((w) => w.cabinet_id === cabinet.id && w.zone === zone).length;
+    const hasRoom = nextDepth < (storageRow.capacity || 20);
+
+    // If we have a copied wine, paste it in this zone instead of opening panel
+    if (this._copiedWine) {
+      if (!hasRoom) {
+        this._showToast(`"${storageRow.name || "Zone"}" is full — cannot paste here.`);
+        return;
+      }
+      this._pasteWine(cabinet.id, null, null, nextDepth, zone);
+      return;
+    }
 
     // If moving wine, drop it in this zone instead of opening panel
     if (this._movingWine) {
+      if (!hasRoom) {
+        this._showToast(`"${storageRow.name || "Zone"}" is full — cannot move here.`);
+        return;
+      }
       this._executeMoveWine(cabinet.id, null, null, zone);
       return;
     }
     if (this._movingBuyListItem) {
+      if (!hasRoom) {
+        this._showToast(`"${storageRow.name || "Zone"}" is full — cannot move here.`);
+        return;
+      }
       this._executeMoveTocellar(cabinet.id, null, null, zone);
       return;
     }
@@ -604,9 +673,106 @@ export class WineCellarCard extends LitElement {
 
   private _refreshZonePanel() {
     if (!this._zonePanelOpen || !this._zonePanelCabinet) return;
+    // Re-derive from the freshly loaded cabinet so capacity/box changes show up.
+    const freshCabinet = this._cabinets.find((c) => c.id === this._zonePanelCabinet!.id);
+    if (freshCabinet) {
+      this._zonePanelCabinet = freshCabinet;
+      const rowIdx = parseInt(this._zonePanelZone.replace("storage-", ""), 10);
+      const sr = (freshCabinet.storage_rows || []).find((s) => s.row === rowIdx);
+      if (sr) {
+        this._zonePanelType = sr.type || "bulk";
+        this._zonePanelCapacity = sr.capacity || 20;
+        this._zonePanelName = sr.name || "Storage";
+        this._zonePanelStorageRow = sr;
+      }
+    }
     this._zonePanelWines = this._wines
       .filter((w) => w.cabinet_id === this._zonePanelCabinet!.id && w.zone === this._zonePanelZone)
       .sort((a, b) => (a.depth || 0) - (b.depth || 0));
+  }
+
+  // Grow a bulk/box zone's capacity by editing its StorageRow entry.
+  private async _updateStorageRow(updates: Partial<StorageRow>) {
+    if (!this._zonePanelCabinet || !this._zonePanelStorageRow) return;
+    const newStorageRows = (this._zonePanelCabinet.storage_rows || []).map((sr) =>
+      sr.row === this._zonePanelStorageRow!.row ? { ...sr, ...updates } : sr
+    );
+    try {
+      await this.hass.callWS({
+        type: "wine_cellar/update_cabinet",
+        cabinet_id: this._zonePanelCabinet.id,
+        updates: { storage_rows: newStorageRows },
+      });
+      await this._loadData();
+    } catch (err) {
+      console.error("Failed to resize zone:", err);
+      this._showToast("Failed to resize zone");
+    }
+  }
+
+  private _addBulkSlot() {
+    if (!this._zonePanelStorageRow) return;
+    this._updateStorageRow({ capacity: (this._zonePanelStorageRow.capacity || 0) + 1 });
+  }
+
+  private _addBoxSlot() {
+    if (!this._zonePanelStorageRow) return;
+    // Append a whole new box of the chosen preset size, so box sizes always
+    // stay one of BOX_SIZES (1/3/6/12/24) — the Manage Racks dialog's size
+    // dropdown can only display values from that list.
+    const boxes = [...(this._zonePanelStorageRow.boxes || [this._zonePanelStorageRow.capacity || 0]), this._zonePanelNewBoxSize];
+    this._updateStorageRow({ boxes, capacity: boxes.reduce((sum, b) => sum + b, 0) });
+  }
+
+  // Delete a single bulk/box slot: unassign its wine (if any) rather than
+  // deleting it, shift every later slot down to close the gap, and shrink
+  // the zone's capacity (or the specific box, for box mode) by one.
+  private async _deleteZoneSlot(slotIndex: number) {
+    if (!this._zonePanelCabinet || !this._zonePanelStorageRow) return;
+    const wineAtSlot = this._zonePanelWines[slotIndex];
+    const warning = wineAtSlot
+      ? `Delete Slot ${slotIndex + 1}? "${wineAtSlot.name}" will be moved to Unassigned.`
+      : `Delete Slot ${slotIndex + 1}?`;
+    if (!window.confirm(warning)) return;
+
+    try {
+      if (wineAtSlot) {
+        await this.hass.callWS({
+          type: "wine_cellar/update_wine",
+          wine_id: wineAtSlot.id,
+          updates: { cabinet_id: "", row: null, col: null, zone: "", depth: 0 },
+        });
+      }
+      for (let i = slotIndex + 1; i < this._zonePanelWines.length; i++) {
+        await this.hass.callWS({
+          type: "wine_cellar/move_wine",
+          wine_id: this._zonePanelWines[i].id,
+          cabinet_id: this._zonePanelCabinet.id,
+          zone: this._zonePanelZone,
+          depth: i - 1,
+        });
+      }
+
+      if (this._zonePanelType === "box") {
+        const boxes = [...(this._zonePanelStorageRow.boxes || [this._zonePanelStorageRow.capacity || 0])];
+        let offset = 0;
+        for (let i = 0; i < boxes.length; i++) {
+          if (slotIndex < offset + boxes[i]) {
+            boxes[i] -= 1;
+            if (boxes[i] <= 0) boxes.splice(i, 1);
+            break;
+          }
+          offset += boxes[i];
+        }
+        await this._updateStorageRow({ boxes, capacity: boxes.reduce((sum, b) => sum + b, 0) });
+      } else {
+        await this._updateStorageRow({ capacity: Math.max(0, (this._zonePanelStorageRow.capacity || 1) - 1) });
+      }
+      this._showToast(wineAtSlot ? "Slot deleted, wine unassigned" : "Slot deleted");
+    } catch (err) {
+      console.error("Failed to delete slot:", err);
+      this._showToast("Failed to delete slot");
+    }
   }
 
   private _onZonePanelSlotClick(slotIndex: number, wine?: Wine) {
@@ -614,32 +780,351 @@ export class WineCellarCard extends LitElement {
       this._selectedWine = wine;
       this._detailMode = "cellar";
       this._showDetail = true;
-    } else {
-      this._addPreselect = {
-        cabinet: this._zonePanelCabinet!.id,
-        row: null,
-        col: null,
-        zone: this._zonePanelZone,
-        depth: slotIndex,
-      };
-      this._showAddDialog = true;
+      return;
     }
-  }
 
-  private _onZonePanelBulkAdd() {
-    const nextDepth = this._zonePanelWines.length;
+    if (this._copiedWine) {
+      this._pasteWine(this._zonePanelCabinet!.id, null, null, slotIndex, this._zonePanelZone);
+      return;
+    }
+    if (this._movingWine) {
+      this._executeMoveWine(this._zonePanelCabinet!.id, null, null, this._zonePanelZone, slotIndex);
+      return;
+    }
+
     this._addPreselect = {
       cabinet: this._zonePanelCabinet!.id,
       row: null,
       col: null,
       zone: this._zonePanelZone,
-      depth: nextDepth,
+      depth: slotIndex,
     };
     this._showAddDialog = true;
   }
 
+  // --- Zone side panel: drag-to-reorder ---
+  private _onZonePanelDragStart(e: DragEvent, wine: Wine) {
+    this._zonePanelDragWineId = wine.id;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      // Same payload shape cabinet-grid's _onDrop expects, so dragging out
+      // of the panel onto any rack/zone in the main grid works too.
+      e.dataTransfer.setData("text/plain", JSON.stringify({
+        wineId: wine.id,
+        cabinetId: wine.cabinet_id,
+        row: wine.row ?? null,
+        col: wine.col ?? null,
+        zone: wine.zone || "",
+      }));
+    }
+  }
+
+  private _onZonePanelDragEnd() {
+    this._zonePanelDragWineId = null;
+    this._zonePanelDragOverKey = null;
+  }
+
+  private _onZonePanelDragOver(e: DragEvent, key: string) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    this._zonePanelDragOverKey = key;
+  }
+
+  // Bulk mode: reflow to sequential depths matching the new visual order.
+  private async _onZonePanelBulkReorder(e: DragEvent, targetIndex: number) {
+    e.preventDefault();
+    this._zonePanelDragOverKey = null;
+    const draggedId = this._zonePanelDragWineId;
+    this._zonePanelDragWineId = null;
+    if (!draggedId || !this._zonePanelCabinet) return;
+
+    const wines = [...this._zonePanelWines];
+    const fromIndex = wines.findIndex((w) => w.id === draggedId);
+    if (fromIndex === -1 || fromIndex === targetIndex) return;
+    const [moved] = wines.splice(fromIndex, 1);
+    wines.splice(targetIndex, 0, moved);
+
+    try {
+      for (let i = 0; i < wines.length; i++) {
+        if ((wines[i].depth || 0) !== i) {
+          await this.hass.callWS({
+            type: "wine_cellar/move_wine",
+            wine_id: wines[i].id,
+            cabinet_id: this._zonePanelCabinet.id,
+            zone: this._zonePanelZone,
+            depth: i,
+          });
+        }
+      }
+      this._showToast("Wine reordered");
+      await this._loadData();
+    } catch (err) {
+      console.error("Failed to reorder wine:", err);
+      this._showToast("Failed to reorder wine");
+    }
+  }
+
+  // Box mode: move/swap into a specific slot depth.
+  private async _onZonePanelBoxReorder(e: DragEvent, targetDepth: number, targetWine?: Wine) {
+    e.preventDefault();
+    this._zonePanelDragOverKey = null;
+    const draggedId = this._zonePanelDragWineId;
+    this._zonePanelDragWineId = null;
+    if (!draggedId || !this._zonePanelCabinet || draggedId === targetWine?.id) return;
+    const draggedWine = this._zonePanelWines.find((w) => w.id === draggedId);
+    if (!draggedWine) return;
+
+    try {
+      await this.hass.callWS({
+        type: "wine_cellar/move_wine",
+        wine_id: draggedWine.id,
+        cabinet_id: this._zonePanelCabinet.id,
+        zone: this._zonePanelZone,
+        depth: targetDepth,
+      });
+      if (targetWine) {
+        await this.hass.callWS({
+          type: "wine_cellar/move_wine",
+          wine_id: targetWine.id,
+          cabinet_id: this._zonePanelCabinet.id,
+          zone: this._zonePanelZone,
+          depth: draggedWine.depth || 0,
+        });
+      }
+      this._showToast("Wine reordered");
+      await this._loadData();
+    } catch (err) {
+      console.error("Failed to reorder wine:", err);
+      this._showToast("Failed to reorder wine");
+    }
+  }
+
   private _getZoneSlotLabel(_type: StorageRowType, index: number): string {
     return `Slot ${index + 1}`;
+  }
+
+  // Opens the right side panel for a wine's location and briefly highlights its slot.
+  private _locateWine(wine: Wine) {
+    const loc = getWineLocation(wine, this._cabinets);
+    if (!loc.cabinet) {
+      this._showToast("This wine is unassigned");
+      return;
+    }
+    this._activeTab = "all";
+
+    if (wine.row !== null && wine.col !== null) {
+      this._openRackPanel(loc.cabinet);
+    } else if (loc.zone && loc.zone !== "bottom" && loc.storageRow) {
+      this._openZonePanel(loc.cabinet, loc.zone, loc.storageRow);
+    } else {
+      this._showToast(`In ${loc.text}`);
+      return;
+    }
+
+    this._highlightWineId = wine.id;
+    this.updateComplete.then(() => {
+      this.shadowRoot?.getElementById("highlight-slot")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    setTimeout(() => {
+      if (this._highlightWineId === wine.id) this._highlightWineId = null;
+    }, 2500);
+  }
+
+  // --- Rack panel (grid-slot cabinets: list + reorder) ---
+  private _onRackClick(e: CustomEvent) {
+    this._openRackPanel(e.detail.cabinet);
+  }
+
+  private _openRackPanel(cabinet: Cabinet) {
+    this._rackPanelCabinet = cabinet;
+    this._rackPanelWines = this._wines.filter((w) => w.cabinet_id === cabinet.id && w.row !== null && w.col !== null);
+    this._rackPanelOpen = true;
+  }
+
+  private _closeRackPanel() {
+    this._rackPanelOpen = false;
+  }
+
+  private _refreshRackPanel() {
+    if (!this._rackPanelOpen || !this._rackPanelCabinet) return;
+    const fresh = this._cabinets.find((c) => c.id === this._rackPanelCabinet!.id);
+    if (fresh) this._rackPanelCabinet = fresh;
+    this._rackPanelWines = this._wines.filter((w) => w.cabinet_id === this._rackPanelCabinet!.id && w.row !== null && w.col !== null);
+  }
+
+  // Every physical (row, col) slot in the rack, skipping bulk/box storage rows.
+  private _getRackSlots(): { row: number; col: number }[] {
+    return this._rackPanelCabinet ? getRackSlots(this._rackPanelCabinet) : [];
+  }
+
+  // Adds exactly one new slot. A rack is a strict rows×cols rectangle, so
+  // growing either axis by 1 adds that many slots (all of the other axis).
+  // Grow whichever axis is smaller to add as few slots as possible — for the
+  // common single-row rack (rows=1) this always adds exactly 1 slot.
+  private _addRackSlot() {
+    if (!this._rackPanelCabinet) return;
+    const { rows, cols } = this._rackPanelCabinet;
+    if (rows <= cols) {
+      this._resizeRack({ cols: cols + 1 });
+    } else {
+      this._resizeRack({ rows: rows + 1 });
+    }
+  }
+
+  private async _resizeRack(updates: { rows?: number; cols?: number }) {
+    if (!this._rackPanelCabinet) return;
+    try {
+      await this.hass.callWS({
+        type: "wine_cellar/update_cabinet",
+        cabinet_id: this._rackPanelCabinet.id,
+        updates,
+      });
+      await this._loadData();
+    } catch (err) {
+      console.error("Failed to resize rack:", err);
+      this._showToast("Failed to resize rack");
+    }
+  }
+
+  // A rack is a strict rows×cols rectangle, so only the trailing slot can be
+  // removed without leaving a hole the grid can't represent.
+  private _isLastRackSlot(row: number, col: number): boolean {
+    const slots = this._getRackSlots();
+    if (slots.length === 0) return false;
+    const last = slots[slots.length - 1];
+    return last.row === row && last.col === col;
+  }
+
+  private async _deleteRackSlot(row: number, col: number) {
+    if (!this._rackPanelCabinet) return;
+    const { rows, cols } = this._rackPanelCabinet;
+    if (rows <= 1 && cols <= 1) {
+      this._showToast("Rack can't get any smaller");
+      return;
+    }
+    const wine = this._rackPanelWines.find((w) => w.row === row && w.col === col);
+    const warning = wine
+      ? `Delete this slot? "${wine.name}" will be moved to Unassigned.`
+      : "Delete this slot?";
+    if (!window.confirm(warning)) return;
+
+    try {
+      if (wine) {
+        await this.hass.callWS({
+          type: "wine_cellar/update_wine",
+          wine_id: wine.id,
+          updates: { cabinet_id: "", row: null, col: null, zone: "", depth: 0 },
+        });
+      }
+      if (cols >= rows && cols > 1) {
+        await this._resizeRack({ cols: cols - 1 });
+      } else {
+        await this._resizeRack({ rows: rows - 1 });
+      }
+      this._showToast(wine ? "Slot deleted, wine unassigned" : "Slot deleted");
+    } catch (err) {
+      console.error("Failed to delete slot:", err);
+      this._showToast("Failed to delete slot");
+    }
+  }
+
+  private _onRackPanelSlotClick(row: number, col: number, wine?: Wine) {
+    const cabinet = this._rackPanelCabinet;
+    if (!cabinet) return;
+    const cabinetDepth = cabinet.depth || 1;
+
+    if (cabinetDepth >= 2) {
+      // Multi-depth cells are handled by the existing depth panel.
+      const wines = this._rackPanelWines.filter((w) => w.row === row && w.col === col);
+      this._closeRackPanel();
+      this._openDepthPanel(cabinet, row, col, wines, cabinetDepth);
+      return;
+    }
+
+    if (wine) {
+      this._selectedWine = wine;
+      this._detailMode = "cellar";
+      this._showDetail = true;
+      return;
+    }
+
+    if (this._copiedWine) {
+      this._pasteWine(cabinet.id, row, col, 0);
+      return;
+    }
+    if (this._movingWine) {
+      this._executeMoveWine(cabinet.id, row, col, "", 0);
+      return;
+    }
+    if (this._movingBuyListItem) {
+      this._executeMoveTocellar(cabinet.id, row, col, "", 0);
+      return;
+    }
+
+    this._addPreselect = { cabinet: cabinet.id, row, col, zone: "", depth: 0 };
+    this._showAddDialog = true;
+  }
+
+  private _onRackPanelDragStart(e: DragEvent, wine: Wine) {
+    this._rackPanelDragWineId = wine.id;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", JSON.stringify({
+        wineId: wine.id,
+        cabinetId: wine.cabinet_id,
+        row: wine.row ?? null,
+        col: wine.col ?? null,
+        zone: wine.zone || "",
+      }));
+    }
+  }
+
+  private _onRackPanelDragEnd() {
+    this._rackPanelDragWineId = null;
+    this._rackPanelDragOverKey = null;
+  }
+
+  private _onRackPanelDragOver(e: DragEvent, key: string) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    this._rackPanelDragOverKey = key;
+  }
+
+  // Swap/move the dragged wine into the target (row, col) slot.
+  private async _onRackPanelReorder(e: DragEvent, targetRow: number, targetCol: number, targetWine?: Wine) {
+    e.preventDefault();
+    this._rackPanelDragOverKey = null;
+    const draggedId = this._rackPanelDragWineId;
+    this._rackPanelDragWineId = null;
+    if (!draggedId || !this._rackPanelCabinet || draggedId === targetWine?.id) return;
+    const draggedWine = this._rackPanelWines.find((w) => w.id === draggedId);
+    if (!draggedWine || (draggedWine.row === targetRow && draggedWine.col === targetCol)) return;
+
+    try {
+      await this.hass.callWS({
+        type: "wine_cellar/move_wine",
+        wine_id: draggedWine.id,
+        cabinet_id: this._rackPanelCabinet.id,
+        row: targetRow,
+        col: targetCol,
+        zone: "",
+      });
+      if (targetWine) {
+        await this.hass.callWS({
+          type: "wine_cellar/move_wine",
+          wine_id: targetWine.id,
+          cabinet_id: this._rackPanelCabinet.id,
+          row: draggedWine.row,
+          col: draggedWine.col,
+          zone: "",
+        });
+      }
+      this._showToast("Wine reordered");
+      await this._loadData();
+    } catch (err) {
+      console.error("Failed to reorder wine:", err);
+      this._showToast("Failed to reorder wine");
+    }
   }
 
   private async _executeMoveWine(cabinetId: string, row: number | null, col: number | null, zone: string, depth = 0) {
@@ -649,10 +1134,12 @@ export class WineCellarCard extends LitElement {
         type: "wine_cellar/move_wine",
         wine_id: this._movingWine.id,
         cabinet_id: cabinetId,
-        row,
-        col,
         zone,
         depth,
+        // Bulk/zone moves have no X/Y; the backend schema rejects row/col
+        // sent as null, so only include them when they're actually set.
+        ...(row !== null ? { row } : {}),
+        ...(col !== null ? { col } : {}),
       });
       this._showToast(`Moved "${this._movingWine.name}"`);
       this._movingWine = null;
@@ -665,8 +1152,53 @@ export class WineCellarCard extends LitElement {
 
   private async _onWineDrop(e: CustomEvent) {
     const d = e.detail;
-    // Don't drop on same position
-    if (d.sourceCabinetId === d.targetCabinetId && d.sourceRow === d.targetRow && d.sourceCol === d.targetCol && d.sourceZone === d.targetZone) return;
+
+    // Reordering within the same bulk zone: dropped on/near another bottle
+    // there, so insert before/after it (whichever side the drop landed on)
+    // and reflow the whole zone to sequential depths — a straight two-item
+    // depth swap couldn't move a bottle to the front/back of a longer bin.
+    if (
+      d.targetWineId &&
+      d.targetWineId !== d.wineId &&
+      d.sourceCabinetId === d.targetCabinetId &&
+      d.sourceZone &&
+      d.sourceZone === d.targetZone
+    ) {
+      try {
+        const zoneWines = this._wines
+          .filter((w) => w.cabinet_id === d.targetCabinetId && w.zone === d.targetZone)
+          .sort((a, b) => (a.depth || 0) - (b.depth || 0));
+        const fromIdx = zoneWines.findIndex((w) => w.id === d.wineId);
+        if (fromIdx === -1) return;
+        const [moved] = zoneWines.splice(fromIdx, 1);
+        const toIdx = zoneWines.findIndex((w) => w.id === d.targetWineId);
+        if (toIdx === -1) return;
+        zoneWines.splice(d.insertBefore ? toIdx : toIdx + 1, 0, moved);
+
+        for (let i = 0; i < zoneWines.length; i++) {
+          if ((zoneWines[i].depth || 0) !== i) {
+            await this.hass.callWS({
+              type: "wine_cellar/move_wine",
+              wine_id: zoneWines[i].id,
+              cabinet_id: d.targetCabinetId,
+              zone: d.targetZone,
+              depth: i,
+            });
+          }
+        }
+        this._showToast("Wine reordered");
+        await this._loadData();
+      } catch (err) {
+        console.error("Failed to reorder wine:", err);
+        this._showToast("Failed to reorder wine");
+      }
+      return;
+    }
+
+    // Don't drop on same position. Only meaningful for grid slots — bulk/box
+    // zones have no row/col (always null), so this would always match and
+    // silently block reordering within the same zone.
+    if (!d.targetZone && d.sourceCabinetId === d.targetCabinetId && d.sourceRow === d.targetRow && d.sourceCol === d.targetCol && d.sourceZone === d.targetZone) return;
 
     try {
       // Check if target cell has a wine (swap)
@@ -683,10 +1215,33 @@ export class WineCellarCard extends LitElement {
           type: "wine_cellar/move_wine",
           wine_id: targetWine.id,
           cabinet_id: d.sourceCabinetId,
-          row: d.sourceRow,
-          col: d.sourceCol,
           zone: d.sourceZone || "",
+          // Slot targets carry real X/Y coordinates; Bulk/zone targets have
+          // none, and the backend schema rejects row/col sent as null, so
+          // only include them when they're actually set.
+          ...(d.sourceRow !== null && d.sourceRow !== undefined ? { row: d.sourceRow } : {}),
+          ...(d.sourceCol !== null && d.sourceCol !== undefined ? { col: d.sourceCol } : {}),
         });
+      }
+
+      // Dropped into a bulk/box zone's general area (not swapped onto a
+      // specific bottle above): land past the last occupied depth instead
+      // of defaulting to 0, which would collide with whatever wine is
+      // already at depth 0 and — since depth-sorting is stable — look like
+      // the drop silently did nothing.
+      let targetDepth: number | undefined;
+      if (d.targetZone) {
+        const occupants = this._wines.filter(
+          (w) => w.cabinet_id === d.targetCabinetId && w.zone === d.targetZone && w.id !== d.wineId
+        );
+        const targetCabinet = this._cabinets.find((c) => c.id === d.targetCabinetId);
+        const rowIdx = parseInt(d.targetZone.replace("storage-", ""), 10);
+        const storageRow = targetCabinet?.storage_rows?.find((s) => s.row === rowIdx);
+        if (storageRow && occupants.length >= (storageRow.capacity || 20)) {
+          this._showToast(`"${storageRow.name || "Zone"}" is full — cannot move here.`);
+          return;
+        }
+        targetDepth = occupants.reduce((max, w) => Math.max(max, w.depth || 0), -1) + 1;
       }
 
       // Move dragged wine to target
@@ -694,12 +1249,16 @@ export class WineCellarCard extends LitElement {
         type: "wine_cellar/move_wine",
         wine_id: d.wineId,
         cabinet_id: d.targetCabinetId,
-        row: d.targetRow,
-        col: d.targetCol,
         zone: d.targetZone || "",
+        ...(d.targetRow !== null && d.targetRow !== undefined ? { row: d.targetRow } : {}),
+        ...(d.targetCol !== null && d.targetCol !== undefined ? { col: d.targetCol } : {}),
+        ...(targetDepth !== undefined ? { depth: targetDepth } : {}),
       });
 
-      this._showToast(targetWine ? "Swapped wines" : "Wine moved");
+      // Same container (rack/bin/box) = reordering; a different one = an
+      // actual move between containers.
+      const sameContainer = d.sourceCabinetId === d.targetCabinetId;
+      this._showToast(sameContainer ? "Wine reordered" : targetWine ? "Swapped wines" : "Wine moved");
       await this._loadData();
     } catch (err) {
       console.error("Failed to move wine:", err);
@@ -709,11 +1268,16 @@ export class WineCellarCard extends LitElement {
 
   private _copyWine(wine: Wine) {
     this._copiedWine = wine;
-    this._showToast(`Copied "${wine.name}" — tap empty cells to paste`);
+    this._showToast(`Copied "${wine.name}" — tap empty cells or bulk/box zones to paste`);
     this._showDetail = false;
+    // Close any open side panel and show every rack, so the whole cellar is reachable to paste into.
+    this._zonePanelOpen = false;
+    this._rackPanelOpen = false;
+    this._depthPanelOpen = false;
+    this._activeTab = "all";
   }
 
-  private async _pasteWine(cabinetId: string, row: number, col: number, depth = 0) {
+  private async _pasteWine(cabinetId: string, row: number | null, col: number | null, depth = 0, zone = "") {
     if (!this._copiedWine) return;
     try {
       await this.hass.callWS({
@@ -729,7 +1293,11 @@ export class WineCellarCard extends LitElement {
           grape_variety: this._copiedWine.grape_variety,
           rating: this._copiedWine.rating,
           image_url: this._copiedWine.image_url,
+          back_image_url: this._copiedWine.back_image_url,
           price: this._copiedWine.price,
+          retail_price: this._copiedWine.retail_price,
+          retail_price_currency: this._copiedWine.retail_price_currency,
+          purchase_date: this._copiedWine.purchase_date,
           drink_by: this._copiedWine.drink_by,
           notes: this._copiedWine.notes,
           description: this._copiedWine.description,
@@ -740,9 +1308,15 @@ export class WineCellarCard extends LitElement {
           row,
           col,
           depth,
-          zone: "",
+          zone,
           user_rating: this._copiedWine.user_rating,
+          tasting_notes: this._copiedWine.tasting_notes,
           disposition: this._copiedWine.disposition,
+          drink_window: this._copiedWine.drink_window,
+          ai_ratings: this._copiedWine.ai_ratings,
+          vivino_updated_at: this._copiedWine.vivino_updated_at,
+          ai_updated_at: this._copiedWine.ai_updated_at,
+          vivino_id: this._copiedWine.vivino_id,
         },
       });
       this._showToast("Wine pasted! Tap more empty cells or click ✕ to stop.");
@@ -753,7 +1327,16 @@ export class WineCellarCard extends LitElement {
   }
 
   // --- Batch AI Analysis ---
-  private async _batchAnalyzeWines() {
+  private _batchAnalyzeWines() {
+    if (this._wines.length > 5) {
+      this._showBatchAiConfirm = true;
+      return;
+    }
+    this._runBatchAnalyzeWines();
+  }
+
+  private async _runBatchAnalyzeWines() {
+    this._showBatchAiConfirm = false;
     this._analyzing = true;
     this._showToast("Running full AI analysis on all wines...");
     try {
@@ -774,20 +1357,79 @@ export class WineCellarCard extends LitElement {
     this._analyzing = false;
   }
 
+  // --- Metadata language (Vivino/AI) ---
+  private async _setMetadataLanguage(lang: string) {
+    if (lang === this._metadataLanguage) return;
+    const previous = this._metadataLanguage;
+    this._metadataLanguage = lang;
+    try {
+      await this.hass.callWS({
+        type: "wine_cellar/update_settings",
+        updates: { metadata_language: lang },
+      });
+    } catch (err) {
+      this._metadataLanguage = previous;
+      this._showToast("Failed to change language");
+    }
+  }
+
+  private async _setMetadataCurrency(currency: string) {
+    if (currency === this._metadataCurrency) return;
+    const previous = this._metadataCurrency;
+    this._metadataCurrency = currency;
+    try {
+      await this.hass.callWS({
+        type: "wine_cellar/update_settings",
+        updates: { metadata_currency: currency },
+      });
+    } catch (err) {
+      this._metadataCurrency = previous;
+      this._showToast("Failed to change currency");
+    }
+  }
+
+  private async _setAiFallbackAlways(value: boolean) {
+    if (value === this._aiFallbackAlways) return;
+    const previous = this._aiFallbackAlways;
+    this._aiFallbackAlways = value;
+    try {
+      await this.hass.callWS({
+        type: "wine_cellar/update_settings",
+        updates: { ai_fallback_always: value },
+      });
+    } catch (err) {
+      this._aiFallbackAlways = previous;
+      this._showToast("Failed to change AI fallback setting");
+    }
+  }
+
   // --- Batch Vivino Refresh ---
-  private async _batchRefreshVivino() {
+  private _batchRefreshVivino() {
+    this._batchAiFallback = this._aiFallbackAlways;
+    this._showBatchVivinoConfirm = true;
+  }
+
+  private async _runBatchVivino(photoMode: "keep" | "replace") {
+    this._showBatchVivinoConfirm = false;
     this._batchVivino = true;
     this._showToast("Refreshing all wines from Vivino...");
     try {
       const result = await this.hass.callWS({
         type: "wine_cellar/batch_refresh_vivino",
+        photo_mode: photoMode,
+        ai_fallback: this._batchAiFallback ? "use" : "skip",
       });
       if (result.error) {
         this._showToast(`Vivino Batch failed: ${result.error}`);
       } else {
         const parts = [`Vivino Batch complete! ${result.updated}/${result.total} updated`];
+        if (result.photos_updated) parts.push(`${result.photos_updated} photos updated`);
+        if (result.photos_kept) parts.push(`${result.photos_kept} kept`);
+        if (result.ai_fallback_used) parts.push(`${result.ai_fallback_used} used AI instead`);
+        const unresolvedMismatch = (result.mismatched || 0) - (result.ai_fallback_used || 0);
+        if (unresolvedMismatch > 0) parts.push(`${unresolvedMismatch} no match at all`);
         if (result.errors > 0) parts.push(`(${result.errors} errors)`);
-        this._showToast(parts.join(" "));
+        this._showToast(parts.join(", "));
         await this._loadData();
       }
     } catch (err: any) {
@@ -897,7 +1539,10 @@ export class WineCellarCard extends LitElement {
         <div class="header-row">
           <div class="title">
             <span class="title-icon">🍷</span>
-            ${title}
+            <div class="title-text">
+              <div>${title}</div>
+              <div class="title-credit">originally created by @BaconWappedBitcoin</div>
+            </div>
           </div>
           <div class="header-actions">
             ${this._hasGemini ? html`
@@ -954,7 +1599,7 @@ export class WineCellarCard extends LitElement {
         ${this._copiedWine
           ? html`
               <div class="copy-banner">
-                <span>📋 Copying "${this._copiedWine.name}" — tap empty cells to place copies</span>
+                <span>📋 Copying "${this._copiedWine.name}" — tap empty cells or bulk/box zones to place copies</span>
                 <button @click=${() => (this._copiedWine = null)}>✕ Done</button>
               </div>
             `
@@ -999,10 +1644,10 @@ export class WineCellarCard extends LitElement {
                 ${this._stats.total_value
                   ? html`
                       <div class="stat">
-                        <span class="stat-value">$${this._stats.total_value.toLocaleString()}</span>
+                        <span class="stat-value">${this._metadataCurrency} ${this._stats.total_value.toLocaleString()}</span>
                         value
                         ${this._stats.total_cost
-                          ? html`<span style="font-size:0.75em;color:${this._stats.total_value - this._stats.total_cost >= 0 ? '#2e7d32' : '#c62828'}">${this._stats.total_value - this._stats.total_cost >= 0 ? '+' : ''}$${(this._stats.total_value - this._stats.total_cost).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>`
+                          ? html`<span style="font-size:0.75em;color:${this._stats.total_value - this._stats.total_cost >= 0 ? '#2e7d32' : '#c62828'}">${this._stats.total_value - this._stats.total_cost >= 0 ? '+' : ''}${this._metadataCurrency} ${(this._stats.total_value - this._stats.total_cost).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>`
                           : nothing}
                       </div>
                     `
@@ -1054,6 +1699,12 @@ export class WineCellarCard extends LitElement {
           >
             Manage Racks
           </button>
+          <button
+            class="tab settings-tab-btn"
+            @click=${() => (this._showVivinoAiSettings = true)}
+          >
+            ⚙️ Vivino/AI Settings
+          </button>
         </div>
 
         <!-- Search bar -->
@@ -1072,6 +1723,7 @@ export class WineCellarCard extends LitElement {
                           @cell-click=${this._onCellClick}
                           @zone-click=${this._onZoneClick}
                           @zone-container-click=${this._onZoneContainerClick}
+                          @rack-click=${this._onRackClick}
                           @wine-drop=${this._onWineDrop}
                           @wine-longpress=${(e: CustomEvent) => {
                             this._movingWine = e.detail.wine;
@@ -1090,6 +1742,13 @@ export class WineCellarCard extends LitElement {
                             @cell-click=${this._onCellClick}
                             @zone-click=${this._onZoneClick}
                             @zone-container-click=${this._onZoneContainerClick}
+                            @rack-click=${this._onRackClick}
+                            @wine-drop=${this._onWineDrop}
+                            @wine-longpress=${(e: CustomEvent) => {
+                              this._activeTab = "all";
+                              this._movingWine = e.detail.wine;
+                              this._showToast(`Tap a cell to move "${e.detail.wine.name}"`);
+                            }}
                           ></cabinet-grid>
                         `
                       )}
@@ -1166,7 +1825,7 @@ export class WineCellarCard extends LitElement {
                             <div class="bl-meta">
                               ${item.winery}${item.vintage ? ` · ${item.vintage}` : ""}
                               ${item.rating ? ` · ★${item.rating.toFixed(1)}` : ""}
-                              ${item.retail_price ? ` · $${item.retail_price}` : ""}
+                              ${item.retail_price ? ` · ${this._metadataCurrency} ${item.retail_price}` : ""}
                             </div>
                           </div>
                           <div class="bl-actions">
@@ -1320,12 +1979,71 @@ export class WineCellarCard extends LitElement {
             `
           : nothing}
 
+        <!-- Batch Vivino Photo Mode Confirm -->
+        ${this._showBatchVivinoConfirm ? html`
+          <div class="dialog-overlay" @click=${() => (this._showBatchVivinoConfirm = false)}>
+            <div class="dialog" style="max-width:340px;padding:24px;text-align:center" @click=${(e: Event) => e.stopPropagation()}>
+              <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">Vivino Batch Scan</h3>
+              <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">
+                Some wines already have a photo. What should happen to those photos?
+              </p>
+              ${this._hasGemini ? html`
+                <label style="display:flex;align-items:center;gap:6px;justify-content:center;font-size:0.8em;color:var(--wc-text-secondary);margin-bottom:16px;cursor:pointer">
+                  <input
+                    type="checkbox"
+                    .checked=${this._batchAiFallback}
+                    @change=${(e: Event) => (this._batchAiFallback = (e.target as HTMLInputElement).checked)}
+                  />
+                  Try AI for wines with no confident Vivino match
+                </label>
+              ` : nothing}
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <button class="btn btn-primary" style="background:#8e24aa" @click=${() => this._runBatchVivino("keep")}>
+                  Keep My Existing Photos
+                </button>
+                <button
+                  style="padding:8px 16px;border-radius:20px;border:1px solid var(--wc-border);background:transparent;color:var(--wc-text);cursor:pointer;font-size:0.85em"
+                  @click=${() => this._runBatchVivino("replace")}
+                >Replace With Vivino Photos</button>
+                <button
+                  style="margin-top:4px;padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.8em"
+                  @click=${() => (this._showBatchVivinoConfirm = false)}
+                >Cancel</button>
+              </div>
+            </div>
+          </div>
+        ` : nothing}
+
+        <!-- Batch AI Analysis Confirm -->
+        ${this._showBatchAiConfirm ? html`
+          <div class="dialog-overlay" @click=${() => (this._showBatchAiConfirm = false)}>
+            <div class="dialog" style="max-width:340px;padding:24px;text-align:center" @click=${(e: Event) => e.stopPropagation()}>
+              <h3 style="margin:0 0 4px;font-size:1em;color:var(--wc-text)">Run AI Batch Scan?</h3>
+              <p style="margin:0 0 16px;font-size:0.85em;color:var(--wc-text-secondary)">
+                This will run a full AI analysis on all ${this._wines.length} wines, one API call per bottle. It may take a while and use significant AI quota.
+              </p>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <button class="btn btn-primary" style="background:#1565c0" @click=${this._runBatchAnalyzeWines}>
+                  Run on ${this._wines.length} Wines
+                </button>
+                <button
+                  style="margin-top:4px;padding:6px 16px;border-radius:16px;border:none;background:var(--wc-hover);color:var(--wc-text-secondary);cursor:pointer;font-size:0.8em"
+                  @click=${() => (this._showBatchAiConfirm = false)}
+                >Cancel</button>
+              </div>
+            </div>
+          </div>
+        ` : nothing}
+
         <!-- Wine Detail Dialog -->
         <wine-detail-dialog
           .wine=${this._selectedWine}
           .hass=${this.hass}
+          .cabinets=${this._cabinets}
           .open=${this._showDetail}
           .hasGemini=${this._hasGemini}
+          .aiFallbackAlways=${this._aiFallbackAlways}
+          .currency=${this._metadataCurrency}
           .mode=${this._detailMode}
           @close=${() => (this._showDetail = false)}
           @remove-wine=${this._onRemoveWine}
@@ -1335,8 +2053,15 @@ export class WineCellarCard extends LitElement {
           @wine-updated=${() => this._loadData()}
           @buy-list-updated=${() => this._loadData()}
           @copy-wine=${(e: CustomEvent) => this._copyWine(e.detail.wine)}
+          @locate-wine=${(e: CustomEvent) => this._locateWine(e.detail.wine)}
+          @set-ai-fallback-always=${(e: CustomEvent) => this._setAiFallbackAlways(e.detail.value)}
           @move-wine=${(e: CustomEvent) => {
             this._showDetail = false;
+            // Close any open side panel and show every rack, so any rack/zone in the cellar is reachable as a target.
+            this._zonePanelOpen = false;
+            this._rackPanelOpen = false;
+            this._depthPanelOpen = false;
+            this._activeTab = "all";
             this._movingWine = e.detail.wine;
             this._showToast(`Tap a cell to move "${e.detail.wine.name}"`);
           }}
@@ -1347,6 +2072,7 @@ export class WineCellarCard extends LitElement {
           .open=${this._showAddDialog}
           .hass=${this.hass}
           .cabinets=${this._cabinets}
+          .wines=${this._wines}
           .preselectedCabinet=${this._addPreselect.cabinet}
           .preselectedRow=${this._addPreselect.row}
           .preselectedCol=${this._addPreselect.col}
@@ -1376,8 +2102,27 @@ export class WineCellarCard extends LitElement {
           .wines=${this._wines}
           .cabinets=${this._cabinets}
           .hasGemini=${this._hasGemini}
+          .currency=${this._metadataCurrency}
           @close=${() => (this._showInventory = false)}
           @wine-updated=${() => this._loadData()}
+          @locate-wine=${(e: CustomEvent) => {
+            this._showInventory = false;
+            this._locateWine(e.detail.wine);
+          }}
+          @copy-wine=${(e: CustomEvent) => {
+            this._showInventory = false;
+            this._copyWine(e.detail.wine);
+          }}
+          @move-wine=${(e: CustomEvent) => {
+            this._showInventory = false;
+            this._zonePanelOpen = false;
+            this._rackPanelOpen = false;
+            this._depthPanelOpen = false;
+            this._activeTab = "all";
+            this._movingWine = e.detail.wine;
+            this._showToast(`Tap a cell to move "${e.detail.wine.name}"`);
+          }}
+          @remove-wine=${this._onRemoveWine}
         ></inventory-dialog>
 
         <!-- Rack Settings Dialog -->
@@ -1389,6 +2134,19 @@ export class WineCellarCard extends LitElement {
           @close=${() => (this._showRackSettings = false)}
           @racks-updated=${() => this._loadData()}
         ></rack-settings-dialog>
+
+        <vivino-ai-settings-dialog
+          .open=${this._showVivinoAiSettings}
+          .aiFallbackAlways=${this._aiFallbackAlways}
+          .metadataLanguage=${this._metadataLanguage}
+          .supportedLanguages=${this._supportedLanguages}
+          .metadataCurrency=${this._metadataCurrency}
+          .supportedCurrencies=${this._supportedCurrencies}
+          @close=${() => (this._showVivinoAiSettings = false)}
+          @set-ai-fallback-always=${(e: CustomEvent) => this._setAiFallbackAlways(e.detail.value)}
+          @set-metadata-language=${(e: CustomEvent) => this._setMetadataLanguage(e.detail.value)}
+          @set-metadata-currency=${(e: CustomEvent) => this._setMetadataCurrency(e.detail.value)}
+        ></vivino-ai-settings-dialog>
 
         <!-- Depth Side Panel -->
         ${this._depthPanelOpen
@@ -1408,6 +2166,8 @@ export class WineCellarCard extends LitElement {
                   ${Array.from({ length: this._depthPanelMaxDepth }, (_, i) => {
                     const wine = this._depthPanelWines.find((w) => (w.depth || 0) === i);
                     const typeColor = wine ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red : "";
+                    const disp = wine?.disposition || "";
+                    const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
                     return html`
                       <div
                         class="depth-slot ${wine ? "filled" : "empty"}"
@@ -1417,15 +2177,18 @@ export class WineCellarCard extends LitElement {
                         ${wine
                           ? html`
                               <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
-                                ${wine.image_url
-                                  ? html`<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
-                                  : html`<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                <div class="depth-slot-avatar">
+                                  ${wine.image_url
+                                    ? html`<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
+                                    : html`<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                  ${dispClass ? html`<span class="depth-slot-disposition ${dispClass}">${disp}</span>` : nothing}
+                                </div>
                                 <div class="depth-slot-info">
                                   <div class="depth-slot-name">${wine.name}</div>
                                   <div class="depth-slot-meta">
                                     ${wine.vintage || "NV"}
                                     ${wine.rating ? html` · ★${wine.rating}` : nothing}
-                                    ${wine.price ? html` · $${wine.price}` : nothing}
+                                    ${wine.price ? html` · ${this._metadataCurrency} ${wine.price}` : nothing}
                                   </div>
                                 </div>
                               </div>
@@ -1447,7 +2210,7 @@ export class WineCellarCard extends LitElement {
         <!-- Zone Side Panel (Boxes, Bulk Bins) -->
         ${this._zonePanelOpen
           ? html`
-              <div class="depth-panel-backdrop" @click=${this._closeZonePanel}></div>
+              <div class="depth-panel-backdrop ${this._zonePanelDragWineId ? "drag-through" : ""}" @click=${this._closeZonePanel}></div>
               <div class="depth-panel open">
                 <div class="depth-panel-header">
                   <span class="depth-panel-title">
@@ -1462,43 +2225,63 @@ export class WineCellarCard extends LitElement {
                 <div class="depth-panel-slots">
                   ${this._zonePanelType === "bulk"
                     ? html`
-                        <!-- Bulk mode: scrollable wine list + add button -->
-                        ${this._zonePanelWines.map((wine) => {
-                          const typeColor = WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red;
+                        <!-- Bulk mode: numbered slots, harmonized with Box mode -->
+                        ${Array.from({ length: this._zonePanelCapacity }, (_, slotIdx) => {
+                          const wine = this._zonePanelWines[slotIdx];
+                          const typeColor = wine ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red : "";
+                          const disp = wine?.disposition || "";
+                          const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
+                          const dragKey = `bulk-${slotIdx}`;
+                          const highlighted = wine?.id === this._highlightWineId;
                           return html`
                             <div
-                              class="depth-slot filled"
-                              @click=${() => this._onZonePanelSlotClick(0, wine)}
+                              id=${highlighted ? "highlight-slot" : nothing}
+                              class="depth-slot ${wine ? "filled" : "empty"} ${this._zonePanelDragOverKey === dragKey ? "drag-over" : ""} ${highlighted ? "highlight" : ""}"
+                              draggable=${wine ? "true" : "false"}
+                              @click=${() => this._onZonePanelSlotClick(slotIdx, wine)}
+                              @dragstart=${wine ? (e: DragEvent) => this._onZonePanelDragStart(e, wine) : nothing}
+                              @dragend=${wine ? () => this._onZonePanelDragEnd() : nothing}
+                              @dragover=${(e: DragEvent) => this._onZonePanelDragOver(e, dragKey)}
+                              @dragleave=${() => (this._zonePanelDragOverKey = null)}
+                              @drop=${(e: DragEvent) => this._onZonePanelBulkReorder(e, slotIdx)}
                             >
-                              <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
-                                ${wine.image_url
-                                  ? html`<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
-                                  : html`<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
-                                <div class="depth-slot-info">
-                                  <div class="depth-slot-name">${wine.name}</div>
-                                  <div class="depth-slot-meta">
-                                    ${wine.vintage || "NV"}
-                                    ${wine.rating ? html` · ★${wine.rating}` : nothing}
-                                    ${wine.price ? html` · $${wine.price}` : nothing}
-                                  </div>
-                                </div>
-                              </div>
+                              <span
+                                class="depth-slot-delete"
+                                title="Delete this slot"
+                                @click=${(e: Event) => { e.stopPropagation(); this._deleteZoneSlot(slotIdx); }}
+                              >✕</span>
+                              <div class="depth-slot-label">Slot ${slotIdx + 1}</div>
+                              ${wine
+                                ? html`
+                                    <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
+                                      <div class="depth-slot-avatar">
+                                        ${wine.image_url
+                                          ? html`<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
+                                          : html`<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                        ${dispClass ? html`<span class="depth-slot-disposition ${dispClass}">${disp}</span>` : nothing}
+                                      </div>
+                                      <div class="depth-slot-info">
+                                        <div class="depth-slot-name">${wine.name}</div>
+                                        <div class="depth-slot-meta">
+                                          ${wine.vintage || "NV"}
+                                          ${wine.rating ? html` · ★${wine.rating}` : nothing}
+                                          ${wine.price ? html` · ${this._metadataCurrency} ${wine.price}` : nothing}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  `
+                                : html`
+                                    <div class="depth-slot-empty">
+                                      <span class="depth-slot-plus">+</span>
+                                      <span>Empty</span>
+                                    </div>
+                                  `}
                             </div>
                           `;
                         })}
-                        ${this._zonePanelWines.length < this._zonePanelCapacity
-                          ? html`
-                              <div
-                                class="depth-slot empty"
-                                @click=${this._onZonePanelBulkAdd}
-                              >
-                                <div class="depth-slot-empty">
-                                  <span class="depth-slot-plus">+</span>
-                                  <span>Add Wine</span>
-                                </div>
-                              </div>
-                            `
-                          : nothing}
+                        <div class="depth-panel-grow" @click=${this._addBulkSlot}>
+                          <span class="depth-slot-plus">+</span> Add Slot
+                        </div>
                       `
                     : html`
                         <!-- Box mode: slots grouped by box -->
@@ -1518,24 +2301,43 @@ export class WineCellarCard extends LitElement {
                                 const depthIdx = start + slotInBox;
                                 const wine = this._zonePanelWines.find((w) => (w.depth || 0) === depthIdx);
                                 const typeColor = wine ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red : "";
+                                const disp = wine?.disposition || "";
+                                const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
+                                const dragKey = `box-${depthIdx}`;
+                                const highlighted = wine?.id === this._highlightWineId;
                                 return html`
                                   <div
-                                    class="depth-slot ${wine ? "filled" : "empty"}"
+                                    id=${highlighted ? "highlight-slot" : nothing}
+                                    class="depth-slot ${wine ? "filled" : "empty"} ${this._zonePanelDragOverKey === dragKey ? "drag-over" : ""} ${highlighted ? "highlight" : ""}"
+                                    draggable=${wine ? "true" : "false"}
                                     @click=${() => this._onZonePanelSlotClick(depthIdx, wine)}
+                                    @dragstart=${wine ? (e: DragEvent) => this._onZonePanelDragStart(e, wine) : nothing}
+                                    @dragend=${wine ? () => this._onZonePanelDragEnd() : nothing}
+                                    @dragover=${(e: DragEvent) => this._onZonePanelDragOver(e, dragKey)}
+                                    @dragleave=${() => (this._zonePanelDragOverKey = null)}
+                                    @drop=${(e: DragEvent) => this._onZonePanelBoxReorder(e, depthIdx, wine)}
                                   >
+                                    <span
+                                      class="depth-slot-delete"
+                                      title="Delete this slot"
+                                      @click=${(e: Event) => { e.stopPropagation(); this._deleteZoneSlot(depthIdx); }}
+                                    >✕</span>
                                     <div class="depth-slot-label">Slot ${slotInBox + 1}</div>
                                     ${wine
                                       ? html`
                                           <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
-                                            ${wine.image_url
-                                              ? html`<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
-                                              : html`<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                            <div class="depth-slot-avatar">
+                                              ${wine.image_url
+                                                ? html`<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
+                                                : html`<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                              ${dispClass ? html`<span class="depth-slot-disposition ${dispClass}">${disp}</span>` : nothing}
+                                            </div>
                                             <div class="depth-slot-info">
                                               <div class="depth-slot-name">${wine.name}</div>
                                               <div class="depth-slot-meta">
                                                 ${wine.vintage || "NV"}
                                                 ${wine.rating ? html` · ★${wine.rating}` : nothing}
-                                                ${wine.price ? html` · $${wine.price}` : nothing}
+                                                ${wine.price ? html` · ${this._metadataCurrency} ${wine.price}` : nothing}
                                               </div>
                                             </div>
                                           </div>
@@ -1552,7 +2354,99 @@ export class WineCellarCard extends LitElement {
                             `;
                           });
                         })()}
+                        <div class="depth-panel-add-box">
+                          <select
+                            .value=${String(this._zonePanelNewBoxSize)}
+                            @change=${(e: Event) => (this._zonePanelNewBoxSize = parseInt((e.target as HTMLSelectElement).value, 10))}
+                          >
+                            ${BOX_SIZES.map((s) => html`<option value=${s} ?selected=${s === this._zonePanelNewBoxSize}>${s}-pk</option>`)}
+                          </select>
+                          <div class="depth-panel-grow" @click=${this._addBoxSlot}>
+                            <span class="depth-slot-plus">+</span> Add Box
+                          </div>
+                        </div>
                       `}
+                </div>
+              </div>
+            `
+          : nothing}
+
+        <!-- Rack Panel (grid-slot cabinets: list + reorder), harmonized with Bulk/Box -->
+        ${this._rackPanelOpen
+          ? html`
+              <div class="depth-panel-backdrop ${this._rackPanelDragWineId ? "drag-through" : ""}" @click=${this._closeRackPanel}></div>
+              <div class="depth-panel open">
+                <div class="depth-panel-header">
+                  <span class="depth-panel-title">
+                    ${this._rackPanelCabinet?.name}
+                    <span class="depth-panel-subtitle">
+                      ${this._rackPanelWines.length}/${this._getRackSlots().length} bottles
+                    </span>
+                  </span>
+                  <button class="depth-panel-close" @click=${this._closeRackPanel}>✕</button>
+                </div>
+                <div class="depth-panel-slots">
+                  ${this._getRackSlots().map(({ row, col }, slotIdx) => {
+                    const wines = this._rackPanelWines.filter((w) => w.row === row && w.col === col);
+                    const wine = wines.length > 0 ? wines.sort((a, b) => (a.depth || 0) - (b.depth || 0))[0] : undefined;
+                    const typeColor = wine ? WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red : "";
+                    const disp = wine?.disposition || "";
+                    const dispClass = disp === "D" ? "drink" : disp === "H" ? "hold" : disp === "P" ? "past" : "";
+                    const dragKey = `rack-${row}-${col}`;
+                    const highlighted = wines.some((w) => w.id === this._highlightWineId);
+                    return html`
+                      <div
+                        id=${highlighted ? "highlight-slot" : nothing}
+                        class="depth-slot ${wine ? "filled" : "empty"} ${this._rackPanelDragOverKey === dragKey ? "drag-over" : ""} ${highlighted ? "highlight" : ""}"
+                        draggable=${wine ? "true" : "false"}
+                        @click=${() => this._onRackPanelSlotClick(row, col, wine)}
+                        @dragstart=${wine ? (e: DragEvent) => this._onRackPanelDragStart(e, wine) : nothing}
+                        @dragend=${wine ? () => this._onRackPanelDragEnd() : nothing}
+                        @dragover=${(e: DragEvent) => this._onRackPanelDragOver(e, dragKey)}
+                        @dragleave=${() => (this._rackPanelDragOverKey = null)}
+                        @drop=${(e: DragEvent) => this._onRackPanelReorder(e, row, col, wine)}
+                      >
+                        ${this._isLastRackSlot(row, col)
+                          ? html`
+                              <span
+                                class="depth-slot-delete"
+                                title="Delete this slot"
+                                @click=${(e: Event) => { e.stopPropagation(); this._deleteRackSlot(row, col); }}
+                              >✕</span>
+                            `
+                          : nothing}
+                        <div class="depth-slot-label">Slot ${slotIdx + 1}</div>
+                        ${wine
+                          ? html`
+                              <div class="depth-slot-wine" style="border-left: 4px solid ${typeColor}">
+                                <div class="depth-slot-avatar">
+                                  ${wine.image_url
+                                    ? html`<img class="depth-slot-thumb" src="${wine.image_url}" alt="" />`
+                                    : html`<div class="depth-slot-dot" style="background: ${typeColor}"></div>`}
+                                  ${dispClass ? html`<span class="depth-slot-disposition ${dispClass}">${disp}</span>` : nothing}
+                                </div>
+                                <div class="depth-slot-info">
+                                  <div class="depth-slot-name">${wine.name}</div>
+                                  <div class="depth-slot-meta">
+                                    ${wine.vintage || "NV"}
+                                    ${wine.rating ? html` · ★${wine.rating}` : nothing}
+                                    ${wines.length > 1 ? html` · ${wines.length} deep` : nothing}
+                                  </div>
+                                </div>
+                              </div>
+                            `
+                          : html`
+                              <div class="depth-slot-empty">
+                                <span class="depth-slot-plus">+</span>
+                                <span>Empty</span>
+                              </div>
+                            `}
+                      </div>
+                    `;
+                  })}
+                  <div class="depth-panel-grow" @click=${this._addRackSlot}>
+                    <span class="depth-slot-plus">+</span> Add Slot
+                  </div>
                 </div>
               </div>
             `

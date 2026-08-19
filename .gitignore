@@ -6,3 +6,7 @@ __pycache__/
 *.pyc
 .env
 frontend-src/node_modules/
+
+# Personal/local Claude Code instructions — read automatically alongside
+# CLAUDE.md, but never committed (may reference machine-specific tooling).
+CLAUDE.local.md

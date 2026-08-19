@@ -13,7 +13,18 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 
-from .const import DOMAIN, FRONTEND_VERSION
+from .const import (
+    CONF_AI_API_KEY,
+    CONF_AI_BASE_URL,
+    CONF_AI_MODEL,
+    CONF_AI_PROVIDER,
+    CONF_GEMINI_API_KEY,
+    CONF_GEMINI_MODEL,
+    DEFAULT_AI_PROVIDER,
+    DEFAULT_GEMINI_MODEL,
+    DOMAIN,
+    FRONTEND_VERSION,
+)
 from .vivino import VivinoClient
 from .websocket import async_register_websocket_commands
 from .wine_storage import WineCellarStorage
@@ -21,6 +32,28 @@ from .wine_storage import WineCellarStorage
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor"]
+
+
+def _build_ai_client(hass: HomeAssistant, entry: ConfigEntry) -> Any | None:
+    """Build the configured AI client (Gemini direct, or OpenAI-compatible), if any."""
+    options = entry.options
+    provider = options.get(CONF_AI_PROVIDER, DEFAULT_AI_PROVIDER)
+
+    if provider == "openai_compatible":
+        base_url = options.get(CONF_AI_BASE_URL, "")
+        api_key = options.get(CONF_AI_API_KEY, "")
+        model = options.get(CONF_AI_MODEL, "")
+        if base_url and api_key and model:
+            from .gemini import OpenAICompatibleClient
+            return OpenAICompatibleClient(hass, base_url, api_key, model)
+        return None
+
+    gemini_api_key = options.get(CONF_GEMINI_API_KEY, "")
+    if gemini_api_key:
+        from .gemini import GeminiVisionClient
+        model = options.get(CONF_GEMINI_MODEL, DEFAULT_GEMINI_MODEL)
+        return GeminiVisionClient(hass, gemini_api_key, model)
+    return None
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -136,11 +169,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Initialize Vivino client
     vivino = VivinoClient(hass)
 
-    # Initialize Gemini client if API key is configured
-    gemini_api_key = entry.options.get("gemini_api_key", "")
-    if gemini_api_key:
-        from .gemini import GeminiVisionClient
-        domain_data["gemini"] = GeminiVisionClient(hass, gemini_api_key)
+    # Initialize the configured AI client, if any
+    ai_client = _build_ai_client(hass, entry)
+    if ai_client:
+        domain_data["gemini"] = ai_client
     else:
         domain_data.pop("gemini", None)
 
@@ -164,10 +196,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""
     domain_data = hass.data.get(DOMAIN, {})
-    gemini_api_key = entry.options.get("gemini_api_key", "")
-    if gemini_api_key:
-        from .gemini import GeminiVisionClient
-        domain_data["gemini"] = GeminiVisionClient(hass, gemini_api_key)
+    ai_client = _build_ai_client(hass, entry)
+    if ai_client:
+        domain_data["gemini"] = ai_client
     else:
         domain_data.pop("gemini", None)
 

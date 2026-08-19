@@ -1,6 +1,6 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { Wine, Cabinet, WineType, WINE_TYPE_COLORS, WINE_TYPE_LABELS, WineHistoryItem } from "../models";
+import { Wine, Cabinet, WineType, WINE_TYPE_COLORS, WINE_TYPE_LABELS, WineHistoryItem, getWineLocation } from "../models";
 import { sharedStyles } from "../styles";
 import "./wine-detail-dialog";
 
@@ -14,6 +14,7 @@ export class InventoryDialog extends LitElement {
   @property({ attribute: false }) wines: Wine[] = [];
   @property({ attribute: false }) cabinets: Cabinet[] = [];
   @property({ type: Boolean }) hasGemini = false;
+  @property({ type: String }) currency = "USD";
 
   @state() private _searchQuery = "";
   @state() private _typeFilter = "all";
@@ -218,8 +219,8 @@ export class InventoryDialog extends LitElement {
       }
 
       .inv-thumb {
-        width: 32px;
-        height: 44px;
+        width: 48px;
+        height: 66px;
         border-radius: 4px;
         object-fit: cover;
         flex-shrink: 0;
@@ -600,6 +601,18 @@ export class InventoryDialog extends LitElement {
     }
   }
 
+  private async _restoreFromHistory(historyId: string) {
+    try {
+      await this.hass.callWS({ type: "wine_cellar/restore_wine", history_id: historyId });
+      this._historyItems = this._historyItems.filter((i) => i.id !== historyId);
+      this._statusMsg = "Wine restored to Unassigned";
+      this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+    } catch (err) {
+      console.error("Failed to restore wine from history", err);
+      this._statusMsg = "Failed to restore wine";
+    }
+  }
+
   private _formatReason(reason: string): string {
     const map: Record<string, string> = {
       drank: "Drank", gifted: "Gifted", sold: "Sold",
@@ -642,8 +655,9 @@ export class InventoryDialog extends LitElement {
               </div>
             </div>
             <div class="inv-right">
-              ${item.price ? html`<div class="inv-price">$${item.price.toFixed(0)}</div>` : nothing}
+              ${item.price ? html`<div class="inv-price">${this.currency} ${item.price.toFixed(0)}</div>` : nothing}
               <div class="inv-location">${this._formatDate(item.removed_at)}</div>
+              <button class="inv-btn" style="margin-top:4px" @click=${() => this._restoreFromHistory(item.id)}>Restore</button>
             </div>
           </div>
         `)}
@@ -767,11 +781,11 @@ export class InventoryDialog extends LitElement {
   }
 
   private _parseCSV(text: string): any[] {
-    const lines = text.split("\n").filter((l) => l.trim());
-    if (lines.length < 2) return [];
+    const rows = this._parseCSVRows(text);
+    if (rows.length < 2) return [];
 
     // Parse header row
-    const headers = this._parseCSVRow(lines[0]).map((h) => h.trim().toLowerCase());
+    const headers = rows[0].map((h) => h.trim().toLowerCase());
 
     // Map CSV headers to wine fields
     const fieldMap: Record<string, string> = {
@@ -814,8 +828,8 @@ export class InventoryDialog extends LitElement {
     ]);
 
     const wines: any[] = [];
-    for (let i = 1; i < lines.length; i++) {
-      const values = this._parseCSVRow(lines[i]);
+    for (let i = 1; i < rows.length; i++) {
+      const values = rows[i];
       if (values.length === 0) continue;
 
       const wine: any = {};
@@ -853,37 +867,52 @@ export class InventoryDialog extends LitElement {
     return wines;
   }
 
-  private _parseCSVRow(line: string): string[] {
-    const result: string[] = [];
-    let current = "";
+  // Quote-aware: a comma or newline inside a quoted field (as produced by
+  // escapeCSV for multi-line Notes/Description) does not end the field/row.
+  private _parseCSVRows(text: string): string[][] {
+    const rows: string[][] = [];
+    let row: string[] = [];
+    let field = "";
     let inQuotes = false;
 
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
+    const endField = () => {
+      row.push(field);
+      field = "";
+    };
+    const endRow = () => {
+      endField();
+      if (row.some((v) => v.trim() !== "")) rows.push(row);
+      row = [];
+    };
+
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
       if (inQuotes) {
         if (ch === '"') {
-          if (i + 1 < line.length && line[i + 1] === '"') {
-            current += '"';
+          if (text[i + 1] === '"') {
+            field += '"';
             i++;
           } else {
             inQuotes = false;
           }
         } else {
-          current += ch;
+          field += ch;
         }
+      } else if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ",") {
+        endField();
+      } else if (ch === "\r") {
+        // skip, \n (or end of text) closes the row
+      } else if (ch === "\n") {
+        endRow();
       } else {
-        if (ch === '"') {
-          inQuotes = true;
-        } else if (ch === ",") {
-          result.push(current);
-          current = "";
-        } else {
-          current += ch;
-        }
+        field += ch;
       }
     }
-    result.push(current);
-    return result;
+    if (field !== "" || row.length > 0) endRow();
+
+    return rows;
   }
 
   // ── Restore JSON ──────────────────────────────────────────────
@@ -1021,18 +1050,12 @@ export class InventoryDialog extends LitElement {
 
   private _renderWineItem(wine: Wine) {
     const typeColor = WINE_TYPE_COLORS[wine.type as WineType] || WINE_TYPE_COLORS.red;
-    const cabinetName = this.cabinets.find((c) => c.id === wine.cabinet_id)?.name || "";
-    let location = "Unassigned";
-    if (cabinetName) {
-      if (wine.row !== null && wine.col !== null) {
-        location = `${cabinetName} R${wine.row + 1}C${wine.col + 1}`;
-      } else if (wine.zone) {
-        location = `${cabinetName}`;
-      } else {
-        location = cabinetName;
-      }
-    }
+    const location = getWineLocation(wine, this.cabinets).text;
     const displayPrice = wine.retail_price || wine.price;
+    // A retail_price keeps the currency it was actually captured in — show
+    // that instead of the globally selected one, or a stale price ends up
+    // mislabeled as if it were in the new currency.
+    const displayCurrency = wine.retail_price ? (wine.retail_price_currency || this.currency) : this.currency;
 
     return html`
       <div class="inv-item" @click=${() => this._showWineDetail(wine)}>
@@ -1066,7 +1089,7 @@ export class InventoryDialog extends LitElement {
           </div>
         </div>
         <div class="inv-right">
-          ${displayPrice ? html`<div class="inv-price">$${displayPrice.toFixed(0)}</div>` : nothing}
+          ${displayPrice ? html`<div class="inv-price">${displayCurrency} ${displayPrice.toFixed(0)}</div>` : nothing}
           <div class="inv-location">${location}</div>
         </div>
       </div>
@@ -1132,7 +1155,7 @@ export class InventoryDialog extends LitElement {
               ? html`
                   <div class="stat">
                     <span class="stat-value"
-                      >$${allStats.totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span
+                      >${this.currency} ${allStats.totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span
                     >
                     est. value
                   </div>
@@ -1366,12 +1389,29 @@ export class InventoryDialog extends LitElement {
       <wine-detail-dialog
         .wine=${this._detailWine}
         .hass=${this.hass}
+        .cabinets=${this.cabinets}
         .open=${this._showDetail}
         .hasGemini=${this.hasGemini}
         .mode=${"cellar"}
         @close=${() => (this._showDetail = false)}
         @wine-updated=${() => {
           this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+        }}
+        @locate-wine=${(e: CustomEvent) => {
+          this._showDetail = false;
+          this.dispatchEvent(new CustomEvent("locate-wine", { detail: e.detail, bubbles: true, composed: true }));
+        }}
+        @copy-wine=${(e: CustomEvent) => {
+          this._showDetail = false;
+          this.dispatchEvent(new CustomEvent("copy-wine", { detail: e.detail, bubbles: true, composed: true }));
+        }}
+        @move-wine=${(e: CustomEvent) => {
+          this._showDetail = false;
+          this.dispatchEvent(new CustomEvent("move-wine", { detail: e.detail, bubbles: true, composed: true }));
+        }}
+        @remove-wine=${(e: CustomEvent) => {
+          this._showDetail = false;
+          this.dispatchEvent(new CustomEvent("remove-wine", { detail: e.detail, bubbles: true, composed: true }));
         }}
       ></wine-detail-dialog>
     `;
