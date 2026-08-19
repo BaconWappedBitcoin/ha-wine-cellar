@@ -27,7 +27,7 @@
         "data_description": {
           "gemini_model": "Format: gemini-2.5-flash",
           "ai_base_url": "Format: https://host or https://host/your-path — with or without a trailing /v1/chat/completions, either works",
-          "ai_api_key": "Sent as header: Authorization: Bearer <key>",
+          "ai_api_key": "Sent as header: Authorization: Bearer {key}",
           "ai_model": "Format: the exact model name your provider expects, e.g. gemini-2.5-flash"
         }
       }
