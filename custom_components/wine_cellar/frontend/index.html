@@ -85,6 +85,13 @@
       ], order: 3 },
     ];
 
+    let mockBackupKeep = 10;
+    const mockServerBackups = [
+      { filename: "wine_cellar_20260307_150000.json", timestamp: "2026-03-07T15:00:00Z", wines: 19, cabinets: 3, buy_list: 4, size: 12500 },
+      { filename: "wine_cellar_20260306_120000.json", timestamp: "2026-03-06T12:00:00Z", wines: 17, cabinets: 3, buy_list: 3, size: 11200 },
+      { filename: "wine_cellar_20260305_090000.json", timestamp: "2026-03-05T09:00:00Z", wines: 15, cabinets: 3, buy_list: 2, size: 9800 },
+    ];
+
     const mockBuyList = [
       { id: "bl-1", name: "Caymus Cabernet Sauvignon 2021", winery: "Caymus Vineyards", region: "Napa Valley", country: "USA", vintage: 2021, type: "red", grape_variety: "Cabernet Sauvignon", rating: 4.3, ratings_count: 7850, image_url: "https://images.vivino.com/thumbs/pC4wjq1BRtOFfWNi8IkFGA_375x500.jpg", price: null, retail_price: 90, notes: "", description: "Rich and full-bodied with ripe dark fruit and vanilla oak.", food_pairings: "Beef, Lamb", alcohol: "14.6%", disposition: "D", drink_window: "2024-2030", ai_ratings: { rating_ws: 92, rating_rp: 93 }, added_at: "2026-03-01T10:00:00Z" },
       { id: "bl-2", name: "Tignanello 2020", winery: "Antinori", region: "Tuscany", country: "Italy", vintage: 2020, type: "red", grape_variety: "Sangiovese/Cabernet", rating: 4.5, ratings_count: 5200, image_url: "https://images.vivino.com/thumbs/xmN-caL0R42OILQL67PLIA_375x500.jpg", price: null, retail_price: 120, notes: "Saw at restaurant", description: "Super Tuscan icon. Dark cherry, spice, and leather.", food_pairings: "Beef, Pasta, Game", alcohol: "14.0%", disposition: "H", drink_window: "2025-2035", ai_ratings: { rating_ws: 95, rating_rp: 94, rating_jd: 96 }, added_at: "2026-03-02T10:00:00Z" },
@@ -250,14 +257,33 @@
                 { name: "Barolo Monfortino 2016", winery: "Giacomo Conterno", region: "Piedmont", country: "Italy", vintage: 2016, type: "red", grape_variety: "Nebbiolo", price: 450 },
               ],
             };
+          case "wine_cellar/update_settings":
+            if (msg.updates && msg.updates.server_backup_keep !== undefined) {
+              mockBackupKeep = msg.updates.server_backup_keep;
+            }
+            return { settings: msg.updates || {} };
           case "wine_cellar/server_backup_save":
             return { success: true, filename: "wine_cellar_" + new Date().toISOString().replace(/[:.]/g, "").slice(0, 15) + ".json", wines: mockWines.length, cabinets: mockCabinets.length, buy_list: mockBuyList.length, timestamp: new Date().toISOString() };
           case "wine_cellar/server_backup_list":
-            return { backups: [
-              { filename: "wine_cellar_20260307_150000.json", timestamp: "2026-03-07T15:00:00Z", wines: 19, cabinets: 3, buy_list: 4, size: 12500 },
-              { filename: "wine_cellar_20260306_120000.json", timestamp: "2026-03-06T12:00:00Z", wines: 17, cabinets: 3, buy_list: 3, size: 11200 },
-              { filename: "wine_cellar_20260305_090000.json", timestamp: "2026-03-05T09:00:00Z", wines: 15, cabinets: 3, buy_list: 2, size: 9800 },
-            ]};
+            return { backups: mockServerBackups, keep: mockBackupKeep, keep_choices: [0, 5, 10, 20, 50] };
+          case "wine_cellar/server_backup_delete": {
+            const bIdx = mockServerBackups.findIndex((b) => b.filename === msg.filename);
+            if (bIdx < 0) return { error: "Backup not found: " + msg.filename };
+            mockServerBackups.splice(bIdx, 1);
+            return { success: true, filename: msg.filename };
+          }
+          case "wine_cellar/get_storage_info": {
+            const bytes = (v) => new TextEncoder().encode(JSON.stringify(v)).length;
+            return {
+              total_bytes: bytes({ wines: mockWines, cabinets: mockCabinets, buy_list: mockBuyList, wine_history: mockWineHistory }),
+              wines_bytes: bytes(mockWines),
+              wines_count: mockWines.length,
+              history_bytes: bytes(mockWineHistory),
+              history_count: mockWineHistory.length,
+              barcode_cache_bytes: 0,
+              barcode_cache_count: 0,
+            };
+          }
           case "wine_cellar/server_backup_restore":
             return { success: true, filename: msg.filename, wines: mockWines.length, cabinets: mockCabinets.length, buy_list: mockBuyList.length, timestamp: new Date().toISOString() };
           case "wine_cellar/backup_data":

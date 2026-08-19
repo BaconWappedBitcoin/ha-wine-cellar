@@ -16,9 +16,12 @@ from .const import (
     CONF_AI_FALLBACK_ALWAYS,
     CONF_METADATA_CURRENCY,
     CONF_METADATA_LANGUAGE,
+    CONF_SERVER_BACKUP_KEEP,
     DEFAULT_METADATA_CURRENCY,
     DEFAULT_METADATA_LANGUAGE,
+    DEFAULT_SERVER_BACKUP_KEEP,
     DOMAIN,
+    SERVER_BACKUP_KEEP_CHOICES,
     SUPPORTED_METADATA_CURRENCIES,
     SUPPORTED_METADATA_LANGUAGES,
 )
@@ -279,6 +282,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_backup)
     websocket_api.async_register_command(hass, ws_restore_backup)
     websocket_api.async_register_command(hass, ws_import_wines)
+    websocket_api.async_register_command(hass, ws_server_backup_delete)
+    websocket_api.async_register_command(hass, ws_get_storage_info)
     websocket_api.async_register_command(hass, ws_server_backup_save)
     websocket_api.async_register_command(hass, ws_server_backup_list)
     websocket_api.async_register_command(hass, ws_server_backup_restore)
@@ -607,6 +612,8 @@ def ws_get_capabilities(
             "ai_fallback_always": bool(
                 hass.data[DOMAIN]["storage"].settings.get(CONF_AI_FALLBACK_ALWAYS, False)
             ),
+            "server_backup_keep": _get_backup_keep(hass),
+            "server_backup_keep_choices": SERVER_BACKUP_KEEP_CHOICES,
         },
     )
 
@@ -634,6 +641,15 @@ async def ws_update_settings(
     if currency is not None and currency not in SUPPORTED_METADATA_CURRENCIES:
         connection.send_result(msg["id"], {"error": f"Unsupported currency: {currency}"})
         return
+    keep = updates.get(CONF_SERVER_BACKUP_KEEP)
+    if keep is not None:
+        try:
+            updates[CONF_SERVER_BACKUP_KEEP] = max(0, int(keep))
+        except (TypeError, ValueError):
+            connection.send_result(
+                msg["id"], {"error": f"Invalid backup retention: {keep}"}
+            )
+            return
     settings = storage.update_settings(updates)
     await storage.async_save()
     connection.send_result(msg["id"], {"settings": settings})
@@ -1492,6 +1508,7 @@ async def ws_restore_backup(
     {
         vol.Required("type"): "wine_cellar/import_wines",
         vol.Required("wines"): list,
+        vol.Optional("mode", default="add"): vol.In(["add", "update"]),
     }
 )
 @websocket_api.async_response
@@ -1500,14 +1517,25 @@ async def ws_import_wines(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Batch import wines (each gets a new UUID)."""
+    """Batch import wines: add as new, or update existing ones by id."""
     storage = hass.data[DOMAIN]["storage"]
-    count = storage.import_wines(msg["wines"])
+    counts = storage.import_wines(msg["wines"], msg.get("mode", "add"))
     await storage.async_save()
     hass.bus.async_fire(f"{DOMAIN}_updated")
 
-    _LOGGER.info("Imported %d wines", count)
-    connection.send_result(msg["id"], {"imported": count})
+    _LOGGER.info(
+        "CSV import (%s): %d added, %d updated, %d locations skipped",
+        msg.get("mode", "add"), counts["added"], counts["updated"],
+        counts["location_skipped"],
+    )
+    connection.send_result(
+        msg["id"],
+        {
+            "imported": counts["added"],
+            "updated": counts["updated"],
+            "location_skipped": counts["location_skipped"],
+        },
+    )
 
 
 # ── Cloud Sync (save/load backup file) ─────────────────────────────
@@ -1517,11 +1545,24 @@ import json
 from pathlib import Path
 
 
+def _get_backup_keep(hass: HomeAssistant) -> int:
+    """How many server backups to retain (0 = keep everything)."""
+    raw = hass.data[DOMAIN]["storage"].settings.get(
+        CONF_SERVER_BACKUP_KEEP, DEFAULT_SERVER_BACKUP_KEEP
+    )
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_SERVER_BACKUP_KEEP
+
+
 def _get_server_backup_dir(hass: HomeAssistant) -> Path:
-    """Return the server backup directory in HA config directory."""
-    d = Path(hass.config.config_dir) / "wine_cellar_backups"
-    d.mkdir(exist_ok=True)
-    return d
+    """Return the server backup directory path (no filesystem access).
+
+    Creating it is left to the executor jobs below: mkdir() blocks, and every
+    caller here runs on the event loop.
+    """
+    return Path(hass.config.config_dir) / "wine_cellar_backups"
 
 
 @websocket_api.websocket_command({vol.Required("type"): "wine_cellar/server_backup_save"})
@@ -1542,11 +1583,27 @@ async def ws_server_backup_save(
     backup_dir = _get_server_backup_dir(hass)
     backup_path = backup_dir / filename
 
+    keep = _get_backup_keep(hass)
+
+    def _write() -> int:
+        backup_dir.mkdir(exist_ok=True)
+        backup_path.write_text(json.dumps(backup, indent=2), "utf-8")
+        if keep <= 0:
+            return 0
+        # Newest first, so everything past the retention count is the tail.
+        existing = sorted(backup_dir.glob("wine_cellar_*.json"), reverse=True)
+        pruned = 0
+        for old_file in existing[keep:]:
+            try:
+                old_file.unlink()
+                pruned += 1
+            except OSError as err:
+                _LOGGER.warning("Could not prune old backup %s: %s", old_file, err)
+        return pruned
+
     try:
-        await hass.async_add_executor_job(
-            backup_path.write_text, json.dumps(backup, indent=2), "utf-8"
-        )
-        _LOGGER.info("Server backup saved to %s", backup_path)
+        pruned = await hass.async_add_executor_job(_write)
+        _LOGGER.info("Server backup saved to %s (pruned %d old)", backup_path, pruned)
         connection.send_result(msg["id"], {
             "success": True,
             "filename": filename,
@@ -1554,6 +1611,7 @@ async def ws_server_backup_save(
             "cabinets": len(backup.get("cabinets", [])),
             "buy_list": len(backup.get("buy_list", [])),
             "timestamp": backup["timestamp"],
+            "pruned": pruned,
         })
     except Exception as err:
         _LOGGER.error("Failed to save server backup: %s", err)
@@ -1571,9 +1629,11 @@ async def ws_server_backup_list(
     backup_dir = _get_server_backup_dir(hass)
 
     def _list_backups() -> list[dict]:
+        if not backup_dir.is_dir():
+            return []
         files = sorted(backup_dir.glob("wine_cellar_*.json"), reverse=True)
         result = []
-        for f in files[:20]:  # limit to 20 most recent
+        for f in files:
             try:
                 data = json.loads(f.read_text("utf-8"))
                 result.append({
@@ -1590,9 +1650,53 @@ async def ws_server_backup_list(
 
     try:
         backups = await hass.async_add_executor_job(_list_backups)
-        connection.send_result(msg["id"], {"backups": backups})
+        connection.send_result(msg["id"], {
+            "backups": backups,
+            "keep": _get_backup_keep(hass),
+            "keep_choices": SERVER_BACKUP_KEEP_CHOICES,
+        })
     except Exception as err:
         _LOGGER.error("Failed to list server backups: %s", err)
+        connection.send_result(msg["id"], {"error": str(err)})
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "wine_cellar/server_backup_delete",
+    vol.Required("filename"): str,
+})
+@websocket_api.async_response
+async def ws_server_backup_delete(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Delete a single server backup file."""
+    backup_dir = _get_server_backup_dir(hass)
+    backup_path = backup_dir / msg["filename"]
+
+    # Same guard as restore: never let a crafted name escape the directory.
+    if backup_path.resolve().parent != backup_dir.resolve():
+        connection.send_result(msg["id"], {"error": "Invalid filename."})
+        return
+    if not backup_path.name.startswith("wine_cellar_") or backup_path.suffix != ".json":
+        connection.send_result(msg["id"], {"error": "Not a cellar backup file."})
+        return
+
+    def _delete() -> bool:
+        if not backup_path.exists():
+            return False
+        backup_path.unlink()
+        return True
+
+    try:
+        deleted = await hass.async_add_executor_job(_delete)
+        if not deleted:
+            connection.send_result(msg["id"], {"error": f"Backup not found: {msg['filename']}"})
+            return
+        _LOGGER.info("Server backup deleted: %s", backup_path)
+        connection.send_result(msg["id"], {"success": True, "filename": msg["filename"]})
+    except Exception as err:
+        _LOGGER.error("Failed to delete server backup: %s", err)
         connection.send_result(msg["id"], {"error": str(err)})
 
 
@@ -1651,3 +1755,37 @@ async def ws_server_backup_restore(
     except Exception as err:
         _LOGGER.error("Failed to restore server backup: %s", err)
         connection.send_result(msg["id"], {"error": str(err)})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "wine_cellar/get_storage_info"})
+@callback
+def ws_get_storage_info(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Report the serialized size of each stored section.
+
+    Home Assistant keeps this store in memory and rewrites the whole file on
+    every save, so an unbounded history makes *every* wine edit slower, not
+    just the history view. Surfacing the numbers lets the user decide when a
+    purge is worth it instead of imposing an arbitrary cap.
+    """
+    storage = hass.data[DOMAIN]["storage"]
+
+    def _size(value: Any) -> int:
+        return len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+
+    history = storage.wine_history
+    wines = storage.wines
+    cache = storage.barcode_cache
+
+    connection.send_result(msg["id"], {
+        "total_bytes": _size(storage.raw_data),
+        "wines_bytes": _size(wines),
+        "wines_count": len(wines),
+        "history_bytes": _size(history),
+        "history_count": len(history),
+        "barcode_cache_bytes": _size(cache),
+        "barcode_cache_count": len(cache),
+    })

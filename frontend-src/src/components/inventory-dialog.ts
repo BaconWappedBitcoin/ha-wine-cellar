@@ -78,12 +78,18 @@ export class InventoryDialog extends LitElement {
   @state() private _restoring = false;
   @state() private _confirmRestore = false;
   @state() private _restoreData: any = null;
+  @state() private _confirmImport = false;
+  @state() private _pendingImport: any[] | null = null;
+  @state() private _importMatches = 0;
   @state() private _statusMsg = "";
   @state() private _serverBackingUp = false;
   @state() private _serverBackupLabel = "";
   @state() private _showServerRestore = false;
   @state() private _serverBackups: any[] = [];
   @state() private _serverRestoring = false;
+  @state() private _backupKeep = 10;
+  @state() private _backupKeepChoices: number[] = [0, 5, 10, 20, 50];
+  @state() private _storageInfo: any = null;
   @state() private _viewMode: "inventory" | "history" = "inventory";
   @state() private _historyItems: WineHistoryItem[] = [];
   @state() private _historyLoading = false;
@@ -327,6 +333,80 @@ export class InventoryDialog extends LitElement {
 
       .inv-drink-by {
         opacity: 0.8;
+      }
+
+      .inv-storage-info {
+        margin: 0 16px 8px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: var(--wc-bg);
+        border: 1px solid var(--wc-border);
+        font-size: 0.75em;
+        color: var(--wc-text-secondary);
+        line-height: 1.4;
+      }
+
+      .inv-storage-info.heavy {
+        border-color: #c98a00;
+      }
+
+      .inv-keep-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+        margin-bottom: 8px;
+      }
+
+      .inv-keep-row select {
+        padding: 5px 8px;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        font-size: 1em;
+        cursor: pointer;
+      }
+
+      .inv-backup-list {
+        max-height: 250px;
+        overflow-y: auto;
+        margin: 8px 0;
+      }
+
+      .inv-backup-row {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 4px;
+      }
+
+      .inv-backup-pick {
+        flex: 1;
+        text-align: left;
+        font-size: 0.82em;
+        padding: 8px 12px;
+      }
+
+      .inv-backup-meta {
+        font-size: 0.85em;
+        color: var(--wc-text-secondary);
+      }
+
+      .inv-backup-del {
+        background: none;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        color: var(--wc-text-secondary);
+        cursor: pointer;
+        padding: 0 10px;
+        font-size: 0.9em;
+      }
+
+      .inv-backup-del:hover {
+        border-color: #c62828;
+        color: #c62828;
       }
 
       .inv-chips {
@@ -652,6 +732,8 @@ export class InventoryDialog extends LitElement {
       this._detailWine = null;
       this._statusMsg = "";
       this._confirmRestore = false;
+      this._confirmImport = false;
+      this._pendingImport = null;
       this._showServerRestore = false;
       this._restoreData = null;
       this._viewMode = "inventory";
@@ -940,6 +1022,7 @@ export class InventoryDialog extends LitElement {
   private async _switchToHistory() {
     this._viewMode = "history";
     this._historyLoading = true;
+    this._loadStorageInfo();
     try {
       const result = await this.hass.callWS({ type: "wine_cellar/get_wine_history" });
       this._historyItems = (result?.history || []).sort(
@@ -957,6 +1040,7 @@ export class InventoryDialog extends LitElement {
     try {
       await this.hass.callWS({ type: "wine_cellar/clear_wine_history" });
       this._historyItems = [];
+      this._loadStorageInfo();
       this._statusMsg = "History cleared";
     } catch (err) {
       console.error("Failed to clear history", err);
@@ -996,6 +1080,7 @@ export class InventoryDialog extends LitElement {
     }
     if (this._historyItems.length === 0) {
       return html`
+        ${this._renderStorageInfo()}
         <div class="inv-empty">No removal history yet</div>
         <div class="inv-footer">
           <span class="inv-count">0 wines removed</span>
@@ -1003,6 +1088,7 @@ export class InventoryDialog extends LitElement {
       `;
     }
     return html`
+      ${this._renderStorageInfo()}
       <div class="inv-list">
         ${this._historyItems.map(item => html`
           <div class="inv-history-item">
@@ -1036,11 +1122,34 @@ export class InventoryDialog extends LitElement {
     `;
   }
 
+  private _renderStorageInfo() {
+    const info = this._storageInfo;
+    if (!info) return nothing;
+    const share = info.total_bytes
+      ? Math.round((info.history_bytes / info.total_bytes) * 100)
+      : 0;
+    const heavy = info.history_bytes > 512 * 1024;
+    return html`
+      <div class="inv-storage-info ${heavy ? "heavy" : ""}">
+        Database ${this._formatBytes(info.total_bytes)} ·
+        history ${this._formatBytes(info.history_bytes)} (${share}%) ·
+        ${info.wines_count} wines, ${info.history_count} archived
+        ${heavy
+          ? html`<br /><small
+              >Home Assistant rewrites this whole file on every change —
+              clearing old history speeds up every edit.</small
+            >`
+          : nothing}
+      </div>
+    `;
+  }
+
   // ── Export CSV ─────────────────────────────────────────────────
 
   private _exportCSV() {
     const wines = this._getFilteredAndSortedWines();
     const headers = [
+      "ID",
       "Name", "Winery", "Vintage", "Type", "Region", "Country",
       "Grape Variety", "Rating", "Ratings Count", "Purchase Price",
       "Retail Price", "Purchase Date", "Drink By", "Drink Window",
@@ -1052,7 +1161,7 @@ export class InventoryDialog extends LitElement {
     const escapeCSV = (val: any): string => {
       if (val === null || val === undefined) return "";
       const str = String(val);
-      if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+      if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
         return `"${str.replace(/"/g, '""')}"`;
       }
       return str;
@@ -1060,6 +1169,7 @@ export class InventoryDialog extends LitElement {
 
     const rows = wines.map((w) =>
       [
+        w.id,
         w.name, w.winery, w.vintage, w.type, w.region, w.country,
         w.grape_variety, w.rating, w.ratings_count, w.price,
         w.retail_price, w.purchase_date, w.drink_by, w.drink_window,
@@ -1074,7 +1184,9 @@ export class InventoryDialog extends LitElement {
         .join(",")
     );
 
-    const csv = [headers.join(","), ...rows].join("\n");
+    // Excel only recognizes a CSV as UTF-8 when it starts with a BOM;
+    // without it every accented wine name comes back mangled.
+    const csv = "\ufeff" + [headers.join(","), ...rows].join("\n");
     this._downloadFile(
       csv,
       `wine-cellar-inventory-${new Date().toISOString().slice(0, 10)}.csv`,
@@ -1116,25 +1228,59 @@ export class InventoryDialog extends LitElement {
     const file = (e.target as HTMLInputElement).files?.[0];
     if (!file) return;
 
+    this._statusMsg = "";
+
+    let wines: any[];
+    try {
+      wines = this._parseCSV(await file.text());
+    } catch (err: any) {
+      this._statusMsg = `Import failed: ${err.message || err}`;
+      return;
+    }
+
+    if (wines.length === 0) {
+      this._statusMsg = "No wines found in CSV file.";
+      return;
+    }
+
+    // A CSV exported from here carries each bottle's ID. When those IDs match
+    // wines already in the cellar the user almost certainly edited an export
+    // (bulk price or drinking-window changes) and wants those bottles
+    // updated, not duplicated — so ask instead of silently doubling the cellar.
+    const knownIds = new Set(this.wines.map((w) => w.id));
+    this._importMatches = wines.filter((w) => w.id && knownIds.has(w.id)).length;
+
+    if (this._importMatches > 0) {
+      this._pendingImport = wines;
+      this._confirmImport = true;
+      return;
+    }
+
+    await this._runImport(wines, "add");
+  }
+
+  private async _runImport(wines: any[], mode: "add" | "update") {
+    this._confirmImport = false;
+    this._pendingImport = null;
     this._importing = true;
     this._statusMsg = "";
 
     try {
-      const text = await file.text();
-      const wines = this._parseCSV(text);
-
-      if (wines.length === 0) {
-        this._statusMsg = "No wines found in CSV file.";
-        this._importing = false;
-        return;
-      }
-
       const result = await this.hass.callWS({
         type: "wine_cellar/import_wines",
         wines,
+        mode,
       });
 
-      this._statusMsg = `Imported ${result.imported} wines successfully!`;
+      const added = result.imported || 0;
+      const updated = result.updated || 0;
+      const skipped = result.location_skipped || 0;
+      const base = updated
+        ? `Updated ${updated} wines${added ? `, added ${added} new` : ""}.`
+        : `Imported ${added} wines successfully!`;
+      this._statusMsg = skipped
+        ? `${base} ${skipped} row${skipped > 1 ? "s" : ""} kept their previous spot — the location given was unknown, out of range or already taken.`
+        : base;
       this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
     } catch (err: any) {
       this._statusMsg = `Import failed: ${err.message || err}`;
@@ -1143,7 +1289,7 @@ export class InventoryDialog extends LitElement {
   }
 
   private _parseCSV(text: string): any[] {
-    const rows = this._parseCSVRows(text);
+    const rows = this._parseCSVRows(text.replace(/^\ufeff/, ""));
     if (rows.length < 2) return [];
 
     // Parse header row
@@ -1182,11 +1328,18 @@ export class InventoryDialog extends LitElement {
       "user rating": "user_rating",
       user_rating: "user_rating",
       barcode: "barcode",
+      id: "id",
+      depth: "depth",
+      cabinet: "cabinet",
+      row: "row",
+      col: "col",
+      "added at": "added_at",
+      added_at: "added_at",
     };
 
     const numericFields = new Set([
       "vintage", "rating", "ratings_count", "price",
-      "retail_price", "user_rating",
+      "retail_price", "user_rating", "depth", "row", "col",
     ]);
 
     const wines: any[] = [];
@@ -1367,9 +1520,59 @@ export class InventoryDialog extends LitElement {
     try {
       const result = await this.hass.callWS({ type: "wine_cellar/server_backup_list" });
       this._serverBackups = result?.backups || [];
+      if (typeof result?.keep === "number") this._backupKeep = result.keep;
+      if (Array.isArray(result?.keep_choices)) this._backupKeepChoices = result.keep_choices;
     } catch (err: any) {
       this._statusMsg = `Failed to list backups: ${err.message || err}`;
       this._serverBackups = [];
+    }
+  }
+
+  private _formatBytes(bytes: number): string {
+    if (!bytes) return "0 KB";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  private async _setBackupKeep(keep: number) {
+    this._backupKeep = keep;
+    try {
+      await this.hass.callWS({
+        type: "wine_cellar/update_settings",
+        updates: { server_backup_keep: keep },
+      });
+      this._statusMsg =
+        keep === 0
+          ? "Keeping every server backup."
+          : `Keeping the ${keep} most recent server backups.`;
+    } catch (err: any) {
+      this._statusMsg = `Could not save retention: ${err.message || err}`;
+    }
+  }
+
+  private async _serverBackupDelete(filename: string) {
+    try {
+      const result = await this.hass.callWS({
+        type: "wine_cellar/server_backup_delete",
+        filename,
+      });
+      if (result?.error) {
+        this._statusMsg = `Delete failed: ${result.error}`;
+        return;
+      }
+      this._serverBackups = this._serverBackups.filter((b: any) => b.filename !== filename);
+      this._statusMsg = `Deleted ${filename}`;
+    } catch (err: any) {
+      this._statusMsg = `Delete failed: ${err.message || err}`;
+    }
+  }
+
+  private async _loadStorageInfo() {
+    try {
+      this._storageInfo = await this.hass.callWS({ type: "wine_cellar/get_storage_info" });
+    } catch {
+      this._storageInfo = null;
     }
   }
 
@@ -1919,29 +2122,99 @@ export class InventoryDialog extends LitElement {
             ? html`
                 <div class="inv-confirm-overlay" @click=${() => (this._showServerRestore = false)}>
                   <div class="inv-confirm-box" style="max-width:420px" @click=${(e: Event) => e.stopPropagation()}>
-                    <h3>Restore from Server</h3>
+                    <h3>Server Backups</h3>
+                    <label class="inv-keep-row">
+                      <span>Keep the last</span>
+                      <select
+                        @change=${(e: Event) =>
+                          this._setBackupKeep(Number((e.target as HTMLSelectElement).value))}
+                      >
+                        ${this._backupKeepChoices.map(
+                          (n) => html`<option value=${n} ?selected=${this._backupKeep === n}>
+                            ${n === 0 ? "All (never delete)" : `${n} backups`}
+                          </option>`
+                        )}
+                      </select>
+                    </label>
                     ${this._serverBackups.length === 0
                       ? html`<p>No server backups found. Use "Server Backup" to create one.</p>`
                       : html`
-                        <p>Select a backup to restore. This will <strong>replace</strong> all current data.</p>
-                        <div style="max-height:250px;overflow-y:auto;margin:8px 0;">
+                        <p>
+                          Select a backup to restore — this will <strong>replace</strong> all
+                          current data. ${this._serverBackups.length} stored,
+                          ${this._formatBytes(
+                            this._serverBackups.reduce((t: number, b: any) => t + (b.size || 0), 0)
+                          )} on disk.
+                        </p>
+                        <div class="inv-backup-list">
                           ${this._serverBackups.map(
                             (b: any) => html`
-                              <button
-                                class="inv-btn"
-                                style="width:100%;margin-bottom:4px;text-align:left;font-size:0.82em;padding:8px 12px;"
-                                @click=${() => this._serverBackupRestore(b.filename)}
-                              >
-                                <div>${b.timestamp ? new Date(b.timestamp).toLocaleString() : b.filename}</div>
-                                <div style="font-size:0.85em;color:var(--wc-text-secondary);">${b.wines} wines, ${b.cabinets} racks</div>
-                              </button>
+                              <div class="inv-backup-row">
+                                <button
+                                  class="inv-btn inv-backup-pick"
+                                  @click=${() => this._serverBackupRestore(b.filename)}
+                                >
+                                  <div>${b.timestamp ? new Date(b.timestamp).toLocaleString() : b.filename}</div>
+                                  <div class="inv-backup-meta">
+                                    ${b.error
+                                      ? "unreadable file"
+                                      : `${b.wines} wines, ${b.cabinets} racks · ${this._formatBytes(b.size || 0)}`}
+                                  </div>
+                                </button>
+                                <button
+                                  class="inv-backup-del"
+                                  title="Delete this backup"
+                                  @click=${() => this._serverBackupDelete(b.filename)}
+                                >
+                                  🗑
+                                </button>
+                              </div>
                             `
                           )}
                         </div>
                       `}
                     <div class="inv-confirm-btns">
                       <button class="inv-confirm-cancel" @click=${() => (this._showServerRestore = false)}>
-                        Cancel
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              `
+            : nothing}
+
+          <!-- CSV Import Mode Overlay -->
+          ${this._confirmImport && this._pendingImport
+            ? html`
+                <div class="inv-confirm-overlay" @click=${() => (this._confirmImport = false)}>
+                  <div class="inv-confirm-box" @click=${(e: Event) => e.stopPropagation()}>
+                    <h3>📄 Update existing wines?</h3>
+                    <p>
+                      This CSV looks like an edited export — some rows carry the ID of a
+                      wine already in your cellar.
+                    </p>
+                    <div class="inv-confirm-stats">
+                      <strong>${this._importMatches}</strong> row${this._importMatches > 1 ? "s" : ""}
+                      match existing wines ·
+                      <strong>${this._pendingImport.length - this._importMatches}</strong> new
+                      <br />
+                      <small>
+                        Updating only touches the columns present in the file; blank cells
+                        leave the stored value alone.
+                      </small>
+                    </div>
+                    <div class="inv-confirm-btns">
+                      <button
+                        class="inv-confirm-cancel"
+                        @click=${() => this._runImport(this._pendingImport!, "add")}
+                      >
+                        Add all as new
+                      </button>
+                      <button
+                        class="inv-confirm-go"
+                        @click=${() => this._runImport(this._pendingImport!, "update")}
+                      >
+                        Update ${this._importMatches} wine${this._importMatches > 1 ? "s" : ""}
                       </button>
                     </div>
                   </div>
