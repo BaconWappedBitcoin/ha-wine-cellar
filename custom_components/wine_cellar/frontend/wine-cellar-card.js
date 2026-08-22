@@ -11087,11 +11087,18 @@ let WineCellarCard = class WineCellarCard extends i {
             this._showToast("Failed to reorder wine");
         }
     }
-    // Renumber the bin's slots so bottles sit in the order they were added.
-    // `added_at` is the only entry timestamp stored; wines without one (very
-    // old records) keep their relative position at the end rather than jumping
-    // to the front, which is what an empty date would otherwise sort as.
-    async _sortZoneByDateAdded() {
+    // Renumber the bin's slots to match when bottles were added.
+    //
+    // Direction matters physically. Slot 1 is the most accessible position —
+    // the same convention as depth 0 being the front bottle of a grid cell —
+    // so "newest first" matches dropping each new bottle on top of the pile,
+    // and "oldest first" matches lining bottles up in a row from one end.
+    // Only the user knows which of the two their bin really is.
+    //
+    // `added_at` is the only entry timestamp stored; bottles without one keep
+    // their relative position at the end in *both* directions rather than
+    // sorting to the front, which is what an empty string would otherwise do.
+    async _sortZoneByDateAdded(direction) {
         this._confirmZoneSort = false;
         if (!this._zonePanelCabinet)
             return;
@@ -11104,7 +11111,7 @@ let WineCellarCard = class WineCellarCard extends i {
                 return 1;
             if (!bDate)
                 return -1;
-            return aDate.localeCompare(bDate);
+            return direction === "newest" ? bDate.localeCompare(aDate) : aDate.localeCompare(bDate);
         });
         this._zoneSorting = true;
         try {
@@ -11119,7 +11126,7 @@ let WineCellarCard = class WineCellarCard extends i {
                     depth: i,
                 });
             }
-            this._showToast("Sorted by date added");
+            this._showToast(direction === "newest" ? "Newest bottles first" : "Oldest bottles first");
             await this._loadData();
         }
         catch (err) {
@@ -12463,10 +12470,10 @@ let WineCellarCard = class WineCellarCard extends i {
                 ? b `<button
                           class="depth-panel-sort"
                           ?disabled=${this._zoneSorting}
-                          title="Renumber the slots so bottles sit in the order they were added"
+                          title="Renumber the slots to match when bottles were added"
                           @click=${() => (this._confirmZoneSort = true)}
                         >
-                          ${this._zoneSorting ? "Sorting…" : "↕ By date added"}
+                          ${this._zoneSorting ? "Sorting…" : "↕ Sort by date"}
                         </button>`
                 : A}
                     <button class="depth-panel-close" @click=${this._closeZonePanel}>✕</button>
@@ -12478,12 +12485,23 @@ let WineCellarCard = class WineCellarCard extends i {
                         <strong>Reorder by date added?</strong>
                         <span>
                           Every bottle in ${this._zonePanelName} moves to a slot matching when
-                          it was added. Any order you arranged by hand is lost.
+                          it was added. Any order you arranged by hand is lost. Slot 1 is the
+                          most accessible position.
                         </span>
                         <span class="depth-panel-confirm-btns">
                           <button @click=${() => (this._confirmZoneSort = false)}>Cancel</button>
-                          <button class="primary" @click=${this._sortZoneByDateAdded}>
-                            Reorder
+                          <button
+                            title="Slot 1 holds the bottle that has been in this bin longest — for a bin you fill in a row"
+                            @click=${() => this._sortZoneByDateAdded("oldest")}
+                          >
+                            Oldest first
+                          </button>
+                          <button
+                            class="primary"
+                            title="Slot 1 holds the bottle you added last — for a bin you stack, where the newest sits on top"
+                            @click=${() => this._sortZoneByDateAdded("newest")}
+                          >
+                            Newest first
                           </button>
                         </span>
                       </div>
