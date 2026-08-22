@@ -264,7 +264,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if dirty:
         await storage.async_save()
-    await photos.prune(hass, storage.wines, storage.wine_history)
+
+    # Pruning deletes every photo file nothing refers to. If the store did not
+    # actually load — missing on a first run, or unreadable — the cellar looks
+    # empty, and pruning against it would delete every photo the user has. The
+    # photos are now separate files that could otherwise have survived a
+    # damaged store, so this stays behind the one check that tells the two
+    # apart.
+    if storage.loaded_from_disk:
+        await photos.prune(hass, storage.wines, storage.wine_history)
+    else:
+        _LOGGER.debug("Skipping photo prune: nothing was loaded from storage")
 
     # Initialize Vivino client
     vivino = VivinoClient(hass)

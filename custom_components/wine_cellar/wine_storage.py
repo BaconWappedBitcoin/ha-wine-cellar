@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .const import (
+    BARCODE_CACHE_MAX,
     CONF_BARCODE_CACHE,
     CONF_BUY_LIST,
     CONF_CABINETS,
@@ -27,6 +28,7 @@ class WineCellarStorage:
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize storage."""
+        self.loaded_from_disk = False
         self._hass = hass
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self._data: dict[str, Any] = {}
@@ -73,8 +75,15 @@ class WineCellarStorage:
         return settings
 
     async def async_load(self) -> None:
-        """Load data from storage."""
+        """Load data from storage.
+
+        `loaded_from_disk` distinguishes "there was nothing to load" from
+        "there was something and we read it". Callers that delete things the
+        stored data is the only record of — photo files, say — must not treat
+        a store that failed to parse as a cellar that is genuinely empty.
+        """
         data = await self._store.async_load()
+        self.loaded_from_disk = data is not None
         if data is None:
             self._data = {
                 CONF_WINES: [],
@@ -443,11 +452,23 @@ class WineCellarStorage:
         }
 
     def cache_barcode(self, barcode: str, data: dict[str, Any]) -> None:
-        """Cache barcode lookup results."""
-        self._data.setdefault(CONF_BARCODE_CACHE, {})[barcode] = {
+        """Cache barcode lookup results.
+
+        Capped, because this lives in the same file as the cellar itself and
+        that file is read and rewritten on every change — an unbounded cache
+        of every barcode ever scanned would slowly tax every save. The oldest
+        entries go first; a re-scan costs one lookup.
+        """
+        cache = self._data.setdefault(CONF_BARCODE_CACHE, {})
+        cache[barcode] = {
             **data,
             "cached_at": datetime.now(timezone.utc).isoformat(),
         }
+        if len(cache) > BARCODE_CACHE_MAX:
+            for old_key in sorted(
+                cache, key=lambda k: cache[k].get("cached_at") or ""
+            )[: len(cache) - BARCODE_CACHE_MAX]:
+                cache.pop(old_key, None)
 
     def get_cached_barcode(self, barcode: str) -> dict[str, Any] | None:
         """Get cached barcode data."""

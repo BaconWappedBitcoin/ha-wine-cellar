@@ -5089,10 +5089,6 @@ let AddWineDialog = class AddWineDialog extends i {
         this._frontImageRaw = "";
         this._showBackPrompt = false;
         this._searchResults = [];
-        this._vivinoEnriching = false;
-        // Bumped per enrichment so a late reply from a previous bottle cannot land
-        // in the current one.
-        this._enrichToken = 0;
     }
     get _steps() {
         return this.buyListMode
@@ -5115,9 +5111,6 @@ let AddWineDialog = class AddWineDialog extends i {
                 this._captureStage = "front";
                 this._frontImageRaw = "";
                 this._showBackPrompt = false;
-                // Any enrichment still in flight belongs to the previous bottle.
-                this._enrichToken++;
-                this._vivinoEnriching = false;
                 this._wineData = {
                     name: "",
                     winery: "",
@@ -5323,8 +5316,6 @@ let AddWineDialog = class AddWineDialog extends i {
                 this._step = "details";
                 this._captureStage = "front";
                 this._frontImageRaw = "";
-                // Deliberately not awaited: the form is already usable.
-                void this._enrichFromVivino(++this._enrichToken);
             }
             else {
                 // Show specific error from backend if available
@@ -5339,75 +5330,6 @@ let AddWineDialog = class AddWineDialog extends i {
             this._error = `Label recognition error: ${msg}`;
         }
         this._labelLoading = false;
-    }
-    // The label path is AI-only: the model reads what is printed on the bottle,
-    // but Vivino's rating, review count and id exist nowhere in that reading —
-    // so a wine added by photo used to arrive with none of them, and without a
-    // vivino_id it could never be refreshed the cheap way afterwards. Since a
-    // barcode that finds no match also falls through to the label, that covered
-    // every bottle whose barcode is not in a grocery database.
-    //
-    // It runs behind the details step rather than in front of it. Waiting on a
-    // second lookup before showing anything would spend the user's time on data
-    // they are not reading yet.
-    async _enrichFromVivino(token) {
-        const d = this._wineData;
-        const query = [d.winery, d.name, d.vintage].filter(Boolean).join(" ").trim();
-        if (!query)
-            return;
-        this._vivinoEnriching = true;
-        try {
-            const res = await this.hass.callWS({ type: "wine_cellar/search_wine", query });
-            const top = res?.results?.[0];
-            // Bail if the user has moved on, scanned something else, or closed up:
-            // writing into _wineData then would be writing into a different bottle.
-            if (!top || token !== this._enrichToken)
-                return;
-            if (!this._looksLikeSameWine(top))
-                return;
-            const cur = this._wineData;
-            const keepExisting = (mine, theirs) => mine !== undefined && mine !== null && mine !== "" ? mine : theirs || mine;
-            this._wineData = {
-                ...cur,
-                // Only Vivino can supply these, so they are always taken.
-                rating: top.rating ?? cur.rating,
-                ratings_count: top.ratings_count ?? cur.ratings_count,
-                vivino_id: top.vivino_id ?? cur.vivino_id,
-                vivino_updated_at: new Date().toISOString(),
-                vivino_checked_at: new Date().toISOString(),
-                // These the AI may already have read off the bottle, and it was
-                // looking at the actual bottle — fill the gaps, do not overwrite.
-                region: keepExisting(cur.region, top.region),
-                country: keepExisting(cur.country, top.country),
-                grape_variety: keepExisting(cur.grape_variety, top.grape_variety),
-                alcohol: keepExisting(cur.alcohol, top.alcohol),
-                description: keepExisting(cur.description, top.description),
-                food_pairings: keepExisting(cur.food_pairings, top.food_pairings),
-            };
-            // name, winery, vintage and image_url are deliberately left alone: the
-            // photo is the user's own, and Vivino's nearest match is not necessarily
-            // spelled the way the label is.
-        }
-        catch (err) {
-            // Enrichment is a bonus. Failing it must not turn into an error the
-            // user has to dismiss on a wine that was recognised perfectly well.
-            console.warn("Wine Cellar: Vivino enrichment failed", err);
-        }
-        finally {
-            if (token === this._enrichToken)
-                this._vivinoEnriching = false;
-        }
-    }
-    // Vivino answers every query with something. Attaching a stranger's rating
-    // to this bottle would be worse than having no rating at all.
-    _looksLikeSameWine(candidate) {
-        const d = this._wineData;
-        const winery = normalizeText(d.winery).trim();
-        const theirWinery = normalizeText(candidate.winery).trim();
-        if (winery && theirWinery && winery === theirWinery)
-            return true;
-        const name = cuveeKey(d.name);
-        return !!name && name === cuveeKey(candidate.name);
     }
     _goToStep(step) {
         this._step = step;
@@ -5748,9 +5670,6 @@ let AddWineDialog = class AddWineDialog extends i {
     _renderDetailsStep() {
         return b `
       <div class="dialog-body">
-        ${this._vivinoEnriching
-            ? b `<div class="vivino-enriching">🍇 Checking Vivino for a rating…</div>`
-            : A}
         <div class="form-group">
           <label>Wine Name *</label>
           <input
@@ -6399,12 +6318,6 @@ AddWineDialog.styles = [
         margin-top: 12px;
       }
 
-      .vivino-enriching {
-        font-size: 0.78em;
-        color: var(--wc-text-secondary);
-        margin-bottom: 10px;
-      }
-
       .suggest-strip {
         display: flex;
         flex-direction: column;
@@ -6816,9 +6729,6 @@ __decorate([
 __decorate([
     r()
 ], AddWineDialog.prototype, "_searchResults", void 0);
-__decorate([
-    r()
-], AddWineDialog.prototype, "_vivinoEnriching", void 0);
 AddWineDialog = __decorate([
     t("add-wine-dialog")
 ], AddWineDialog);
@@ -11786,6 +11696,10 @@ let WineCellarCard = class WineCellarCard extends i {
         this._showVivinoAiSettings = false;
         this._showWineList = false;
         this._showInventory = false;
+        this._findingsCache = null;
+        this._unsubscribe = null;
+        this._refreshTimer = 0;
+        this._toastTimer = 0;
         this._showArrangement = false;
         this._dismissedArrangements = [];
         this._buyList = [];
@@ -11833,9 +11747,50 @@ let WineCellarCard = class WineCellarCard extends i {
     connectedCallback() {
         super.connectedCallback();
         this._loadData();
+        this._subscribeToUpdates();
     }
-    updated(changedProps) {
-        if (changedProps.has("hass") && this.hass) ;
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this._unsubscribe?.();
+        this._unsubscribe = null;
+        if (this._refreshTimer) {
+            clearTimeout(this._refreshTimer);
+            this._refreshTimer = 0;
+        }
+        if (this._toastTimer) {
+            clearTimeout(this._toastTimer);
+            this._toastTimer = 0;
+        }
+    }
+    // The backend announces every change it makes on the event bus, and nobody
+    // was listening. Work it does on its own — the Vivino lookup fired after a
+    // wine is added, most visibly — landed in storage and stayed invisible
+    // until the user happened to do something that reloaded the card. That is
+    // why an added bottle could look like Vivino had never been consulted.
+    async _subscribeToUpdates() {
+        if (!this.hass?.connection || this._unsubscribe) {
+            if (!this.hass)
+                setTimeout(() => this._subscribeToUpdates(), 500);
+            return;
+        }
+        try {
+            this._unsubscribe = await this.hass.connection.subscribeEvents(() => this._scheduleRefresh(), "wine_cellar_updated");
+        }
+        catch (err) {
+            // Without this the card still works, it just will not notice background
+            // work. Not worth an error the user has to dismiss.
+            console.warn("Wine Cellar: could not subscribe to updates", err);
+        }
+    }
+    // Batch operations fire one event per bottle. Coalesce them, or a scan of
+    // the whole cellar would queue one full reload per wine.
+    _scheduleRefresh() {
+        if (this._refreshTimer)
+            clearTimeout(this._refreshTimer);
+        this._refreshTimer = window.setTimeout(() => {
+            this._refreshTimer = 0;
+            this._loadData();
+        }, 400);
     }
     async _loadData() {
         if (!this.hass) {
@@ -11903,7 +11858,14 @@ let WineCellarCard = class WineCellarCard extends i {
     }
     _showToast(message) {
         this._toast = message;
-        setTimeout(() => (this._toast = ""), 2500);
+        // Each toast gets its own full 2.5s: the previous timer would otherwise
+        // still be running and cut the new message short.
+        if (this._toastTimer)
+            clearTimeout(this._toastTimer);
+        this._toastTimer = window.setTimeout(() => {
+            this._toastTimer = 0;
+            this._toast = "";
+        }, 2500);
     }
     // --- Copy/Paste wine ---
     _onCellClick(e) {
@@ -12164,13 +12126,18 @@ let WineCellarCard = class WineCellarCard extends i {
                     updates: { cabinet_id: "", row: null, col: null, zone: "", depth: 0 },
                 });
             }
-            for (let i = slotIndex + 1; i < this._zonePanelWines.length; i++) {
+            // Closing the gap is one renumbering of the zone, not one round trip per
+            // bottle behind the deleted slot — emptying slot 1 of a full 20-bottle
+            // bin used to mean nineteen calls, each with its own disk write.
+            const remaining = this._zonePanelWines
+                .filter((_, i) => i !== slotIndex)
+                .map((w) => w.id);
+            if (remaining.length) {
                 await this.hass.callWS({
-                    type: "wine_cellar/move_wine",
-                    wine_id: this._zonePanelWines[i].id,
+                    type: "wine_cellar/reorder_zone",
                     cabinet_id: this._zonePanelCabinet.id,
                     zone: this._zonePanelZone,
-                    depth: i - 1,
+                    wine_ids: remaining,
                 });
             }
             if (this._zonePanelType === "box") {
@@ -12835,7 +12802,24 @@ let WineCellarCard = class WineCellarCard extends i {
     // cabinets the card already holds, and a stale count would point at moves
     // that have since been made.
     get _arrangementFindings() {
-        return analyzeArrangement(this._wines, this._cabinets, this._dismissedArrangements);
+        // Read from render(), so it ran on every keystroke in the search box even
+        // though typing cannot change how the cellar is arranged. Cached against
+        // the three things it actually depends on — all replaced wholesale rather
+        // than mutated, so identity is a sound key.
+        if (this._findingsCache &&
+            this._findingsCache.wines === this._wines &&
+            this._findingsCache.cabinets === this._cabinets &&
+            this._findingsCache.dismissed === this._dismissedArrangements) {
+            return this._findingsCache.findings;
+        }
+        const findings = analyzeArrangement(this._wines, this._cabinets, this._dismissedArrangements);
+        this._findingsCache = {
+            wines: this._wines,
+            cabinets: this._cabinets,
+            dismissed: this._dismissedArrangements,
+            findings,
+        };
+        return findings;
     }
     // "Leave it as it is" has to stick, or the count becomes a badge people
     // learn to ignore. Applied locally first so the finding disappears at once.

@@ -55,6 +55,16 @@ export class WineCellarCard extends LitElement {
   @state() private _showVivinoAiSettings = false;
   @state() private _showWineList = false;
   @state() private _showInventory = false;
+  private _findingsCache: {
+    wines: Wine[];
+    cabinets: Cabinet[];
+    dismissed: string[];
+    findings: Finding[];
+  } | null = null;
+  private _unsubscribe: (() => void) | null = null;
+  private _refreshTimer = 0;
+  private _toastTimer = 0;
+
   @state() private _showArrangement = false;
   @state() private _dismissedArrangements: string[] = [];
   @state() private _buyList: Wine[] = [];
@@ -432,12 +442,53 @@ export class WineCellarCard extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this._loadData();
+    this._subscribeToUpdates();
   }
 
-  updated(changedProps: Map<string, unknown>) {
-    if (changedProps.has("hass") && this.hass) {
-      // Refresh on HA state changes (lightweight check)
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this._unsubscribe?.();
+    this._unsubscribe = null;
+    if (this._refreshTimer) {
+      clearTimeout(this._refreshTimer);
+      this._refreshTimer = 0;
     }
+    if (this._toastTimer) {
+      clearTimeout(this._toastTimer);
+      this._toastTimer = 0;
+    }
+  }
+
+  // The backend announces every change it makes on the event bus, and nobody
+  // was listening. Work it does on its own — the Vivino lookup fired after a
+  // wine is added, most visibly — landed in storage and stayed invisible
+  // until the user happened to do something that reloaded the card. That is
+  // why an added bottle could look like Vivino had never been consulted.
+  private async _subscribeToUpdates() {
+    if (!this.hass?.connection || this._unsubscribe) {
+      if (!this.hass) setTimeout(() => this._subscribeToUpdates(), 500);
+      return;
+    }
+    try {
+      this._unsubscribe = await this.hass.connection.subscribeEvents(
+        () => this._scheduleRefresh(),
+        "wine_cellar_updated"
+      );
+    } catch (err) {
+      // Without this the card still works, it just will not notice background
+      // work. Not worth an error the user has to dismiss.
+      console.warn("Wine Cellar: could not subscribe to updates", err);
+    }
+  }
+
+  // Batch operations fire one event per bottle. Coalesce them, or a scan of
+  // the whole cellar would queue one full reload per wine.
+  private _scheduleRefresh() {
+    if (this._refreshTimer) clearTimeout(this._refreshTimer);
+    this._refreshTimer = window.setTimeout(() => {
+      this._refreshTimer = 0;
+      this._loadData();
+    }, 400);
   }
 
   private async _loadData() {
@@ -515,7 +566,13 @@ export class WineCellarCard extends LitElement {
 
   private _showToast(message: string) {
     this._toast = message;
-    setTimeout(() => (this._toast = ""), 2500);
+    // Each toast gets its own full 2.5s: the previous timer would otherwise
+    // still be running and cut the new message short.
+    if (this._toastTimer) clearTimeout(this._toastTimer);
+    this._toastTimer = window.setTimeout(() => {
+      this._toastTimer = 0;
+      this._toast = "";
+    }, 2500);
   }
 
   // --- Copy/Paste wine ---
@@ -804,13 +861,18 @@ export class WineCellarCard extends LitElement {
           updates: { cabinet_id: "", row: null, col: null, zone: "", depth: 0 },
         });
       }
-      for (let i = slotIndex + 1; i < this._zonePanelWines.length; i++) {
+      // Closing the gap is one renumbering of the zone, not one round trip per
+      // bottle behind the deleted slot — emptying slot 1 of a full 20-bottle
+      // bin used to mean nineteen calls, each with its own disk write.
+      const remaining = this._zonePanelWines
+        .filter((_, i) => i !== slotIndex)
+        .map((w) => w.id);
+      if (remaining.length) {
         await this.hass.callWS({
-          type: "wine_cellar/move_wine",
-          wine_id: this._zonePanelWines[i].id,
+          type: "wine_cellar/reorder_zone",
           cabinet_id: this._zonePanelCabinet.id,
           zone: this._zonePanelZone,
-          depth: i - 1,
+          wine_ids: remaining,
         });
       }
 
@@ -1499,7 +1561,30 @@ export class WineCellarCard extends LitElement {
   // cabinets the card already holds, and a stale count would point at moves
   // that have since been made.
   private get _arrangementFindings(): Finding[] {
-    return analyzeArrangement(this._wines, this._cabinets, this._dismissedArrangements);
+    // Read from render(), so it ran on every keystroke in the search box even
+    // though typing cannot change how the cellar is arranged. Cached against
+    // the three things it actually depends on — all replaced wholesale rather
+    // than mutated, so identity is a sound key.
+    if (
+      this._findingsCache &&
+      this._findingsCache.wines === this._wines &&
+      this._findingsCache.cabinets === this._cabinets &&
+      this._findingsCache.dismissed === this._dismissedArrangements
+    ) {
+      return this._findingsCache.findings;
+    }
+    const findings = analyzeArrangement(
+      this._wines,
+      this._cabinets,
+      this._dismissedArrangements
+    );
+    this._findingsCache = {
+      wines: this._wines,
+      cabinets: this._cabinets,
+      dismissed: this._dismissedArrangements,
+      findings,
+    };
+    return findings;
   }
 
   // "Leave it as it is" has to stick, or the count becomes a badge people

@@ -118,7 +118,24 @@
     };
 
     // Mock hass object
+    // The card subscribes to wine_cellar_updated so that work the backend does
+    // on its own becomes visible without the user prodding it. Mirrored here so
+    // that path is exercisable in the preview.
+    const mockEventListeners = new Set();
+    const fireWineCellarUpdated = () => {
+      for (const cb of mockEventListeners) cb({ event_type: "wine_cellar_updated" });
+    };
+    // Exposed so the event path can be driven from the console.
+    window.fireWineCellarUpdated = fireWineCellarUpdated;
+
     const mockHass = {
+      connection: {
+        subscribeEvents: async (cb, eventType) => {
+          if (eventType !== "wine_cellar_updated") return () => {};
+          mockEventListeners.add(cb);
+          return () => mockEventListeners.delete(cb);
+        },
+      },
       callWS: async (msg) => {
         switch (msg.type) {
           case "wine_cellar/get_wines":

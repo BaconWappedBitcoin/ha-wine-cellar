@@ -56,6 +56,9 @@ DEFAULT_CABINETS = [
 CONF_CABINETS = "cabinets"
 CONF_WINES = "wines"
 CONF_BARCODE_CACHE = "barcode_cache"
+# Enough that a normal cellar never evicts; small enough that the store
+# file cannot grow without bound from scanning alone.
+BARCODE_CACHE_MAX = 500
 CONF_BUY_LIST = "buy_list"
 CONF_WINE_HISTORY = "wine_history"
 CONF_SETTINGS = "settings"
@@ -98,4 +101,4 @@ SERVER_BACKUP_KEEP_CHOICES = [0, 5, 10, 20, 50]
 ATTR_TOTAL_BOTTLES = "total_bottles"
 ATTR_TOTAL_CAPACITY = "total_capacity"
 
-FRONTEND_VERSION = "20260822q"
+FRONTEND_VERSION = "20260823a"
