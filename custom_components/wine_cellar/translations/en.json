@@ -19,9 +19,12 @@
         "data": {
           "default_wine_type": "Default wine type for new entries",
           "gemini_api_key": "Google Gemini API key (for AI label recognition)",
-          "vivino_cellar_url": "Vivino cellar page URL (e.g. https://www.vivino.com/sv/cellars/123456)",
+          "vivino_cellar_url": "Vivino cellar page URL",
           "vivino_session_cookie": "Vivino session cookie (from your logged-in browser)",
           "vivino_auto_sync": "Automatically sync the Vivino cellar twice a day"
+        },
+        "data_description": {
+          "vivino_cellar_url": "Open your cellar in a browser and copy the address from the address bar. It ends with /cellars/ and your cellar number."
         }
       }
     },

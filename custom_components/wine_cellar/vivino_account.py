@@ -47,6 +47,29 @@ WWW_BASE = "https://www.vivino.com"
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
 MAX_PAGES = 60  # safety cap
 
+# Detail lookup for thin cellar records.
+#
+# Vivino's cellar endpoint serves a stripped-down record for wines still below
+# their data threshold (``statistics.status == "BelowThreshold"``): winery and
+# region are null and the image is the default_label.jpg placeholder. This hits
+# wines the user has just added themselves — precisely the ones they care about
+# most. The wine's own page does carry a real label image and a winery, so those
+# are fetched from there and filled in afterwards.
+ENRICH_SPACING_SECONDS = 1.0
+MAX_ENRICH_PER_SYNC = 25
+PLACEHOLDER_LABEL = "default_label"
+
+# The wine page gives the country as an ISO code while the rest of the data
+# carries localized names ("Italien", "Frankrike"). Without translation the
+# lookup would write "it" among all the "Italien". Unknown codes are left empty
+# rather than wrong.
+COUNTRY_NAMES = {
+    "it": "Italien", "fr": "Frankrike", "es": "Spanien", "pt": "Portugal",
+    "de": "Tyskland", "at": "Österrike", "us": "USA", "au": "Australien",
+    "cl": "Chile", "ar": "Argentina", "za": "Sydafrika", "nz": "Nya Zeeland",
+    "gr": "Grekland", "hu": "Ungern", "ro": "Rumänien", "se": "Sverige",
+}
+
 # Write-back pacing to stay under Vivino's rate limiting.
 PUSH_SPACING_SECONDS = 2.0
 MAX_PUSHES_PER_SYNC = 12
@@ -186,6 +209,56 @@ def _find_wine_array(node: Any) -> list[dict[str, Any]]:
     return best
 
 
+def _is_thin(wine: dict[str, Any]) -> bool:
+    """True when the cellar record lacks what the wine page can fill in.
+
+    The winery is the clearest marker: it is null in the cellar record for
+    wines below Vivino's data threshold, but present on the wine page.
+    """
+    return (
+        not wine.get("winery")
+        or PLACEHOLDER_LABEL in str(wine.get("image_url") or "")
+    )
+
+
+def _parse_wine_page(html: str) -> dict[str, str]:
+    """Pull image, winery, region and country out of a Vivino wine page.
+
+    The page is not Inertia but classically rendered, so the data sits in two
+    places: an ``ld+json`` block holding the image, and an HTML-escaped
+    ``light_winery`` inside the page's preloaded state. Both are read
+    defensively — if absent the field is left empty rather than breaking sync.
+    """
+    ut: dict[str, str] = {}
+
+    m = re.search(r'<script type="application/ld\+json">(.*?)</script>', html, re.S)
+    if m:
+        try:
+            bilder = json.loads(m.group(1)).get("image") or []
+            if bilder and PLACEHOLDER_LABEL not in str(bilder[0]):
+                ut["image_url"] = str(bilder[0])
+        except (ValueError, AttributeError, IndexError):
+            pass
+
+    m = re.search(r'&quot;light_winery&quot;:\{(.{0,400}?)\}', html)
+    if m:
+        raw = ("{" + m.group(1) + "}").replace("&quot;", '"') \
+            .replace("&amp;", "&").replace("&#39;", "'").replace("&#34;", '"')
+        try:
+            w = json.loads(raw)
+        except ValueError:
+            w = {}
+        if isinstance(w, dict):
+            if w.get("name"):
+                ut["winery"] = str(w["name"])
+            if w.get("region"):
+                ut["region"] = str(w["region"])
+            land = COUNTRY_NAMES.get(str(w.get("country") or "").lower())
+            if land:
+                ut["country"] = land
+    return ut
+
+
 class VivinoAccountClient:
     """Reads a user's Vivino cellar via the Inertia endpoint using a session cookie."""
 
@@ -200,6 +273,9 @@ class VivinoAccountClient:
         self.user_id: int | None = None
         self._session_rejected = False
         self.token_diagnostics: dict[str, Any] = {}
+        # Wine pages change rarely; the cache keeps the lookup to one request
+        # per wine per sync even if the same wine appears several times.
+        self._detail_cache: dict[str, dict[str, str]] = {}
         # Dedicated session so Vivino cookies never leak into HA's shared one.
         self._session: aiohttp.ClientSession | None = None
 
@@ -353,7 +429,72 @@ class VivinoAccountClient:
 
         wines = [w for w in (_parse_user_wine(r) for r in records) if w]
         _log_parse_outcome("cellar", records, wines)
+        await self._enrich_thin_wines(wines)
         return wines
+
+    async def _enrich_thin_wines(self, wines: list[dict[str, Any]]) -> None:
+        """Fill in image and winery for records the cellar endpoint left empty.
+
+        Only fields that are missing are touched, so an image set by hand is
+        never overwritten. Fails quietly per wine — one broken wine page must
+        not stop an otherwise working sync.
+        """
+        thin = [w for w in wines if _is_thin(w) and w.get("vivino_id")]
+        if not thin:
+            return
+        # Better an explicit limit than a sync fetching hundreds of pages on
+        # first import. What is skipped gets logged — a silent truncation would
+        # look like everything had been fetched.
+        if len(thin) > MAX_ENRICH_PER_SYNC:
+            _LOGGER.info(
+                "Vivino: %d thin poster, hämtar details för de första %d "
+                "denna synk; resten tas nästa gång",
+                len(thin), MAX_ENRICH_PER_SYNC,
+            )
+            thin = thin[:MAX_ENRICH_PER_SYNC]
+
+        succeeded_count = 0
+        for i, wine in enumerate(thin):
+            if i:
+                await asyncio.sleep(ENRICH_SPACING_SECONDS)
+            extra = await self._fetch_wine_details(str(wine["vivino_id"]))
+            if not extra:
+                continue
+            for key, value in extra.items():
+                if key == "image_url":
+                    if PLACEHOLDER_LABEL in str(wine.get("image_url") or ""):
+                        wine["image_url"] = value
+                elif not wine.get(key):
+                    wine[key] = value
+            succeeded_count += 1
+        _LOGGER.debug(
+            "Vivino: efterhämtade details för %d av %d thin poster",
+            succeeded_count, len(thin),
+        )
+
+    async def _fetch_wine_details(self, vintage_id: str) -> dict[str, str]:
+        """Fetch a wine page and extract what the cellar record was missing."""
+        if vintage_id in self._detail_cache:
+            return self._detail_cache[vintage_id]
+        try:
+            session = self._get_session()
+            async with session.get(
+                f"{WWW_BASE}/wines/{vintage_id}",
+                headers={**HEADERS, "Cookie": self._cookie, "Accept": "text/html"},
+                timeout=REQUEST_TIMEOUT,
+            ) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug(
+                        "Vivino vinsida %s -> HTTP %s", vintage_id, resp.status
+                    )
+                    return {}
+                html = await resp.text()
+        except Exception as err:  # noqa: BLE001 – får aldrig stoppa synken
+            _LOGGER.debug("Kunde inte hämta vinsida %s: %s", vintage_id, err)
+            return {}
+        details = _parse_wine_page(html)
+        self._detail_cache[vintage_id] = details
+        return details
 
     # ── Write-back (Cork Dork -> Vivino) ─────────────────────────────
 
@@ -746,6 +887,37 @@ async def _reconcile_cellar(
             wine_data["source"] = "vivino_cellar"
             storage.add_wine(wine_data)
             added += 1
+
+    # ── Fill gaps on wines that already exist ────────────────────────
+    #
+    # The plan above only adds and removes bottles; fields on existing wines
+    # were never touched. That left a wine imported while Vivino still lacked a
+    # winery and label image empty forever, even after Vivino filled it in.
+    #
+    # Only empty fields are filled, and the image is replaced only when it is
+    # the placeholder, so anything entered by hand stays untouched.
+    enriched_count = 0
+    if cellar:
+        by_id = {str(w.get("vivino_id")): w for w in cellar if w.get("vivino_id")}
+        for local in storage.wines:
+            fresh = by_id.get(str(local.get("vivino_id") or ""))
+            if not fresh:
+                continue
+            changes: dict[str, Any] = {}
+            for key in ("winery", "region", "country", "grape_variety",
+                           "rating", "ratings_count", "alcohol", "description"):
+                if not local.get(key) and fresh.get(key):
+                    changes[key] = fresh[key]
+            image = str(fresh.get("image_url") or "")
+            if (image and PLACEHOLDER_LABEL not in image
+                    and PLACEHOLDER_LABEL in str(local.get("image_url") or "")):
+                changes["image_url"] = image
+            if changes:
+                storage.update_wine(local.get("id"), changes)
+                enriched_count += 1
+    result["cellar_enriched"] = enriched_count
+    if enriched_count:
+        _LOGGER.debug("Vivino: fyllde i luckor på %d befintliga viner", enriched_count)
 
     # ── Apply Vivino → Cork Dork removals (unless suspicious) ─────────
     removed = 0
