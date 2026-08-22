@@ -57,6 +57,19 @@ def _get_metadata_currency(hass: HomeAssistant) -> str:
     return storage.settings.get(CONF_METADATA_CURRENCY, DEFAULT_METADATA_CURRENCY)
 
 
+def _select_wines(storage: Any, wine_ids: list[str] | None) -> list[dict[str, Any]]:
+    """All wines, or just the requested ids, keeping the stored order.
+
+    Unknown ids are ignored rather than treated as an error: the frontend's
+    list can be a moment stale, and refreshing the wines that do exist beats
+    refusing the whole batch.
+    """
+    if not wine_ids:
+        return list(storage.wines)
+    wanted = set(wine_ids)
+    return [w for w in storage.wines if w.get("id") in wanted]
+
+
 def _build_ai_updates(wine: dict[str, Any], result: dict[str, Any], currency: str = "USD") -> dict[str, Any]:
     """Build a wine `updates` dict from a Gemini analyze_single_wine result."""
     updates: dict[str, Any] = {}
@@ -906,7 +919,10 @@ async def ws_analyze_single_wine(
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "wine_cellar/batch_analyze_wines"}
+    {
+        vol.Required("type"): "wine_cellar/batch_analyze_wines",
+        vol.Optional("wine_ids"): [str],
+    }
 )
 @websocket_api.async_response
 async def ws_batch_analyze_wines(
@@ -914,7 +930,7 @@ async def ws_batch_analyze_wines(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Batch AI analysis: run full analyze_single_wine on every wine."""
+    """Batch AI analysis: run analyze_single_wine on every wine, or a subset."""
     gemini = hass.data[DOMAIN].get("gemini")
     if not gemini:
         connection.send_result(
@@ -924,7 +940,7 @@ async def ws_batch_analyze_wines(
         return
 
     storage = hass.data[DOMAIN]["storage"]
-    wines = storage.wines
+    wines = _select_wines(storage, msg.get("wine_ids"))
     if not wines:
         connection.send_result(msg["id"], {"error": "No wines to analyze."})
         return
@@ -977,6 +993,7 @@ async def ws_batch_analyze_wines(
         vol.Required("type"): "wine_cellar/batch_refresh_vivino",
         vol.Optional("photo_mode", default="keep"): vol.In(["keep", "replace"]),
         vol.Optional("ai_fallback", default="skip"): vol.In(["skip", "use"]),
+        vol.Optional("wine_ids"): [str],
     }
 )
 @websocket_api.async_response
@@ -985,7 +1002,7 @@ async def ws_batch_refresh_vivino(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Batch Vivino refresh: look up every wine on Vivino and update data."""
+    """Batch Vivino refresh: look up every wine on Vivino, or a subset."""
     vivino = hass.data[DOMAIN].get("vivino")
     if not vivino:
         connection.send_result(
@@ -995,7 +1012,7 @@ async def ws_batch_refresh_vivino(
         return
 
     storage = hass.data[DOMAIN]["storage"]
-    wines = storage.wines
+    wines = _select_wines(storage, msg.get("wine_ids"))
     if not wines:
         connection.send_result(msg["id"], {"error": "No wines to refresh."})
         return

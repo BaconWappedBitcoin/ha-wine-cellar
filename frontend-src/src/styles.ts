@@ -343,6 +343,14 @@ export const sharedStyles = css`
     gap: 2px;
   }
 
+  .depth-panel-rack {
+    font-size: 0.78em;
+    font-weight: 500;
+    color: var(--wc-text-secondary, #888);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
   .depth-panel-subtitle {
     font-size: 0.8em;
     font-weight: 400;

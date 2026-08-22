@@ -924,7 +924,7 @@ export class RackSettingsDialog extends LitElement {
                         <input
                           type="text"
                           class="row-name-input"
-                          .value=${sr?.name || "Storage"}
+                          .value=${sr?.name ?? ""}
                           @input=${(e: InputEvent) =>
                             this._updateStorageRowName(row, (e.target as HTMLInputElement).value)}
                           @click=${(e: Event) => e.stopPropagation()}

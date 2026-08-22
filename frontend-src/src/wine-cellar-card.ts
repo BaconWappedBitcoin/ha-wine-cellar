@@ -906,16 +906,19 @@ export class WineCellarCard extends LitElement {
     }
     this._activeTab = "all";
 
+    // Mark the bottle on the rack drawing regardless of whether a side panel
+    // opens — for a plain bottom-zone bottle the drawing is the only place it
+    // can be pointed at.
+    this._highlightWineId = wine.id;
+
     if (wine.row !== null && wine.col !== null) {
       this._openRackPanel(loc.cabinet);
     } else if (loc.zone && loc.zone !== "bottom" && loc.storageRow) {
       this._openZonePanel(loc.cabinet, loc.zone, loc.storageRow);
     } else {
       this._showToast(`In ${loc.text}`);
-      return;
     }
 
-    this._highlightWineId = wine.id;
     this.updateComplete.then(() => {
       this.shadowRoot?.getElementById("highlight-slot")?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
@@ -1714,6 +1717,7 @@ export class WineCellarCard extends LitElement {
                         <cabinet-grid
                           .cabinet=${cab}
                           .wines=${this._getCabinetWines(cab.id)}
+                          .highlightWineId=${this._highlightWineId}
                           @cell-click=${this._onCellClick}
                           @zone-click=${this._onZoneClick}
                           @zone-container-click=${this._onZoneContainerClick}
@@ -1733,6 +1737,7 @@ export class WineCellarCard extends LitElement {
                           <cabinet-grid
                             .cabinet=${cab}
                             .wines=${this._getCabinetWines(cab.id)}
+                            .highlightWineId=${this._highlightWineId}
                             @cell-click=${this._onCellClick}
                             @zone-click=${this._onZoneClick}
                             @zone-container-click=${this._onZoneContainerClick}
@@ -2208,6 +2213,9 @@ export class WineCellarCard extends LitElement {
               <div class="depth-panel open">
                 <div class="depth-panel-header">
                   <span class="depth-panel-title">
+                    ${this._zonePanelCabinet
+                      ? html`<span class="depth-panel-rack">${this._zonePanelCabinet.name}</span>`
+                      : nothing}
                     ${this._zonePanelName}
                     <span class="depth-panel-subtitle">
                       ${this._zonePanelWines.length}/${this._zonePanelCapacity}

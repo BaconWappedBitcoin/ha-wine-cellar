@@ -415,6 +415,14 @@ const sharedStyles = i$3 `
     gap: 2px;
   }
 
+  .depth-panel-rack {
+    font-size: 0.78em;
+    font-weight: 500;
+    color: var(--wc-text-secondary, #888);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
   .depth-panel-subtitle {
     font-size: 0.8em;
     font-weight: 400;
@@ -861,6 +869,9 @@ let CabinetGrid = class CabinetGrid extends i {
     constructor() {
         super(...arguments);
         this.wines = [];
+        // Set briefly by "locate" so the bottle is marked on the rack drawing too,
+        // not just in the side panel's slot list.
+        this.highlightWineId = null;
         this._dragOverCell = null;
         // --- Long press (mobile move) ---
         this._longPressTimer = null;
@@ -1077,7 +1088,7 @@ let CabinetGrid = class CabinetGrid extends i {
             const bottleKey = `${zoneKey}-${wine.id}`;
             return b `
             <div
-              class="zone-bottle ${this._dragOverCell === bottleKey ? "drag-over" : ""}"
+              class="zone-bottle ${this._dragOverCell === bottleKey ? "drag-over" : ""} ${wine.id === this.highlightWineId ? "locate-highlight" : ""}"
               style="background: ${WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red}"
               data-wine-id="${wine.id}"
               draggable="true"
@@ -1113,7 +1124,12 @@ let CabinetGrid = class CabinetGrid extends i {
                 const d = w.depth || 0;
                 return d >= start && d < start + boxSize;
             });
-            return { size: boxSize, start, wineCount: boxWines.length };
+            return {
+                size: boxSize,
+                start,
+                wineCount: boxWines.length,
+                hasHighlight: !!this.highlightWineId && boxWines.some((w) => w.id === this.highlightWineId),
+            };
         });
         return b `
       <div class="bottom-zone zone-box-row ${isDragOver ? "drag-over" : ""}"
@@ -1124,7 +1140,7 @@ let CabinetGrid = class CabinetGrid extends i {
         <div class="bottom-zone-label">📦 ${name} <span class="zone-count">${wines.length}/${capacity}</span></div>
         <div class="zone-box-grid">
           ${boxSegments.map((seg) => b `
-            <div class="zone-box-item ${seg.wineCount > 0 ? "has-wine" : ""}">
+            <div class="zone-box-item ${seg.wineCount > 0 ? "has-wine" : ""} ${seg.hasHighlight ? "locate-highlight" : ""}">
               <div class="zone-box-shape">
                 <div class="box-lid"></div>
                 <div class="box-body"><span class="box-count">${seg.wineCount}/${seg.size}</span></div>
@@ -1155,9 +1171,10 @@ let CabinetGrid = class CabinetGrid extends i {
             const ringColor = frontWine ? this._brightenColor(bgColor) : "";
             const cellKey = `${row}-${col}`;
             const isDragOver = this._dragOverCell === cellKey;
+            const isHighlighted = !!this.highlightWineId && wines.some((w) => w.id === this.highlightWineId);
             return b `
             <div
-              class="cell ${frontWine ? "filled" : "empty"} ${isDragOver ? "drag-over" : ""}"
+              class="cell ${frontWine ? "filled" : "empty"} ${isDragOver ? "drag-over" : ""} ${isHighlighted ? "locate-highlight" : ""}"
               style=${frontWine ? `background: ${bgColor}; --bottle-type-color: ${ringColor}` : ""}
               draggable=${frontWine ? "true" : "false"}
               @click=${() => this._onCellClick(row, col, frontWine, wineCount, cabinetDepth, wines)}
@@ -1475,6 +1492,29 @@ CabinetGrid.styles = [
 
       .cell.filled:hover .bottle-label {
         display: block;
+      }
+
+      /* "Locate" marker: a pulsing ring drawn outside the element so it
+         reads on a filled bottle, an empty slot and a box alike. */
+      .locate-highlight {
+        position: relative;
+        z-index: 3;
+        animation: locatePulse 1.2s ease-in-out 2;
+        border-radius: inherit;
+      }
+
+      @keyframes locatePulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(255, 193, 7, 0);
+          outline: 2px solid rgba(255, 193, 7, 0.9);
+          outline-offset: 1px;
+        }
+        50% {
+          box-shadow: 0 0 10px 4px rgba(255, 193, 7, 0.65);
+          outline: 2px solid rgba(255, 193, 7, 1);
+          outline-offset: 2px;
+        }
       }
 
       .cell .disposition {
@@ -1836,6 +1876,9 @@ __decorate([
 __decorate([
     n({ attribute: false })
 ], CabinetGrid.prototype, "wines", void 0);
+__decorate([
+    n({ attribute: false })
+], CabinetGrid.prototype, "highlightWineId", void 0);
 __decorate([
     r()
 ], CabinetGrid.prototype, "_dragOverCell", void 0);
@@ -4302,14 +4345,45 @@ let AddWineDialog = class AddWineDialog extends i {
     _updateField(field, value) {
         this._wineData = { ...this._wineData, [field]: value };
     }
-    _selectZone(zoneId) {
-        // Land after the last occupied depth in that zone instead of always
-        // depth 0 — otherwise a second bottle added to the same zone collides
-        // with whatever's already at depth 0.
-        const depth = this.wines
-            .filter((w) => w.cabinet_id === this._wineData.cabinet_id && w.zone === zoneId)
-            .reduce((max, w) => Math.max(max, w.depth || 0), -1) + 1;
-        this._wineData = { ...this._wineData, zone: zoneId, row: null, col: null, depth };
+    // A bin's real capacity: for a box row the sum of its boxes, otherwise the
+    // row's own capacity.
+    _zoneUsage(sr) {
+        const capacity = sr.type === "box"
+            ? (sr.boxes || []).reduce((sum, b) => sum + b, 0) || sr.capacity || 0
+            : sr.capacity || 0;
+        const occupied = new Set(this.wines
+            .filter((w) => w.cabinet_id === this._wineData.cabinet_id && w.zone === `storage-${sr.row}`)
+            .map((w) => w.depth || 0));
+        // First free slot rather than "one past the last": a bottle removed from
+        // the middle leaves a gap that should be reused, not skipped over.
+        let nextDepth = 0;
+        while (occupied.has(nextDepth))
+            nextDepth++;
+        return {
+            used: occupied.size,
+            capacity,
+            nextDepth,
+            full: capacity > 0 && (occupied.size >= capacity || nextDepth >= capacity),
+        };
+    }
+    _selectZone(sr) {
+        // Adding a bottle used to append past the end of a full bin, silently
+        // growing it beyond its configured capacity. Refuse instead, the way
+        // drag-and-drop and paste already do.
+        const { used, capacity, nextDepth, full } = this._zoneUsage(sr);
+        const label = sr.name || (sr.type === "box" ? "This box" : "This bin");
+        if (full) {
+            this._error = `${label} is full (${used}/${capacity}). Free a slot, or raise its capacity in Manage Racks.`;
+            return;
+        }
+        this._error = "";
+        this._wineData = {
+            ...this._wineData,
+            zone: `storage-${sr.row}`,
+            row: null,
+            col: null,
+            depth: nextDepth,
+        };
     }
     async _addWine() {
         this._loading = true;
@@ -4748,13 +4822,21 @@ let AddWineDialog = class AddWineDialog extends i {
                 style="font-size:0.8em;padding:6px 10px"
                 @click=${() => this._updateField("zone", "")}
               >None — use grid Row/Col</button>
-              ${zones.map((sr) => b `
-                <button
-                  class="btn ${this._wineData.zone === `storage-${sr.row}` ? "btn-primary" : "btn-outline"}"
-                  style="font-size:0.8em;padding:6px 10px"
-                  @click=${() => this._selectZone(`storage-${sr.row}`)}
-                >${sr.name || (sr.type === "box" ? "Box" : "Bulk Bin")}</button>
-              `)}
+              ${zones.map((sr) => {
+            const usage = this._zoneUsage(sr);
+            const selected = this._wineData.zone === `storage-${sr.row}`;
+            return b `
+                  <button
+                    class="btn ${selected ? "btn-primary" : "btn-outline"}"
+                    style="font-size:0.8em;padding:6px 10px${usage.full ? ";opacity:0.5" : ""}"
+                    title=${usage.full ? "Full — free a slot or raise its capacity" : ""}
+                    @click=${() => this._selectZone(sr)}
+                  >
+                    ${sr.name || (sr.type === "box" ? "Box" : "Bulk Bin")}
+                    <span style="opacity:0.75">${usage.used}/${usage.capacity}</span>
+                  </button>
+                `;
+        })}
             </div>
           </div>
         ` : A}
@@ -4804,6 +4886,32 @@ let AddWineDialog = class AddWineDialog extends i {
         if (d.cabinet_id && !d.zone && (d.row == null || d.col == null || isNaN(d.row) || isNaN(d.col))) {
             this._error = "Pick a zone, or enter both Row and Column, so the bottle has a findable spot.";
             return;
+        }
+        const cabinet = this.cabinets.find((c) => c.id === d.cabinet_id);
+        if (cabinet && !d.zone && d.row != null && d.col != null) {
+            if (d.row < 0 || d.row >= cabinet.rows || d.col < 0 || d.col >= cabinet.cols) {
+                this._error = `That slot is outside ${cabinet.name} (${cabinet.rows} rows × ${cabinet.cols} columns).`;
+                return;
+            }
+            const isStorageRow = (cabinet.storage_rows || []).some((sr) => sr.row === d.row);
+            if (isStorageRow) {
+                this._error = "That row is a bin or box, not grid slots — pick it from the zone list above.";
+                return;
+            }
+            // Stack behind whatever is already in the slot, up to the rack's depth,
+            // instead of landing on top of another bottle at depth 0.
+            const occupied = new Set(this.wines
+                .filter((w) => w.cabinet_id === d.cabinet_id && w.row === d.row && w.col === d.col)
+                .map((w) => w.depth || 0));
+            const rackDepth = cabinet.depth || 1;
+            let depth = 0;
+            while (occupied.has(depth))
+                depth++;
+            if (depth >= rackDepth) {
+                this._error = `Row ${d.row + 1}, column ${d.col + 1} is full (${occupied.size}/${rackDepth} deep).`;
+                return;
+            }
+            this._wineData = { ...this._wineData, depth };
         }
         this._error = "";
         this._goToStep("confirm");
@@ -5937,7 +6045,7 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
                         <input
                           type="text"
                           class="row-name-input"
-                          .value=${sr?.name || "Storage"}
+                          .value=${sr?.name ?? ""}
                           @input=${(e) => this._updateStorageRowName(row, e.target.value)}
                           @click=${(e) => e.stopPropagation()}
                           placeholder="Zone name"
@@ -7434,6 +7542,8 @@ let InventoryDialog = class InventoryDialog extends i {
         this._backupKeep = 10;
         this._backupKeepChoices = [0, 5, 10, 20, 50];
         this._storageInfo = null;
+        this._enriching = "";
+        this._confirmEnrich = "";
         this._viewMode = "inventory";
         this._historyItems = [];
         this._historyLoading = false;
@@ -7448,6 +7558,7 @@ let InventoryDialog = class InventoryDialog extends i {
             this._detailWine = null;
             this._statusMsg = "";
             this._confirmRestore = false;
+            this._confirmEnrich = "";
             this._confirmImport = false;
             this._pendingImport = null;
             this._showServerRestore = false;
@@ -7583,6 +7694,50 @@ let InventoryDialog = class InventoryDialog extends i {
     }
     _winesWithoutPairings() {
         return this.wines.filter((w) => !splitMulti(w.food_pairings).length).length;
+    }
+    // ── Enrichment ────────────────────────────────────────────────
+    // Vivino is the *only* source of food pairings; it also supplies the
+    // description. Rating and photo are deliberately not part of the test —
+    // Vivino has no match for plenty of bottles, and a wine that will never
+    // gain a photo must not sit in this list forever nagging the user.
+    // `vivino_updated_at` drops a wine out once it has actually been looked up.
+    _winesNeedingVivino() {
+        return this.wines.filter((w) => !w.vivino_updated_at && (!w.food_pairings || !w.description));
+    }
+    // The AI supplies the drinking verdict and window; it never returns food
+    // pairings. Critic scores are excluded for the same reason as the photo
+    // above — the AI legitimately has none for many wines.
+    _winesNeedingAI() {
+        return this.wines.filter((w) => !w.ai_updated_at && (!w.disposition || !w.drink_window));
+    }
+    async _runEnrich(source) {
+        const wines = source === "vivino" ? this._winesNeedingVivino() : this._winesNeedingAI();
+        this._confirmEnrich = "";
+        if (!wines.length)
+            return;
+        this._enriching = source;
+        this._statusMsg = `Refreshing ${wines.length} wines via ${source === "vivino" ? "Vivino" : "AI"}…`;
+        try {
+            const result = await this.hass.callWS({
+                type: source === "vivino" ? "wine_cellar/batch_refresh_vivino" : "wine_cellar/batch_analyze_wines",
+                wine_ids: wines.map((w) => w.id),
+            });
+            if (result?.error) {
+                this._statusMsg = `Refresh failed: ${result.error}`;
+            }
+            else {
+                const updated = result?.updated ?? 0;
+                const errors = result?.errors ?? 0;
+                this._statusMsg =
+                    `Updated ${updated} of ${result?.total ?? wines.length} wines` +
+                        (errors ? ` — ${errors} could not be looked up.` : ".");
+                this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+            }
+        }
+        catch (err) {
+            this._statusMsg = `Refresh failed: ${err.message || err}`;
+        }
+        this._enriching = "";
     }
     // ── Filtering & sorting ───────────────────────────────────────
     _matchesPreset(wine, currentYear, recentCutoff) {
@@ -7815,6 +7970,80 @@ let InventoryDialog = class InventoryDialog extends i {
             : A}
         <div class="inv-footer-btns">
           <button class="inv-btn" @click=${this._clearHistory}>Clear History</button>
+        </div>
+      </div>
+    `;
+    }
+    // Sits under the list: how many bottles are still missing data, and the two
+    // actions that can fill it. Each source is labelled with what it actually
+    // supplies, so nobody runs AI hoping for food pairings.
+    _renderEnrichBar() {
+        const needVivino = this._winesNeedingVivino().length;
+        const needAI = this._winesNeedingAI().length;
+        if (!needVivino && !needAI)
+            return A;
+        const busy = !!this._enriching;
+        return b `
+      <div class="inv-enrich">
+        <span class="inv-enrich-text">
+          ${needVivino
+            ? b `<strong>${needVivino}</strong> never looked up on Vivino (pairings,
+                description)`
+            : A}${needVivino && needAI ? " · " : ""}${needAI
+            ? b `<strong>${needAI}</strong> never analyzed by AI (drink window,
+                verdict)`
+            : A}
+        </span>
+        <span class="inv-enrich-btns">
+          ${needVivino
+            ? b `<button
+                class="inv-btn"
+                ?disabled=${busy}
+                @click=${() => (this._confirmEnrich = "vivino")}
+              >
+                ${this._enriching === "vivino" ? "Filling…" : `Fill from Vivino (${needVivino})`}
+              </button>`
+            : A}
+          ${needAI && this.hasGemini
+            ? b `<button
+                class="inv-btn"
+                ?disabled=${busy}
+                @click=${() => (this._confirmEnrich = "ai")}
+              >
+                ${this._enriching === "ai" ? "Analyzing…" : `Analyze with AI (${needAI})`}
+              </button>`
+            : A}
+        </span>
+      </div>
+    `;
+    }
+    _renderEnrichConfirm() {
+        if (!this._confirmEnrich)
+            return A;
+        const source = this._confirmEnrich;
+        const count = source === "vivino" ? this._winesNeedingVivino().length : this._winesNeedingAI().length;
+        return b `
+      <div class="inv-confirm-overlay" @click=${() => (this._confirmEnrich = "")}>
+        <div class="inv-confirm-box" @click=${(e) => e.stopPropagation()}>
+          <h3>${source === "vivino" ? "🍇 Fill from Vivino?" : "🤖 Analyze with AI?"}</h3>
+          <p>
+            ${count} wine${count > 1 ? "s" : ""} will be looked up one at a time. This is a
+            slow, rate-limited network call — expect it to run for a while, and leave the
+            dialog open until it finishes.
+          </p>
+          <div class="inv-confirm-stats">
+            ${source === "vivino"
+            ? "Fills food pairings, description, rating and the label photo where Vivino has them. Existing values are kept."
+            : "Fills the drinking verdict, drink window and critic scores where the AI can infer them. Existing values are kept."}
+          </div>
+          <div class="inv-confirm-btns">
+            <button class="inv-confirm-cancel" @click=${() => (this._confirmEnrich = "")}>
+              Cancel
+            </button>
+            <button class="inv-confirm-go" @click=${() => this._runEnrich(source)}>
+              Start
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -8328,7 +8557,8 @@ let InventoryDialog = class InventoryDialog extends i {
           ${missingPairings
             ? b `<small class="inv-filter-hint"
                 >${missingPairings} wine${missingPairings > 1 ? "s have" : " has"} no pairing
-                data — refresh them via Vivino or AI to make them findable here.</small
+                data. Only Vivino supplies pairings — use “Fill from Vivino” below the
+                list.</small
               >`
             : A}
         </label>
@@ -8675,6 +8905,8 @@ let InventoryDialog = class InventoryDialog extends i {
             : filteredWines.map((w) => this._renderWineItem(w))}
           </div>
 
+          ${this._renderEnrichBar()}
+
           <!-- Footer -->
           <div class="inv-footer">
             <span class="inv-count">
@@ -8813,6 +9045,8 @@ let InventoryDialog = class InventoryDialog extends i {
                 </div>
               `
             : A}
+
+          ${this._renderEnrichConfirm()}
 
           <!-- CSV Import Mode Overlay -->
           ${this._confirmImport && this._pendingImport
@@ -9158,6 +9392,34 @@ InventoryDialog.styles = [
 
       .inv-drink-by {
         opacity: 0.8;
+      }
+
+      .inv-enrich {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 0 16px 10px;
+        padding: 8px 10px;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        font-size: 0.75em;
+        color: var(--wc-text-secondary);
+      }
+
+      .inv-enrich-text {
+        line-height: 1.4;
+      }
+
+      .inv-enrich-text strong {
+        color: var(--wc-text);
+      }
+
+      .inv-enrich-btns {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
       }
 
       .inv-storage-info {
@@ -9666,6 +9928,12 @@ __decorate([
 __decorate([
     r()
 ], InventoryDialog.prototype, "_storageInfo", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_enriching", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_confirmEnrich", void 0);
 __decorate([
     r()
 ], InventoryDialog.prototype, "_viewMode", void 0);
@@ -10426,6 +10694,10 @@ let WineCellarCard = class WineCellarCard extends i {
             return;
         }
         this._activeTab = "all";
+        // Mark the bottle on the rack drawing regardless of whether a side panel
+        // opens — for a plain bottom-zone bottle the drawing is the only place it
+        // can be pointed at.
+        this._highlightWineId = wine.id;
         if (wine.row !== null && wine.col !== null) {
             this._openRackPanel(loc.cabinet);
         }
@@ -10434,9 +10706,7 @@ let WineCellarCard = class WineCellarCard extends i {
         }
         else {
             this._showToast(`In ${loc.text}`);
-            return;
         }
-        this._highlightWineId = wine.id;
         this.updateComplete.then(() => {
             this.shadowRoot?.getElementById("highlight-slot")?.scrollIntoView({ behavior: "smooth", block: "center" });
         });
@@ -11221,6 +11491,7 @@ let WineCellarCard = class WineCellarCard extends i {
                         <cabinet-grid
                           .cabinet=${cab}
                           .wines=${this._getCabinetWines(cab.id)}
+                          .highlightWineId=${this._highlightWineId}
                           @cell-click=${this._onCellClick}
                           @zone-click=${this._onZoneClick}
                           @zone-container-click=${this._onZoneContainerClick}
@@ -11238,6 +11509,7 @@ let WineCellarCard = class WineCellarCard extends i {
                           <cabinet-grid
                             .cabinet=${cab}
                             .wines=${this._getCabinetWines(cab.id)}
+                            .highlightWineId=${this._highlightWineId}
                             @cell-click=${this._onCellClick}
                             @zone-click=${this._onZoneClick}
                             @zone-container-click=${this._onZoneContainerClick}
@@ -11701,6 +11973,9 @@ let WineCellarCard = class WineCellarCard extends i {
               <div class="depth-panel open">
                 <div class="depth-panel-header">
                   <span class="depth-panel-title">
+                    ${this._zonePanelCabinet
+                ? b `<span class="depth-panel-rack">${this._zonePanelCabinet.name}</span>`
+                : A}
                     ${this._zonePanelName}
                     <span class="depth-panel-subtitle">
                       ${this._zonePanelWines.length}/${this._zonePanelCapacity}

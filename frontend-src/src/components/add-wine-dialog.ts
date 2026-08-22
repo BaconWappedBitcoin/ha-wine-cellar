@@ -4,6 +4,7 @@ import {
   Wine,
   Cabinet,
   BarcodeLookupResult,
+  StorageRow,
   WineType,
   WINE_TYPE_LABELS,
 } from "../models";
@@ -652,14 +653,48 @@ export class AddWineDialog extends LitElement {
     this._wineData = { ...this._wineData, [field]: value };
   }
 
-  private _selectZone(zoneId: string) {
-    // Land after the last occupied depth in that zone instead of always
-    // depth 0 — otherwise a second bottle added to the same zone collides
-    // with whatever's already at depth 0.
-    const depth = this.wines
-      .filter((w) => w.cabinet_id === this._wineData.cabinet_id && w.zone === zoneId)
-      .reduce((max, w) => Math.max(max, w.depth || 0), -1) + 1;
-    this._wineData = { ...this._wineData, zone: zoneId, row: null, col: null, depth };
+  // A bin's real capacity: for a box row the sum of its boxes, otherwise the
+  // row's own capacity.
+  private _zoneUsage(sr: StorageRow) {
+    const capacity =
+      sr.type === "box"
+        ? (sr.boxes || []).reduce((sum, b) => sum + b, 0) || sr.capacity || 0
+        : sr.capacity || 0;
+    const occupied = new Set(
+      this.wines
+        .filter((w) => w.cabinet_id === this._wineData.cabinet_id && w.zone === `storage-${sr.row}`)
+        .map((w) => w.depth || 0)
+    );
+    // First free slot rather than "one past the last": a bottle removed from
+    // the middle leaves a gap that should be reused, not skipped over.
+    let nextDepth = 0;
+    while (occupied.has(nextDepth)) nextDepth++;
+    return {
+      used: occupied.size,
+      capacity,
+      nextDepth,
+      full: capacity > 0 && (occupied.size >= capacity || nextDepth >= capacity),
+    };
+  }
+
+  private _selectZone(sr: StorageRow) {
+    // Adding a bottle used to append past the end of a full bin, silently
+    // growing it beyond its configured capacity. Refuse instead, the way
+    // drag-and-drop and paste already do.
+    const { used, capacity, nextDepth, full } = this._zoneUsage(sr);
+    const label = sr.name || (sr.type === "box" ? "This box" : "This bin");
+    if (full) {
+      this._error = `${label} is full (${used}/${capacity}). Free a slot, or raise its capacity in Manage Racks.`;
+      return;
+    }
+    this._error = "";
+    this._wineData = {
+      ...this._wineData,
+      zone: `storage-${sr.row}`,
+      row: null,
+      col: null,
+      depth: nextDepth,
+    };
   }
 
   private async _addWine() {
@@ -1134,13 +1169,21 @@ export class AddWineDialog extends LitElement {
                 style="font-size:0.8em;padding:6px 10px"
                 @click=${() => this._updateField("zone", "")}
               >None — use grid Row/Col</button>
-              ${zones.map((sr) => html`
-                <button
-                  class="btn ${this._wineData.zone === `storage-${sr.row}` ? "btn-primary" : "btn-outline"}"
-                  style="font-size:0.8em;padding:6px 10px"
-                  @click=${() => this._selectZone(`storage-${sr.row}`)}
-                >${sr.name || (sr.type === "box" ? "Box" : "Bulk Bin")}</button>
-              `)}
+              ${zones.map((sr) => {
+                const usage = this._zoneUsage(sr);
+                const selected = this._wineData.zone === `storage-${sr.row}`;
+                return html`
+                  <button
+                    class="btn ${selected ? "btn-primary" : "btn-outline"}"
+                    style="font-size:0.8em;padding:6px 10px${usage.full ? ";opacity:0.5" : ""}"
+                    title=${usage.full ? "Full — free a slot or raise its capacity" : ""}
+                    @click=${() => this._selectZone(sr)}
+                  >
+                    ${sr.name || (sr.type === "box" ? "Box" : "Bulk Bin")}
+                    <span style="opacity:0.75">${usage.used}/${usage.capacity}</span>
+                  </button>
+                `;
+              })}
             </div>
           </div>
         ` : nothing}
@@ -1194,6 +1237,35 @@ export class AddWineDialog extends LitElement {
       this._error = "Pick a zone, or enter both Row and Column, so the bottle has a findable spot.";
       return;
     }
+
+    const cabinet = this.cabinets.find((c) => c.id === d.cabinet_id);
+    if (cabinet && !d.zone && d.row != null && d.col != null) {
+      if (d.row < 0 || d.row >= cabinet.rows || d.col < 0 || d.col >= cabinet.cols) {
+        this._error = `That slot is outside ${cabinet.name} (${cabinet.rows} rows × ${cabinet.cols} columns).`;
+        return;
+      }
+      const isStorageRow = (cabinet.storage_rows || []).some((sr) => sr.row === d.row);
+      if (isStorageRow) {
+        this._error = "That row is a bin or box, not grid slots — pick it from the zone list above.";
+        return;
+      }
+      // Stack behind whatever is already in the slot, up to the rack's depth,
+      // instead of landing on top of another bottle at depth 0.
+      const occupied = new Set(
+        this.wines
+          .filter((w) => w.cabinet_id === d.cabinet_id && w.row === d.row && w.col === d.col)
+          .map((w) => w.depth || 0)
+      );
+      const rackDepth = cabinet.depth || 1;
+      let depth = 0;
+      while (occupied.has(depth)) depth++;
+      if (depth >= rackDepth) {
+        this._error = `Row ${d.row + 1}, column ${d.col + 1} is full (${occupied.size}/${rackDepth} deep).`;
+        return;
+      }
+      this._wineData = { ...this._wineData, depth };
+    }
+
     this._error = "";
     this._goToStep("confirm");
   }

@@ -272,6 +272,32 @@
             mockServerBackups.splice(bIdx, 1);
             return { success: true, filename: msg.filename };
           }
+          case "wine_cellar/batch_refresh_vivino": {
+            const vIds = msg.wine_ids || mockWines.map((w) => w.id);
+            let vN = 0;
+            for (const w of mockWines) {
+              if (!vIds.includes(w.id)) continue;
+              if (!w.food_pairings) w.food_pairings = "Beef, Pasta";
+              if (!w.description) w.description = "Mock Vivino description.";
+              if (!w.rating) w.rating = 4.0;
+              w.vivino_updated_at = new Date().toISOString();
+              vN++;
+            }
+            return { updated: vN, total: vIds.length, errors: 0 };
+          }
+          case "wine_cellar/batch_analyze_wines": {
+            const aIds = msg.wine_ids || mockWines.map((w) => w.id);
+            let aN = 0;
+            for (const w of mockWines) {
+              if (!aIds.includes(w.id)) continue;
+              if (!w.disposition) w.disposition = "D";
+              if (!w.drink_window) w.drink_window = "2026-2030";
+              if (!w.ai_ratings) w.ai_ratings = { rating_ws: 92 };
+              w.ai_updated_at = new Date().toISOString();
+              aN++;
+            }
+            return { updated: aN, total: aIds.length, errors: 1 };
+          }
           case "wine_cellar/get_storage_info": {
             const bytes = (v) => new TextEncoder().encode(JSON.stringify(v)).length;
             return {
