@@ -3940,6 +3940,332 @@ WineDetailDialog = __decorate([
     t("wine-detail-dialog")
 ], WineDetailDialog);
 
+// A bin's real capacity: for a box row the sum of its boxes, otherwise the
+// row's own capacity.
+function zoneCapacity(sr) {
+    return sr.type === "box"
+        ? (sr.boxes || []).reduce((sum, b) => sum + b, 0) || sr.capacity || 0
+        : sr.capacity || 0;
+}
+function storageRowFor(cabinet, zone) {
+    if (!cabinet || !zone || zone === "bottom")
+        return undefined;
+    return (cabinet.storage_rows || []).find((sr) => `storage-${sr.row}` === zone);
+}
+function containerKey(c) {
+    return `${c.cabinetId}|${c.zone}|${c.row ?? ""}|${c.col ?? ""}`;
+}
+function sameContainer(a, b) {
+    return containerKey(a) === containerKey(b);
+}
+// The container a bottle currently sits in, or null when it is unassigned.
+function containerOf(wine) {
+    if (!wine.cabinet_id)
+        return null;
+    if (wine.zone === "bottom") {
+        return { cabinetId: wine.cabinet_id, kind: "bottom", zone: "bottom", row: null, col: null };
+    }
+    if (wine.zone) {
+        return { cabinetId: wine.cabinet_id, kind: "zone", zone: wine.zone, row: null, col: null };
+    }
+    if (wine.row !== null && wine.col !== null) {
+        return { cabinetId: wine.cabinet_id, kind: "slot", zone: "", row: wine.row, col: wine.col };
+    }
+    return null;
+}
+function winesInContainer(c, wines) {
+    return wines.filter((w) => {
+        const wc = containerOf(w);
+        return wc !== null && sameContainer(wc, c);
+    });
+}
+function containerCapacity(c, cabinet) {
+    if (!cabinet)
+        return 0;
+    if (c.kind === "bottom")
+        return 0; // unlimited
+    if (c.kind === "zone") {
+        const sr = storageRowFor(cabinet, c.zone);
+        return sr ? zoneCapacity(sr) : 0;
+    }
+    return cabinet.depth || 1;
+}
+function containerUsage(c, cabinet, wines) {
+    const capacity = containerCapacity(c, cabinet);
+    const occupied = new Set(winesInContainer(c, wines).map((w) => w.depth || 0));
+    // First free slot rather than "one past the last": a bottle removed from the
+    // middle leaves a gap that should be reused, not skipped over.
+    let nextDepth = 0;
+    while (occupied.has(nextDepth))
+        nextDepth++;
+    const unlimited = capacity <= 0;
+    return {
+        used: occupied.size,
+        capacity,
+        nextDepth,
+        free: unlimited ? Infinity : Math.max(0, capacity - occupied.size),
+        full: !unlimited && (occupied.size >= capacity || nextDepth >= capacity),
+    };
+}
+// Human-readable name for the container itself — no slot number, since a
+// container holds several bottles.
+function containerLabel(c, cabinets) {
+    const cabinet = cabinets.find((cab) => cab.id === c.cabinetId);
+    if (!cabinet)
+        return "Unassigned";
+    if (c.kind === "bottom")
+        return `${cabinet.name} · ${cabinet.bottom_zone_name || "Storage"}`;
+    if (c.kind === "zone") {
+        const sr = storageRowFor(cabinet, c.zone);
+        return `${cabinet.name} · ${sr?.name || (sr?.type === "box" ? "Box" : "Bulk Bin")}`;
+    }
+    const idx = getRackSlots(cabinet).findIndex((s) => s.row === c.row && s.col === c.col);
+    const slot = idx >= 0 ? `Slot ${idx + 1}` : `R${(c.row ?? 0) + 1}C${(c.col ?? 0) + 1}`;
+    return `${cabinet.name} · ${slot}`;
+}
+// Every container in a cabinet, in the order the grid draws them: bins and
+// boxes first, then the bottom zone, then the grid slots in reading order.
+function containersOf(cabinet) {
+    const out = [];
+    for (const sr of cabinet.storage_rows || []) {
+        out.push({ cabinetId: cabinet.id, kind: "zone", zone: `storage-${sr.row}`, row: null, col: null });
+    }
+    if (cabinet.has_bottom_zone) {
+        out.push({ cabinetId: cabinet.id, kind: "bottom", zone: "bottom", row: null, col: null });
+    }
+    for (const s of getRackSlots(cabinet)) {
+        out.push({ cabinetId: cabinet.id, kind: "slot", zone: "", row: s.row, col: s.col });
+    }
+    return out;
+}
+// The wine-shaped patch that puts a bottle into `c`, at its first free depth.
+// Returns null when the container has no room left.
+function placementIn(c, cabinet, wines) {
+    const usage = containerUsage(c, cabinet, wines);
+    if (usage.full)
+        return null;
+    return {
+        cabinet_id: c.cabinetId,
+        zone: c.zone,
+        row: c.row,
+        col: c.col,
+        depth: usage.nextDepth,
+    };
+}
+// Where each of `count` identical bottles would land, given a chosen
+// destination. Returns fewer entries than asked when the destination runs out
+// of room, so the caller can clamp rather than silently dropping bottles.
+function planSlots(target, cabinets, wines, count) {
+    const cabinet = cabinets.find((c) => c.id === target.cabinet_id);
+    const unplaced = { row: null, col: null, zone: "", depth: 0 };
+    // No rack chosen: the bottles go in unassigned, where nothing can clash.
+    if (!cabinet)
+        return Array.from({ length: count }, () => ({ ...unplaced }));
+    const out = [];
+    const placed = [];
+    const known = () => [...wines, ...placed];
+    const fill = (c) => {
+        while (out.length < count) {
+            const usage = containerUsage(c, cabinet, known());
+            if (usage.full)
+                break;
+            out.push({ row: c.row, col: c.col, zone: c.zone, depth: usage.nextDepth });
+            // Feed each placement back in so the next bottle sees the slot as taken.
+            placed.push({
+                cabinet_id: c.cabinetId,
+                zone: c.zone,
+                row: c.row,
+                col: c.col,
+                depth: usage.nextDepth,
+            });
+        }
+    };
+    if (target.zone) {
+        const c = {
+            cabinetId: cabinet.id,
+            kind: target.zone === "bottom" ? "bottom" : "zone",
+            zone: target.zone,
+            row: null,
+            col: null,
+        };
+        // An unlimited container would never stop filling; cap it at the request.
+        if (c.kind === "zone" && !storageRowFor(cabinet, target.zone))
+            return out;
+        fill(c);
+        return out;
+    }
+    // Grid: fill the chosen slot's depths first, then carry on through the
+    // rack's remaining slots in reading order — a six-pack should not stop at
+    // the first slot just because it only holds one bottle.
+    const slots = getRackSlots(cabinet);
+    const startIdx = Math.max(0, slots.findIndex((x) => x.row === target.row && x.col === target.col));
+    const ordered = [...slots.slice(startIdx), ...slots.slice(0, startIdx)];
+    for (const slot of ordered) {
+        fill({ cabinetId: cabinet.id, kind: "slot", zone: "", row: slot.row, col: slot.col });
+        if (out.length >= count)
+            break;
+    }
+    return out;
+}
+// Free space at a chosen destination; Infinity when there is no limit.
+function freeAt(target, cabinets, wines) {
+    const cabinet = cabinets.find((c) => c.id === target.cabinet_id);
+    if (!cabinet)
+        return Infinity;
+    if (target.zone) {
+        const c = {
+            cabinetId: cabinet.id,
+            kind: target.zone === "bottom" ? "bottom" : "zone",
+            zone: target.zone,
+            row: null,
+            col: null,
+        };
+        if (c.kind === "zone" && !storageRowFor(cabinet, target.zone))
+            return 0;
+        return containerUsage(c, cabinet, wines).free;
+    }
+    // No zone: everything still free across the cabinet's grid slots.
+    const total = getRackSlots(cabinet).length * (cabinet.depth || 1);
+    const used = wines.filter((w) => w.cabinet_id === cabinet.id && w.row !== null && w.col !== null).length;
+    return Math.max(0, total - used);
+}
+
+const TIER_ORDER = ["same-wine", "same-winery", "same-family"];
+const key = (value) => normalizeText(value).trim();
+// Names are free text and a good half of them carry the vintage ("Sassicaia
+// 2019") or a bottling note ("Margaux 2018 (Case #2)"). Comparing them raw
+// would make "same wine, any vintage" almost never fire, which is the one
+// tier the user actually cares about.
+function cuveeKey(value) {
+    return key(value)
+        .replace(/\((?:[^()]*)\)/g, " ")
+        .replace(/\b(?:19|20)\d{2}\b/g, " ")
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+}
+function tierOf(draft, wine) {
+    const dName = cuveeKey(draft.name);
+    const dWinery = key(draft.winery);
+    const wName = cuveeKey(wine.name);
+    const wWinery = key(wine.winery);
+    // Same wine, any vintage: the cuvée is what identifies it, not the year.
+    // With no winery recorded on either side the name has to carry it alone.
+    if (dName && dName === wName && (!dWinery || !wWinery || dWinery === wWinery))
+        return "same-wine";
+    if (dWinery && dWinery === wWinery)
+        return "same-winery";
+    const dRegion = key(draft.region);
+    if (dRegion && dRegion === key(wine.region) && draft.type && draft.type === wine.type) {
+        return "same-family";
+    }
+    return null;
+}
+function vintageList(wines) {
+    const years = Array.from(new Set(wines.map((w) => w.vintage).filter((v) => typeof v === "number"))).sort((a, b) => a - b);
+    return years.join(", ");
+}
+function reasonFor(tier, draft, matches) {
+    const n = matches.length;
+    const bottles = n === 1 ? "1 bottle" : `${n} bottles`;
+    if (tier === "same-wine") {
+        const years = vintageList(matches);
+        const sameYear = matches.every((w) => w.vintage === draft.vintage);
+        if (sameYear)
+            return `${bottles} of this exact wine already here`;
+        return years ? `${bottles} of this wine here (${years})` : `${bottles} of this wine already here`;
+    }
+    if (tier === "same-winery") {
+        const winery = matches[0]?.winery || draft.winery || "this winery";
+        return `${bottles} from ${winery} here`;
+    }
+    const first = matches[0];
+    const region = first?.region || draft.region || "";
+    const type = first ? WINE_TYPE_LABELS[first.type] || "" : "";
+    return `${bottles} of ${[region, type].filter(Boolean).join(" ")} here`.replace(/\s+/g, " ");
+}
+// The best place to send the bottle instead, when the natural destination is
+// full: somewhere in the same cabinet with room, preferring a container that
+// already holds relatives, then simply the nearest one with space.
+function alternativeFor(full, cabinet, wines, matchIds) {
+    const all = containersOf(cabinet);
+    const fullIdx = all.findIndex((c) => sameContainer(c, full));
+    const scored = all
+        .map((c, idx) => ({ c, idx, usage: containerUsage(c, cabinet, wines) }))
+        .filter((x) => !sameContainer(x.c, full) && !x.usage.full)
+        .map((x) => ({
+        ...x,
+        relatives: wines.filter((w) => {
+            const wc = containerOf(w);
+            return wc !== null && sameContainer(wc, x.c) && matchIds.has(w.id);
+        }).length,
+    }));
+    if (!scored.length)
+        return null;
+    scored.sort((a, b) => b.relatives - a.relatives ||
+        Math.abs(a.idx - fullIdx) - Math.abs(b.idx - fullIdx) ||
+        b.usage.free - a.usage.free);
+    const best = scored[0];
+    return {
+        container: best.c,
+        label: containerLabel(best.c, [cabinet]),
+        free: best.usage.free,
+    };
+}
+// Ranked destinations for a bottle about to be added. Empty when the cellar
+// holds nothing related — better to say nothing than to invent a reason.
+function suggestDestinations(draft, wines, cabinets, limit = 3) {
+    const byContainer = new Map();
+    for (const wine of wines) {
+        const container = containerOf(wine);
+        if (!container)
+            continue;
+        // Never point at a bin the rack layout no longer knows about: bottles can
+        // outlive a deleted storage row, but sending a new one there would be
+        // sending it nowhere.
+        const cabinet = cabinets.find((c) => c.id === container.cabinetId);
+        if (!cabinet)
+            continue;
+        if (container.kind === "zone" && !storageRowFor(cabinet, container.zone))
+            continue;
+        if (container.kind === "bottom" && !cabinet.has_bottom_zone)
+            continue;
+        const tier = tierOf(draft, wine);
+        if (!tier)
+            continue;
+        const k = `${containerKey(container)}::${tier}`;
+        const entry = byContainer.get(k);
+        if (entry)
+            entry.matches.push(wine);
+        else
+            byContainer.set(k, { container, tier, matches: [wine] });
+    }
+    // A container reached through several tiers is only worth listing once, at
+    // its most specific tier.
+    const bestPerContainer = new Map();
+    for (const entry of byContainer.values()) {
+        const k = containerKey(entry.container);
+        const current = bestPerContainer.get(k);
+        if (!current || TIER_ORDER.indexOf(entry.tier) < TIER_ORDER.indexOf(current.tier)) {
+            bestPerContainer.set(k, entry);
+        }
+    }
+    const ranked = Array.from(bestPerContainer.values()).sort((a, b) => TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier) || b.matches.length - a.matches.length);
+    return ranked.slice(0, limit).map((entry) => {
+        const cabinet = cabinets.find((c) => c.id === entry.container.cabinetId);
+        const usage = containerUsage(entry.container, cabinet, wines);
+        const matchIds = new Set(entry.matches.map((w) => w.id));
+        return {
+            container: entry.container,
+            label: containerLabel(entry.container, cabinets),
+            usage,
+            tier: entry.tier,
+            reason: reasonFor(entry.tier, draft, entry.matches),
+            matches: entry.matches,
+            alternative: usage.full && cabinet ? alternativeFor(entry.container, cabinet, wines, matchIds) : null,
+        };
+    });
+}
+
 let BarcodeScanner = class BarcodeScanner extends i {
     constructor() {
         super(...arguments);
@@ -4442,26 +4768,16 @@ let AddWineDialog = class AddWineDialog extends i {
     _updateField(field, value) {
         this._wineData = { ...this._wineData, [field]: value };
     }
-    // A bin's real capacity: for a box row the sum of its boxes, otherwise the
-    // row's own capacity.
     _zoneUsage(sr) {
-        const capacity = sr.type === "box"
-            ? (sr.boxes || []).reduce((sum, b) => sum + b, 0) || sr.capacity || 0
-            : sr.capacity || 0;
-        const occupied = new Set(this.wines
-            .filter((w) => w.cabinet_id === this._wineData.cabinet_id && w.zone === `storage-${sr.row}`)
-            .map((w) => w.depth || 0));
-        // First free slot rather than "one past the last": a bottle removed from
-        // the middle leaves a gap that should be reused, not skipped over.
-        let nextDepth = 0;
-        while (occupied.has(nextDepth))
-            nextDepth++;
-        return {
-            used: occupied.size,
-            capacity,
-            nextDepth,
-            full: capacity > 0 && (occupied.size >= capacity || nextDepth >= capacity),
+        const cabinet = this.cabinets.find((c) => c.id === this._wineData.cabinet_id);
+        const container = {
+            cabinetId: this._wineData.cabinet_id || "",
+            kind: "zone",
+            zone: `storage-${sr.row}`,
+            row: null,
+            col: null,
         };
+        return containerUsage(container, cabinet, this.wines);
     }
     _selectZone(sr) {
         // Adding a bottle used to append past the end of a full bin, silently
@@ -4482,75 +4798,25 @@ let AddWineDialog = class AddWineDialog extends i {
             depth: nextDepth,
         };
     }
-    // Where each of `count` identical bottles would land. Returns fewer than
-    // asked when the destination runs out of room, so the caller can clamp
-    // rather than silently dropping bottles.
+    // Send the bottle to a container the suggestion strip proposed, landing on
+    // its first free depth.
+    _applyContainer(c) {
+        const cabinet = this.cabinets.find((cab) => cab.id === c.cabinetId);
+        const patch = placementIn(c, cabinet, this.wines);
+        if (!patch) {
+            this._error = `${containerLabel(c, this.cabinets)} is full. Free a slot, or raise its capacity in Manage Racks.`;
+            return;
+        }
+        this._error = "";
+        this._wineData = { ...this._wineData, ...patch };
+    }
     _planSlots(count) {
-        const d = this._wineData;
-        const cabinet = this.cabinets.find((c) => c.id === d.cabinet_id);
-        const unplaced = { row: null, col: null, zone: "", depth: 0 };
-        // No rack chosen: the bottles go in unassigned, where nothing can clash.
-        if (!cabinet)
-            return Array.from({ length: count }, () => ({ ...unplaced }));
-        const key = (zone, row, col, depth) => `${zone}|${row ?? ""}|${col ?? ""}|${depth}`;
-        const taken = new Set(this.wines
-            .filter((w) => w.cabinet_id === cabinet.id)
-            .map((w) => key(w.zone || "", w.row, w.col, w.depth || 0)));
-        const out = [];
-        if (d.zone) {
-            const sr = (cabinet.storage_rows || []).find((x) => `storage-${x.row}` === d.zone);
-            if (!sr)
-                return out;
-            const capacity = sr.type === "box"
-                ? (sr.boxes || []).reduce((sum, b) => sum + b, 0) || sr.capacity || 0
-                : sr.capacity || 0;
-            for (let depth = 0; depth < capacity && out.length < count; depth++) {
-                const k = key(d.zone, null, null, depth);
-                if (taken.has(k))
-                    continue;
-                taken.add(k);
-                out.push({ row: null, col: null, zone: d.zone, depth });
-            }
-            return out;
-        }
-        // Grid: fill the chosen slot's depths first, then carry on through the
-        // rack's remaining slots in reading order — a six-pack should not stop
-        // at the first slot just because it only holds one bottle.
-        const rackDepth = cabinet.depth || 1;
-        const slots = getRackSlots(cabinet);
-        const startIdx = Math.max(0, slots.findIndex((x) => x.row === d.row && x.col === d.col));
-        const ordered = [...slots.slice(startIdx), ...slots.slice(0, startIdx)];
-        for (const slot of ordered) {
-            for (let depth = 0; depth < rackDepth && out.length < count; depth++) {
-                const k = key("", slot.row, slot.col, depth);
-                if (taken.has(k))
-                    continue;
-                taken.add(k);
-                out.push({ row: slot.row, col: slot.col, zone: "", depth });
-            }
-            if (out.length >= count)
-                break;
-        }
-        return out;
+        return planSlots(this._wineData, this.cabinets, this.wines, count);
     }
     // Free space at the chosen destination; null when there is no limit.
     _availableSlots() {
-        const d = this._wineData;
-        const cabinet = this.cabinets.find((c) => c.id === d.cabinet_id);
-        if (!cabinet)
-            return null;
-        const inCabinet = this.wines.filter((w) => w.cabinet_id === cabinet.id);
-        if (d.zone) {
-            const sr = (cabinet.storage_rows || []).find((x) => `storage-${x.row}` === d.zone);
-            if (!sr)
-                return 0;
-            const capacity = sr.type === "box"
-                ? (sr.boxes || []).reduce((sum, b) => sum + b, 0) || sr.capacity || 0
-                : sr.capacity || 0;
-            return Math.max(0, capacity - inCabinet.filter((w) => w.zone === d.zone).length);
-        }
-        const total = getRackSlots(cabinet).length * (cabinet.depth || 1);
-        return Math.max(0, total - inCabinet.filter((w) => w.row !== null && w.col !== null).length);
+        const free = freeAt(this._wineData, this.cabinets, this.wines);
+        return Number.isFinite(free) ? free : null;
     }
     _setQuantity(value) {
         const available = this._availableSlots();
@@ -4987,6 +5253,55 @@ let AddWineDialog = class AddWineDialog extends i {
       </div>
     `;
     }
+    // Destinations deduced from where this bottle's relatives already sit. The
+    // cellar has no declared zone rules, so its own layout is the only signal:
+    // every suggestion says which bottles are already there and why they match.
+    _renderSuggestions() {
+        const suggestions = suggestDestinations(this._wineData, this.wines, this.cabinets, 3);
+        if (!suggestions.length)
+            return A;
+        const current = containerOf(this._wineData);
+        const spaceText = (s) => {
+            if (s.usage.full)
+                return `Full · ${s.usage.used}/${s.usage.capacity}`;
+            if (!Number.isFinite(s.usage.free))
+                return "Room";
+            return s.usage.free === 1 ? "1 free" : `${s.usage.free} free`;
+        };
+        return b `
+      <div class="suggest-strip">
+        <div class="suggest-title">Suggested — where its relatives are</div>
+        ${suggestions.map((s) => {
+            const selected = !!current && sameContainer(current, s.container);
+            return b `
+            <button
+              class="suggest-item ${s.usage.full ? "full" : ""} ${selected ? "selected" : ""}"
+              ?disabled=${s.usage.full}
+              @click=${() => this._applyContainer(s.container)}
+            >
+              <span class="suggest-where">${s.label}</span>
+              <span class="suggest-why">${s.reason}</span>
+              <span class="suggest-space ${s.usage.full || s.usage.free <= 1 ? "tight" : ""}">
+                ${spaceText(s)}
+              </span>
+            </button>
+            ${s.alternative
+                ? b `
+                  <div class="suggest-alt">
+                    No room left there — split the series into
+                    <button @click=${() => this._applyContainer(s.alternative.container)}>
+                      ${s.alternative.label}
+                    </button>
+                    (${s.alternative.free === 1 ? "1 free" : `${s.alternative.free} free`}), or free a
+                    slot first.
+                  </div>
+                `
+                : A}
+          `;
+        })}
+      </div>
+    `;
+    }
     _renderLocationStep() {
         const selectedCabinet = this.cabinets.find((c) => c.id === this._wineData.cabinet_id);
         const zones = selectedCabinet?.storage_rows || [];
@@ -4997,6 +5312,8 @@ let AddWineDialog = class AddWineDialog extends i {
         <div style="font-size: 0.85em; color: var(--wc-text-secondary); margin-bottom: 12px">
           Select a cabinet and position for this bottle
         </div>
+
+        ${this._renderSuggestions()}
 
         <div class="location-grid">
           ${this.cabinets.map((cab) => b `
@@ -5430,6 +5747,97 @@ AddWineDialog.styles = [
         grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
         gap: 8px;
         margin-top: 12px;
+      }
+
+      .suggest-strip {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 14px;
+        padding: 10px;
+        border: 1px solid var(--wc-border);
+        border-radius: 10px;
+        background: rgba(114, 47, 55, 0.04);
+      }
+
+      .suggest-title {
+        font-size: 0.75em;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--wc-text-secondary);
+      }
+
+      .suggest-item {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        width: 100%;
+        text-align: left;
+        font: inherit;
+        color: inherit;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        background: var(--wc-card-bg, transparent);
+        padding: 8px 10px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+
+      .suggest-item:hover:not(.full) {
+        border-color: var(--wc-primary);
+        background: rgba(114, 47, 55, 0.08);
+      }
+
+      .suggest-item.selected {
+        border-color: var(--wc-primary);
+        background: rgba(114, 47, 55, 0.12);
+      }
+
+      .suggest-item.full {
+        cursor: default;
+        opacity: 0.65;
+      }
+
+      .suggest-item.full .suggest-where {
+        text-decoration: line-through;
+      }
+
+      .suggest-where {
+        font-weight: 600;
+        font-size: 0.85em;
+        white-space: nowrap;
+      }
+
+      .suggest-why {
+        flex: 1;
+        font-size: 0.78em;
+        color: var(--wc-text-secondary);
+      }
+
+      .suggest-space {
+        font-size: 0.75em;
+        white-space: nowrap;
+        color: var(--wc-text-secondary);
+      }
+
+      .suggest-space.tight {
+        color: #c62828;
+      }
+
+      .suggest-alt {
+        margin: -2px 0 2px 10px;
+        font-size: 0.75em;
+        color: var(--wc-text-secondary);
+      }
+
+      .suggest-alt button {
+        font: inherit;
+        color: var(--wc-primary);
+        background: none;
+        border: none;
+        padding: 0;
+        cursor: pointer;
+        text-decoration: underline;
       }
 
       .location-cabinet {
