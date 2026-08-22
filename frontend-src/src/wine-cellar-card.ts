@@ -3,7 +3,9 @@ import { customElement, property, state } from "lit/decorators.js";
 import { sharedStyles } from "./styles";
 import { Wine, Cabinet, CellarStats, WINE_TYPE_COLORS, WineType, StorageRow, StorageRowType, BOX_SIZES, getRackSlots, getWineLocation } from "./models";
 import { matchesQuery } from "./utils/search";
+import { Finding, analyzeArrangement } from "./utils/arrange";
 
+import "./components/arrangement-dialog";
 import "./components/cabinet-grid";
 import "./components/wine-detail-dialog";
 import "./components/add-wine-dialog";
@@ -53,6 +55,8 @@ export class WineCellarCard extends LitElement {
   @state() private _showVivinoAiSettings = false;
   @state() private _showWineList = false;
   @state() private _showInventory = false;
+  @state() private _showArrangement = false;
+  @state() private _dismissedArrangements: string[] = [];
   @state() private _buyList: Wine[] = [];
   @state() private _addToBuyListMode = false;
   @state() private _movingBuyListItem: Wine | null = null;
@@ -350,6 +354,22 @@ export class WineCellarCard extends LitElement {
         font-size: 0.9em;
       }
 
+      /* The arrangement count is the only stat you can act on, and it is only
+         there at all when the cellar has something to say. */
+      .stat-action {
+        cursor: pointer;
+        border-radius: 6px;
+        padding: 2px 8px;
+        margin: -2px 0;
+        border: 1px solid var(--wc-border);
+        transition: all 0.15s;
+      }
+
+      .stat-action:hover {
+        border-color: var(--wc-primary);
+        background: rgba(114, 47, 55, 0.08);
+      }
+
       /* Phone: stack cabinets vertically */
       @media (max-width: 599px) {
         .header-row {
@@ -449,6 +469,7 @@ export class WineCellarCard extends LitElement {
       this._metadataCurrency = capResult?.metadata_currency || "USD";
       this._supportedCurrencies = capResult?.supported_currencies || ["USD", "EUR", "GBP", "CHF"];
       this._aiFallbackAlways = capResult?.ai_fallback_always || false;
+      this._dismissedArrangements = capResult?.dismissed_arrangements || [];
       this._buyList = buyListResult?.buy_list || [];
 
       // Refresh selected wine if detail dialog is open
@@ -1473,6 +1494,32 @@ export class WineCellarCard extends LitElement {
     this._analyzing = false;
   }
 
+  // --- Arrangement ---
+  // Recomputed on render rather than cached: it reads the same wines and
+  // cabinets the card already holds, and a stale count would point at moves
+  // that have since been made.
+  private get _arrangementFindings(): Finding[] {
+    return analyzeArrangement(this._wines, this._cabinets, this._dismissedArrangements);
+  }
+
+  // "Leave it as it is" has to stick, or the count becomes a badge people
+  // learn to ignore. Applied locally first so the finding disappears at once.
+  private async _dismissArrangement(id: string) {
+    if (this._dismissedArrangements.includes(id)) return;
+    const previous = this._dismissedArrangements;
+    const next = [...previous, id];
+    this._dismissedArrangements = next;
+    try {
+      await this.hass.callWS({
+        type: "wine_cellar/update_settings",
+        updates: { dismissed_arrangements: next },
+      });
+    } catch (err) {
+      this._dismissedArrangements = previous;
+      this._showToast("Failed to dismiss the suggestion");
+    }
+  }
+
   // --- Metadata language (Vivino/AI) ---
   private async _setMetadataLanguage(lang: string) {
     if (lang === this._metadataLanguage) return;
@@ -1759,6 +1806,18 @@ export class WineCellarCard extends LitElement {
                   <span class="stat-value">${this._stats.available_slots}</span>
                   available
                 </div>
+                ${this._arrangementFindings.length
+                  ? html`
+                      <div
+                        class="stat stat-action"
+                        title="Suggestions read from where your bottles already are"
+                        @click=${() => (this._showArrangement = true)}
+                      >
+                        <span class="stat-value">🧹 ${this._arrangementFindings.length}</span>
+                        ${this._arrangementFindings.length === 1 ? "tidy-up" : "tidy-ups"}
+                      </div>
+                    `
+                  : nothing}
                 ${this._stats.total_value
                   ? html`
                       <div class="stat">
@@ -2218,6 +2277,18 @@ export class WineCellarCard extends LitElement {
           @wine-added=${this._onWineAdded}
           @buy-list-updated=${() => this._loadData()}
         ></wine-list-dialog>
+
+        <!-- Arrangement report -->
+        <arrangement-dialog
+          .open=${this._showArrangement}
+          .hass=${this.hass}
+          .wines=${this._wines}
+          .cabinets=${this._cabinets}
+          .dismissed=${this._dismissedArrangements}
+          @close=${() => (this._showArrangement = false)}
+          @moves-applied=${() => this._loadData()}
+          @dismiss-finding=${(e: CustomEvent) => this._dismissArrangement(e.detail.id)}
+        ></arrangement-dialog>
 
         <!-- Inventory Dialog -->
         <inventory-dialog

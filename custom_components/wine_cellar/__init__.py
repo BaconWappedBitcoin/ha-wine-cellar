@@ -11,6 +11,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.components import persistent_notification
 from homeassistant.helpers import config_validation as cv
 
 from .const import (
@@ -85,33 +86,84 @@ def _register_static_path(hass: HomeAssistant) -> None:
             _LOGGER.warning("Could not register frontend static path")
 
 
+def _lovelace_resources(hass: HomeAssistant) -> Any | None:
+    """The Lovelace resource collection, wherever this HA version keeps it.
+
+    This used to read hass.data["lovelace_resources"], a key Home Assistant
+    has never defined. The lookup therefore always came back empty and
+    auto-registration silently did nothing, which is what leaves people with
+    "Custom element not found: wine-cellar-card" until they add the resource
+    by hand.
+
+    Two shapes exist in the wild: newer HA stores a LovelaceData dataclass
+    under the LOVELACE_DATA key with a .resources attribute, older HA stored
+    a plain dict under "lovelace" with a "resources" entry.
+    """
+    data = None
+    try:
+        from homeassistant.components.lovelace.const import LOVELACE_DATA
+
+        data = hass.data.get(LOVELACE_DATA)
+    except ImportError:
+        pass
+    if data is None:
+        data = hass.data.get("lovelace")
+    if data is None:
+        return None
+    if isinstance(data, dict):
+        return data.get("resources")
+    return getattr(data, "resources", None)
+
+
 def _register_frontend_resource(hass: HomeAssistant) -> None:
     """Register the card JS as a Lovelace resource with cache-busted URL.
 
-    Waits for HA to fully start so that lovelace_resources is available.
+    Waits for HA to fully start so the resource collection exists.
     """
     url = f"/wine_cellar/wine-cellar-card-{FRONTEND_VERSION}.js"
 
-    # Use the lovelace resources collection if available
-    try:
-        from homeassistant.components.lovelace.resources import (
-            ResourceStorageCollection,
+    def _tell_user(reason: str, how: str) -> None:
+        """Surface a failure the user would otherwise only meet as a broken card."""
+        _LOGGER.warning("Cork Dork could not register its card automatically: %s", reason)
+        persistent_notification.async_create(
+            hass,
+            f"{reason}\n\n{how}",
+            title="Cork Dork: add the card resource manually",
+            notification_id=f"{DOMAIN}_frontend_resource",
         )
-    except ImportError:
-        _LOGGER.debug("Lovelace resources API not available, skipping auto-register")
-        return
 
     async def _async_add_resource(*_args) -> None:
         """Add or update Lovelace resource."""
         try:
-            resources = hass.data.get("lovelace_resources")
+            resources = _lovelace_resources(hass)
             if resources is None:
-                _LOGGER.debug(
-                    "lovelace_resources not in hass.data, "
-                    "card must be added manually via Settings > Dashboards > Resources: %s",
-                    url,
+                _tell_user(
+                    "Home Assistant did not expose its Lovelace resource list.",
+                    f"Add it under Settings > Dashboards > ⋮ > Resources, as a "
+                    f"JavaScript module with the URL: {url}",
                 )
                 return
+
+            # YAML-mode Lovelace keeps its resources in configuration.yaml and
+            # offers no way to add one at runtime — the collection has no
+            # create method at all. Say so rather than throwing.
+            if not hasattr(resources, "async_create_item"):
+                _tell_user(
+                    "Your dashboards are in YAML mode, so resources cannot be "
+                    "added automatically.",
+                    "Add this to your Lovelace configuration:\n\n"
+                    f"resources:\n  - url: {url}\n    type: module",
+                )
+                return
+
+            # async_items() does not load the store by itself; without this the
+            # collection looks empty and we would add a duplicate resource on
+            # every restart.
+            ensure_loaded = getattr(resources, "_async_ensure_loaded", None)
+            if ensure_loaded is not None:
+                await ensure_loaded()
+            elif not getattr(resources, "loaded", True):
+                await resources.async_load()
 
             # Check existing resources
             existing = None
@@ -129,17 +181,20 @@ def _register_frontend_resource(hass: HomeAssistant) -> None:
                     _LOGGER.debug("Updated wine cellar frontend resource to %s", url)
             else:
                 await resources.async_create_item({"res_type": "module", "url": url})
-                _LOGGER.debug("Registered wine cellar frontend resource: %s", url)
-        except Exception as err:
-            _LOGGER.warning(
-                "Could not auto-register frontend resource (%s). "
-                "Add it manually via Settings > Dashboards > Resources: %s",
-                err,
-                url,
+                _LOGGER.info("Registered wine cellar frontend resource: %s", url)
+
+            persistent_notification.async_dismiss(
+                hass, f"{DOMAIN}_frontend_resource"
+            )
+        except Exception as err:  # noqa: BLE001 - never break setup over the card
+            _tell_user(
+                f"Registering the card resource failed ({err}).",
+                f"Add it under Settings > Dashboards > ⋮ > Resources, as a "
+                f"JavaScript module with the URL: {url}",
             )
 
     # If HA is already running (e.g. integration reload), register immediately.
-    # Otherwise wait for full startup so lovelace_resources is available.
+    # Otherwise wait for full startup so the resource collection exists.
     if hass.is_running:
         hass.async_create_task(_async_add_resource())
     else:

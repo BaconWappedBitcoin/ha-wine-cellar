@@ -93,6 +93,7 @@
       { filename: "wine_cellar_20260305_090000.json", timestamp: "2026-03-05T09:00:00Z", wines: 15, cabinets: 3, buy_list: 2, size: 9800 },
     ];
 
+    const mockSettings = { dismissed_arrangements: [] };
     const mockBuyList = [
       { id: "bl-1", name: "Caymus Cabernet Sauvignon 2021", winery: "Caymus Vineyards", region: "Napa Valley", country: "USA", vintage: 2021, type: "red", grape_variety: "Cabernet Sauvignon", rating: 4.3, ratings_count: 7850, image_url: "https://images.vivino.com/thumbs/pC4wjq1BRtOFfWNi8IkFGA_375x500.jpg", price: null, retail_price: 90, notes: "", description: "Rich and full-bodied with ripe dark fruit and vanilla oak.", food_pairings: "Beef, Lamb", alcohol: "14.6%", disposition: "D", drink_window: "2024-2030", ai_ratings: { rating_ws: 92, rating_rp: 93 }, added_at: "2026-03-01T10:00:00Z" },
       { id: "bl-2", name: "Tignanello 2020", winery: "Antinori", region: "Tuscany", country: "Italy", vintage: 2020, type: "red", grape_variety: "Sangiovese/Cabernet", rating: 4.5, ratings_count: 5200, image_url: "https://images.vivino.com/thumbs/xmN-caL0R42OILQL67PLIA_375x500.jpg", price: null, retail_price: 120, notes: "Saw at restaurant", description: "Super Tuscan icon. Dark cherry, spice, and leather.", food_pairings: "Beef, Pasta, Game", alcohol: "14.0%", disposition: "H", drink_window: "2025-2035", ai_ratings: { rating_ws: 95, rating_rp: 94, rating_jd: 96 }, added_at: "2026-03-02T10:00:00Z" },
@@ -127,7 +128,7 @@
           case "wine_cellar/get_stats":
             return mockStats;
           case "wine_cellar/get_capabilities":
-            return { has_gemini: true };
+            return { has_gemini: true, dismissed_arrangements: mockSettings.dismissed_arrangements || [] };
           case "wine_cellar/lookup_barcode":
             return { result: { name: "Test Wine", winery: "Test Winery", region: "Test Region", country: "France", vintage: 2020, type: "red", grape_variety: "Merlot", rating: 4.0, ratings_count: 500, image_url: "https://images.vivino.com/thumbs/ApnxEJsiSaCuFadP5WMFKQ_375x500.jpg", price: 30, description: "A rich, full-bodied red.", food_pairings: "Beef, Pasta", alcohol: "13.5%", source: "mock" }, cached: false };
           case "wine_cellar/search_wine":
@@ -213,7 +214,7 @@
             }
             return { wine: aw, analysis: {} };
           case "wine_cellar/get_capabilities":
-            return { has_gemini: true };
+            return { has_gemini: true, dismissed_arrangements: mockSettings.dismissed_arrangements || [] };
           case "wine_cellar/get_buy_list":
             return { buy_list: mockBuyList };
           case "wine_cellar/add_to_buy_list":
@@ -261,6 +262,9 @@
           case "wine_cellar/update_settings":
             if (msg.updates && msg.updates.server_backup_keep !== undefined) {
               mockBackupKeep = msg.updates.server_backup_keep;
+            }
+            if (msg.updates && msg.updates.dismissed_arrangements !== undefined) {
+              mockSettings.dismissed_arrangements = msg.updates.dismissed_arrangements;
             }
             return { settings: msg.updates || {} };
           case "wine_cellar/server_backup_save":

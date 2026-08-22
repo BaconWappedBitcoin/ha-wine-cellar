@@ -935,6 +935,851 @@ function collectFacet(wines, pick) {
     return [...seen.values()].sort((a, b) => a.localeCompare(b));
 }
 
+// A bin's real capacity: for a box row the sum of its boxes, otherwise the
+// row's own capacity.
+function zoneCapacity(sr) {
+    return sr.type === "box"
+        ? (sr.boxes || []).reduce((sum, b) => sum + b, 0) || sr.capacity || 0
+        : sr.capacity || 0;
+}
+function storageRowFor(cabinet, zone) {
+    if (!cabinet || !zone || zone === "bottom")
+        return undefined;
+    return (cabinet.storage_rows || []).find((sr) => `storage-${sr.row}` === zone);
+}
+function containerKey(c) {
+    return `${c.cabinetId}|${c.zone}|${c.row ?? ""}|${c.col ?? ""}`;
+}
+function sameContainer(a, b) {
+    return containerKey(a) === containerKey(b);
+}
+// The container a bottle currently sits in, or null when it is unassigned.
+function containerOf(wine) {
+    if (!wine.cabinet_id)
+        return null;
+    if (wine.zone === "bottom") {
+        return { cabinetId: wine.cabinet_id, kind: "bottom", zone: "bottom", row: null, col: null };
+    }
+    if (wine.zone) {
+        return { cabinetId: wine.cabinet_id, kind: "zone", zone: wine.zone, row: null, col: null };
+    }
+    if (wine.row !== null && wine.col !== null) {
+        return { cabinetId: wine.cabinet_id, kind: "slot", zone: "", row: wine.row, col: wine.col };
+    }
+    return null;
+}
+function winesInContainer(c, wines) {
+    return wines.filter((w) => {
+        const wc = containerOf(w);
+        return wc !== null && sameContainer(wc, c);
+    });
+}
+function containerCapacity(c, cabinet) {
+    if (!cabinet)
+        return 0;
+    if (c.kind === "bottom")
+        return 0; // unlimited
+    if (c.kind === "zone") {
+        const sr = storageRowFor(cabinet, c.zone);
+        return sr ? zoneCapacity(sr) : 0;
+    }
+    return cabinet.depth || 1;
+}
+function containerUsage(c, cabinet, wines) {
+    const capacity = containerCapacity(c, cabinet);
+    const occupied = new Set(winesInContainer(c, wines).map((w) => w.depth || 0));
+    // First free slot rather than "one past the last": a bottle removed from the
+    // middle leaves a gap that should be reused, not skipped over.
+    let nextDepth = 0;
+    while (occupied.has(nextDepth))
+        nextDepth++;
+    const unlimited = capacity <= 0;
+    return {
+        used: occupied.size,
+        capacity,
+        nextDepth,
+        free: unlimited ? Infinity : Math.max(0, capacity - occupied.size),
+        full: !unlimited && (occupied.size >= capacity || nextDepth >= capacity),
+    };
+}
+// Human-readable name for the container itself — no slot number, since a
+// container holds several bottles.
+function containerLabel(c, cabinets) {
+    const cabinet = cabinets.find((cab) => cab.id === c.cabinetId);
+    if (!cabinet)
+        return "Unassigned";
+    if (c.kind === "bottom")
+        return `${cabinet.name} · ${cabinet.bottom_zone_name || "Storage"}`;
+    if (c.kind === "zone") {
+        const sr = storageRowFor(cabinet, c.zone);
+        return `${cabinet.name} · ${sr?.name || (sr?.type === "box" ? "Box" : "Bulk Bin")}`;
+    }
+    const idx = getRackSlots(cabinet).findIndex((s) => s.row === c.row && s.col === c.col);
+    const slot = idx >= 0 ? `Slot ${idx + 1}` : `R${(c.row ?? 0) + 1}C${(c.col ?? 0) + 1}`;
+    return `${cabinet.name} · ${slot}`;
+}
+// Every container in a cabinet, in the order the grid draws them: bins and
+// boxes first, then the bottom zone, then the grid slots in reading order.
+function containersOf(cabinet) {
+    const out = [];
+    for (const sr of cabinet.storage_rows || []) {
+        out.push({ cabinetId: cabinet.id, kind: "zone", zone: `storage-${sr.row}`, row: null, col: null });
+    }
+    if (cabinet.has_bottom_zone) {
+        out.push({ cabinetId: cabinet.id, kind: "bottom", zone: "bottom", row: null, col: null });
+    }
+    for (const s of getRackSlots(cabinet)) {
+        out.push({ cabinetId: cabinet.id, kind: "slot", zone: "", row: s.row, col: s.col });
+    }
+    return out;
+}
+// The wine-shaped patch that puts a bottle into `c`, at its first free depth.
+// Returns null when the container has no room left.
+function placementIn(c, cabinet, wines) {
+    const usage = containerUsage(c, cabinet, wines);
+    if (usage.full)
+        return null;
+    return {
+        cabinet_id: c.cabinetId,
+        zone: c.zone,
+        row: c.row,
+        col: c.col,
+        depth: usage.nextDepth,
+    };
+}
+// Where each of `count` identical bottles would land, given a chosen
+// destination. Returns fewer entries than asked when the destination runs out
+// of room, so the caller can clamp rather than silently dropping bottles.
+function planSlots(target, cabinets, wines, count) {
+    const cabinet = cabinets.find((c) => c.id === target.cabinet_id);
+    const unplaced = { row: null, col: null, zone: "", depth: 0 };
+    // No rack chosen: the bottles go in unassigned, where nothing can clash.
+    if (!cabinet)
+        return Array.from({ length: count }, () => ({ ...unplaced }));
+    const out = [];
+    const placed = [];
+    const known = () => [...wines, ...placed];
+    const fill = (c) => {
+        while (out.length < count) {
+            const usage = containerUsage(c, cabinet, known());
+            if (usage.full)
+                break;
+            out.push({ row: c.row, col: c.col, zone: c.zone, depth: usage.nextDepth });
+            // Feed each placement back in so the next bottle sees the slot as taken.
+            placed.push({
+                cabinet_id: c.cabinetId,
+                zone: c.zone,
+                row: c.row,
+                col: c.col,
+                depth: usage.nextDepth,
+            });
+        }
+    };
+    if (target.zone) {
+        const c = {
+            cabinetId: cabinet.id,
+            kind: target.zone === "bottom" ? "bottom" : "zone",
+            zone: target.zone,
+            row: null,
+            col: null,
+        };
+        // An unlimited container would never stop filling; cap it at the request.
+        if (c.kind === "zone" && !storageRowFor(cabinet, target.zone))
+            return out;
+        fill(c);
+        return out;
+    }
+    // Grid: fill the chosen slot's depths first, then carry on through the
+    // rack's remaining slots in reading order — a six-pack should not stop at
+    // the first slot just because it only holds one bottle.
+    const slots = getRackSlots(cabinet);
+    const startIdx = Math.max(0, slots.findIndex((x) => x.row === target.row && x.col === target.col));
+    const ordered = [...slots.slice(startIdx), ...slots.slice(0, startIdx)];
+    for (const slot of ordered) {
+        fill({ cabinetId: cabinet.id, kind: "slot", zone: "", row: slot.row, col: slot.col });
+        if (out.length >= count)
+            break;
+    }
+    return out;
+}
+// Free space at a chosen destination; Infinity when there is no limit.
+function freeAt(target, cabinets, wines) {
+    const cabinet = cabinets.find((c) => c.id === target.cabinet_id);
+    if (!cabinet)
+        return Infinity;
+    if (target.zone) {
+        const c = {
+            cabinetId: cabinet.id,
+            kind: target.zone === "bottom" ? "bottom" : "zone",
+            zone: target.zone,
+            row: null,
+            col: null,
+        };
+        if (c.kind === "zone" && !storageRowFor(cabinet, target.zone))
+            return 0;
+        return containerUsage(c, cabinet, wines).free;
+    }
+    // No zone: everything still free across the cabinet's grid slots.
+    const total = getRackSlots(cabinet).length * (cabinet.depth || 1);
+    const used = wines.filter((w) => w.cabinet_id === cabinet.id && w.row !== null && w.col !== null).length;
+    return Math.max(0, total - used);
+}
+
+const TIER_ORDER = ["same-wine", "same-winery", "same-family"];
+const key = (value) => normalizeText(value).trim();
+// Names are free text and a good half of them carry the vintage ("Sassicaia
+// 2019") or a bottling note ("Margaux 2018 (Case #2)"). Comparing them raw
+// would make "same wine, any vintage" almost never fire, which is the one
+// tier the user actually cares about.
+function cuveeKey(value) {
+    return key(value)
+        .replace(/\((?:[^()]*)\)/g, " ")
+        .replace(/\b(?:19|20)\d{2}\b/g, " ")
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+}
+function tierOf(draft, wine) {
+    const dName = cuveeKey(draft.name);
+    const dWinery = key(draft.winery);
+    const wName = cuveeKey(wine.name);
+    const wWinery = key(wine.winery);
+    // Same wine, any vintage: the cuvée is what identifies it, not the year.
+    // With no winery recorded on either side the name has to carry it alone.
+    if (dName && dName === wName && (!dWinery || !wWinery || dWinery === wWinery))
+        return "same-wine";
+    if (dWinery && dWinery === wWinery)
+        return "same-winery";
+    const dRegion = key(draft.region);
+    if (dRegion && dRegion === key(wine.region) && draft.type && draft.type === wine.type) {
+        return "same-family";
+    }
+    return null;
+}
+function vintageList(wines) {
+    const years = Array.from(new Set(wines.map((w) => w.vintage).filter((v) => typeof v === "number"))).sort((a, b) => a - b);
+    return years.join(", ");
+}
+function reasonFor(tier, draft, matches) {
+    const n = matches.length;
+    const bottles = n === 1 ? "1 bottle" : `${n} bottles`;
+    if (tier === "same-wine") {
+        const years = vintageList(matches);
+        const sameYear = matches.every((w) => w.vintage === draft.vintage);
+        if (sameYear)
+            return `${bottles} of this exact wine already here`;
+        return years ? `${bottles} of this wine here (${years})` : `${bottles} of this wine already here`;
+    }
+    if (tier === "same-winery") {
+        const winery = matches[0]?.winery || draft.winery || "this winery";
+        return `${bottles} from ${winery} here`;
+    }
+    const first = matches[0];
+    const region = first?.region || draft.region || "";
+    const type = first ? WINE_TYPE_LABELS[first.type] || "" : "";
+    return `${bottles} of ${[region, type].filter(Boolean).join(" ")} here`.replace(/\s+/g, " ");
+}
+// The best place to send the bottle instead, when the natural destination is
+// full: somewhere in the same cabinet with room, preferring a container that
+// already holds relatives, then simply the nearest one with space.
+function alternativeFor(full, cabinet, wines, matchIds) {
+    const all = containersOf(cabinet);
+    const fullIdx = all.findIndex((c) => sameContainer(c, full));
+    const scored = all
+        .map((c, idx) => ({ c, idx, usage: containerUsage(c, cabinet, wines) }))
+        .filter((x) => !sameContainer(x.c, full) && !x.usage.full)
+        .map((x) => ({
+        ...x,
+        relatives: wines.filter((w) => {
+            const wc = containerOf(w);
+            return wc !== null && sameContainer(wc, x.c) && matchIds.has(w.id);
+        }).length,
+    }));
+    if (!scored.length)
+        return null;
+    scored.sort((a, b) => b.relatives - a.relatives ||
+        Math.abs(a.idx - fullIdx) - Math.abs(b.idx - fullIdx) ||
+        b.usage.free - a.usage.free);
+    const best = scored[0];
+    return {
+        container: best.c,
+        label: containerLabel(best.c, [cabinet]),
+        free: best.usage.free,
+    };
+}
+// Ranked destinations for a bottle about to be added. Empty when the cellar
+// holds nothing related — better to say nothing than to invent a reason.
+function suggestDestinations(draft, wines, cabinets, limit = 3) {
+    const byContainer = new Map();
+    for (const wine of wines) {
+        const container = containerOf(wine);
+        if (!container)
+            continue;
+        // Never point at a bin the rack layout no longer knows about: bottles can
+        // outlive a deleted storage row, but sending a new one there would be
+        // sending it nowhere.
+        const cabinet = cabinets.find((c) => c.id === container.cabinetId);
+        if (!cabinet)
+            continue;
+        if (container.kind === "zone" && !storageRowFor(cabinet, container.zone))
+            continue;
+        if (container.kind === "bottom" && !cabinet.has_bottom_zone)
+            continue;
+        const tier = tierOf(draft, wine);
+        if (!tier)
+            continue;
+        const k = `${containerKey(container)}::${tier}`;
+        const entry = byContainer.get(k);
+        if (entry)
+            entry.matches.push(wine);
+        else
+            byContainer.set(k, { container, tier, matches: [wine] });
+    }
+    // A container reached through several tiers is only worth listing once, at
+    // its most specific tier.
+    const bestPerContainer = new Map();
+    for (const entry of byContainer.values()) {
+        const k = containerKey(entry.container);
+        const current = bestPerContainer.get(k);
+        if (!current || TIER_ORDER.indexOf(entry.tier) < TIER_ORDER.indexOf(current.tier)) {
+            bestPerContainer.set(k, entry);
+        }
+    }
+    const ranked = Array.from(bestPerContainer.values()).sort((a, b) => TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier) || b.matches.length - a.matches.length);
+    return ranked.slice(0, limit).map((entry) => {
+        const cabinet = cabinets.find((c) => c.id === entry.container.cabinetId);
+        const usage = containerUsage(entry.container, cabinet, wines);
+        const matchIds = new Set(entry.matches.map((w) => w.id));
+        return {
+            container: entry.container,
+            label: containerLabel(entry.container, cabinets),
+            usage,
+            tier: entry.tier,
+            reason: reasonFor(entry.tier, draft, entry.matches),
+            matches: entry.matches,
+            alternative: usage.full && cabinet ? alternativeFor(entry.container, cabinet, wines, matchIds) : null,
+        };
+    });
+}
+
+const MIN_GROUP_BOTTLES = 3;
+const MIN_CONTAINER_BOTTLES = 4;
+const DOMINANCE = 0.75;
+const MAX_INTRUDERS = 2;
+const groupKey = (w) => `${cuveeKey(w.name)}|${normalizeText(w.winery).trim()}`.replace(/^\||\|$/g, "");
+// A bottle whose window is closing: explicitly marked drink/past, or carrying a
+// drink-by year that has arrived.
+function isDrinkSoon(wine) {
+    const code = (wine.disposition || "").toUpperCase();
+    if (code === "D" || code === "P")
+        return true;
+    const year = drinkByYear(wine);
+    return year !== null && year <= new Date().getFullYear();
+}
+function isKeeper(wine) {
+    return (wine.disposition || "").toUpperCase() === "H" && !isDrinkSoon(wine);
+}
+// Containers that actually exist in the current rack layout. Bottles can
+// outlive a deleted storage row, but proposing a move into one would be
+// proposing a move into nothing.
+function liveContainers(cabinets) {
+    const out = new Map();
+    for (const cabinet of cabinets) {
+        for (const container of containersOf(cabinet)) {
+            out.set(containerKey(container), { container, cabinet });
+        }
+    }
+    return out;
+}
+function placedWines(wines, live) {
+    return wines
+        .map((wine) => ({ wine, container: containerOf(wine) }))
+        .filter((x) => x.container !== null && live.has(containerKey(x.container)));
+}
+function dominantType(bottles) {
+    const counts = new Map();
+    for (const w of bottles)
+        counts.set(w.type, (counts.get(w.type) || 0) + 1);
+    let best = null;
+    let bestCount = 0;
+    for (const [type, count] of counts) {
+        if (count > bestCount) {
+            best = type;
+            bestCount = count;
+        }
+    }
+    if (best === null)
+        return null;
+    return { type: best, share: bestCount / bottles.length };
+}
+// Bottles of one wine scattered across several places. The fix is real work,
+// so only worth raising for a series big enough to be worth gathering.
+function findScatter(placed, live, cabinets, wines) {
+    const groups = new Map();
+    for (const entry of placed) {
+        const k = groupKey(entry.wine);
+        if (!k)
+            continue;
+        const list = groups.get(k);
+        if (list)
+            list.push(entry);
+        else
+            groups.set(k, [entry]);
+    }
+    const out = [];
+    for (const [key, entries] of groups) {
+        if (entries.length < MIN_GROUP_BOTTLES)
+            continue;
+        const byContainer = new Map();
+        for (const e of entries) {
+            const ck = containerKey(e.container);
+            const list = byContainer.get(ck);
+            if (list)
+                list.push(e);
+            else
+                byContainer.set(ck, [e]);
+        }
+        if (byContainer.size < 2)
+            continue;
+        // Gather towards wherever most of the series already sits, preferring the
+        // one that can actually take the rest.
+        const candidates = [...byContainer.entries()]
+            .map(([ck, held]) => {
+            const entry = live.get(ck);
+            const strays = entries.length - held.length;
+            const usage = containerUsage(entry.container, entry.cabinet, wines);
+            return { ck, held, strays, free: usage.free, container: entry.container };
+        })
+            .sort((a, b) => (b.free >= b.strays ? 1 : 0) - (a.free >= a.strays ? 1 : 0) || b.held.length - a.held.length || b.free - a.free);
+        const target = candidates[0];
+        if (!target || target.free < 1)
+            continue;
+        const strays = entries.filter((e) => containerKey(e.container) !== target.ck);
+        const movable = strays.slice(0, Number.isFinite(target.free) ? target.free : strays.length);
+        if (!movable.length)
+            continue;
+        const targetLabel = containerLabel(target.container, cabinets);
+        const name = entries[0].wine.name || entries[0].wine.winery || "This wine";
+        const partial = movable.length < strays.length;
+        out.push({
+            id: `consolidate:${key}`,
+            kind: "consolidate",
+            title: `${name} — ${entries.length} bottles across ${byContainer.size} places`,
+            detail: partial
+                ? `${targetLabel} holds ${target.held.length} of them and has room for ${movable.length} more, not all ${strays.length}. Gathering what fits still cuts the search in half.`
+                : `${targetLabel} already holds ${target.held.length} of them and has room for the other ${movable.length}.`,
+            wines: entries.map((e) => e.wine),
+            moves: movable.map((e) => ({
+                wine: e.wine,
+                from: e.container,
+                to: target.container,
+                fromLabel: containerLabel(e.container, cabinets),
+                toLabel: targetLabel,
+            })),
+        });
+    }
+    return out;
+}
+// A bin that is overwhelmingly one kind of wine, with a couple of bottles that
+// are not. The bin's purpose was never declared, but at this concentration it
+// plainly has one.
+function findOutliers(placed, live, cabinets, wines) {
+    const byContainer = new Map();
+    for (const e of placed) {
+        const ck = containerKey(e.container);
+        const list = byContainer.get(ck);
+        if (list)
+            list.push(e.wine);
+        else
+            byContainer.set(ck, [e.wine]);
+    }
+    // Where each type feels at home, for suggesting somewhere better.
+    const homes = new Map();
+    for (const [ck, bottles] of byContainer) {
+        const dom = dominantType(bottles);
+        if (!dom || dom.share < DOMINANCE)
+            continue;
+        const entry = live.get(ck);
+        const list = homes.get(dom.type) || [];
+        list.push({ ...entry, count: bottles.filter((w) => w.type === dom.type).length });
+        homes.set(dom.type, list);
+    }
+    const out = [];
+    for (const [ck, bottles] of byContainer) {
+        if (bottles.length < MIN_CONTAINER_BOTTLES)
+            continue;
+        const dom = dominantType(bottles);
+        if (!dom || dom.share < DOMINANCE)
+            continue;
+        const intruders = bottles.filter((w) => w.type !== dom.type);
+        if (!intruders.length || intruders.length > MAX_INTRUDERS)
+            continue;
+        const here = live.get(ck);
+        const moves = [];
+        for (const wine of intruders) {
+            const better = (homes.get(wine.type) || [])
+                .filter((h) => containerKey(h.container) !== ck)
+                .map((h) => ({ ...h, free: containerUsage(h.container, h.cabinet, wines).free }))
+                .filter((h) => h.free > 0)
+                .sort((a, b) => b.count - a.count || b.free - a.free)[0];
+            if (!better)
+                continue;
+            moves.push({
+                wine,
+                from: here.container,
+                to: better.container,
+                fromLabel: containerLabel(here.container, cabinets),
+                toLabel: containerLabel(better.container, cabinets),
+            });
+        }
+        if (!moves.length)
+            continue;
+        const label = containerLabel(here.container, cabinets);
+        const typeName = WINE_TYPE_LABELS[dom.type] || dom.type;
+        out.push({
+            id: `outlier:${ck}:${dom.type}`,
+            kind: "outlier",
+            title: `${label} is ${Math.round(dom.share * 100)}% ${typeName}`,
+            detail: `${intruders.length === 1 ? "One bottle does" : `${intruders.length} bottles do`} not belong to that group. Nothing says this bin is only for ${typeName} — but it nearly is.`,
+            wines: intruders,
+            moves,
+        });
+    }
+    return out;
+}
+// A bottle whose drinking window is closing, stuck behind or under bottles
+// meant to be kept. No move is proposed: freeing it means two bottles trading
+// places, and writing that as one-way moves would misdescribe the rack.
+function findBuried(placed, cabinets) {
+    const byContainer = new Map();
+    for (const e of placed) {
+        const ck = containerKey(e.container);
+        const list = byContainer.get(ck);
+        if (list)
+            list.push(e);
+        else
+            byContainer.set(ck, [e]);
+    }
+    const out = [];
+    for (const entries of byContainer.values()) {
+        if (entries.length < 2)
+            continue;
+        for (const e of entries) {
+            if (!isDrinkSoon(e.wine))
+                continue;
+            const depth = e.wine.depth || 0;
+            const inFront = entries.filter((o) => (o.wine.depth || 0) < depth && isKeeper(o.wine));
+            if (!inFront.length)
+                continue;
+            const label = containerLabel(e.container, cabinets);
+            const year = drinkByYear(e.wine);
+            out.push({
+                id: `buried:${e.wine.id}`,
+                kind: "buried",
+                title: `${e.wine.name || "A bottle"} is due${year ? ` by ${year}` : ""} but hard to reach`,
+                detail: `It sits at slot ${depth + 1} of ${label}, behind ${inFront.length === 1 ? "a bottle" : `${inFront.length} bottles`} marked to keep. Swap them by hand next time the door is open.`,
+                wines: [e.wine, ...inFront.map((o) => o.wine)],
+                moves: [],
+            });
+        }
+    }
+    return out;
+}
+const KIND_ORDER = ["consolidate", "outlier", "buried"];
+// Everything the cellar's own arrangement disagrees about, minus what the user
+// has waved off for good.
+function analyzeArrangement(wines, cabinets, dismissed = []) {
+    const live = liveContainers(cabinets);
+    const placed = placedWines(wines, live);
+    const hidden = new Set(dismissed);
+    return [
+        ...findScatter(placed, live, cabinets, wines),
+        ...findOutliers(placed, live, cabinets, wines),
+        ...findBuried(placed, cabinets),
+    ]
+        .filter((f) => !hidden.has(f.id))
+        .sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
+}
+
+const SECTIONS = [
+    {
+        kind: "consolidate",
+        title: "Scattered",
+        blurb: "Bottles of one wine sitting in several places.",
+    },
+    {
+        kind: "outlier",
+        title: "Odd ones out",
+        blurb: "Bins that are almost entirely one kind of wine, with a stray or two.",
+    },
+    {
+        kind: "buried",
+        title: "Hard to reach",
+        blurb: "Bottles due soon, stuck behind ones you meant to keep.",
+    },
+];
+// The arrangement report. Deliberately a place you visit rarely — after
+// scanning a cellar in, mostly — and leave empty once the moves are done.
+//
+// Every move is applied only when the user says it happened. The database
+// follows the bottles, never the other way around: renumbering a rack the
+// moment a suggestion is generated would make every later "where is it"
+// a lie.
+let ArrangementDialog = class ArrangementDialog extends i {
+    constructor() {
+        super(...arguments);
+        this.open = false;
+        this.wines = [];
+        this.cabinets = [];
+        this.dismissed = [];
+        this._busy = "";
+        this._error = "";
+    }
+    get _findings() {
+        return analyzeArrangement(this.wines, this.cabinets, this.dismissed);
+    }
+    // Apply every move in a finding, then tell the card to reload. Moves are
+    // sequential on purpose: each one consumes a slot the next one might have
+    // been aiming at.
+    async _applyMoves(finding) {
+        this._busy = finding.id;
+        this._error = "";
+        try {
+            let known = [...this.wines];
+            for (const move of finding.moves) {
+                const cabinet = this.cabinets.find((c) => c.id === move.to.cabinetId);
+                // Re-derive the landing slot per move rather than trusting the depth
+                // the analysis saw: earlier moves in this same batch have taken slots
+                // since, and the cellar may have changed under us.
+                const patch = placementIn(move.to, cabinet, known.filter((w) => w.id !== move.wine.id));
+                if (!patch) {
+                    this._error = `${move.toLabel} filled up before the move could be recorded.`;
+                    break;
+                }
+                await this.hass.callWS({
+                    type: "wine_cellar/move_wine",
+                    wine_id: move.wine.id,
+                    cabinet_id: patch.cabinet_id,
+                    row: patch.row ?? undefined,
+                    col: patch.col ?? undefined,
+                    zone: patch.zone,
+                    depth: patch.depth,
+                });
+                known = known.map((w) => (w.id === move.wine.id ? { ...w, ...patch } : w));
+            }
+            this.dispatchEvent(new CustomEvent("moves-applied", { bubbles: true, composed: true }));
+        }
+        catch (err) {
+            this._error = `Could not record the move: ${err?.message || err}`;
+        }
+        finally {
+            this._busy = "";
+        }
+    }
+    _dismiss(finding) {
+        this.dispatchEvent(new CustomEvent("dismiss-finding", {
+            detail: { id: finding.id },
+            bubbles: true,
+            composed: true,
+        }));
+    }
+    _renderMove(move) {
+        return b `
+      <div class="arr-move">
+        <span>${move.wine.name || "Bottle"}${move.wine.vintage ? ` ${move.wine.vintage}` : ""}</span>
+        <span class="arr-move-where">${move.fromLabel}</span>
+        <span class="arr-move-arrow">→</span>
+        <span class="arr-move-where">${move.toLabel}</span>
+      </div>
+    `;
+    }
+    _renderFinding(finding) {
+        const busy = this._busy === finding.id;
+        return b `
+      <div class="arr-finding">
+        <div class="arr-title">${finding.title}</div>
+        <div class="arr-detail">${finding.detail}</div>
+        ${finding.moves.length
+            ? b `<div class="arr-moves">${finding.moves.map((m) => this._renderMove(m))}</div>`
+            : A}
+        <div class="arr-actions">
+          ${finding.moves.length
+            ? b `
+                <button class="btn btn-primary" ?disabled=${busy} @click=${() => this._applyMoves(finding)}>
+                  ${busy
+                ? "Recording..."
+                : finding.moves.length === 1
+                    ? "I moved it"
+                    : `I moved all ${finding.moves.length}`}
+                </button>
+              `
+            : A}
+          <button class="btn btn-outline" ?disabled=${busy} @click=${() => this._dismiss(finding)}>
+            ${finding.moves.length ? "Leave it as it is" : "Noted"}
+          </button>
+        </div>
+      </div>
+    `;
+    }
+    render() {
+        if (!this.open)
+            return A;
+        const findings = this._findings;
+        return b `
+      <div class="dialog-overlay" @click=${() => this.dispatchEvent(new CustomEvent("close"))}>
+        <div class="dialog" style="max-width:620px" @click=${(e) => e.stopPropagation()}>
+          <div class="dialog-header">🧹 Arrangement</div>
+
+          <div class="dialog-body">
+            ${findings.length === 0
+            ? b `
+                  <div class="arr-empty">
+                    Nothing worth moving. Your cellar agrees with itself.
+                  </div>
+                `
+            : b `
+                  <div class="arr-intro">
+                    Read from where your bottles already are — there are no rules to
+                    configure. Tick a move once you have actually made it; nothing is
+                    recorded before that.
+                  </div>
+                  ${SECTIONS.map((section) => {
+                const inSection = findings.filter((f) => f.kind === section.kind);
+                if (!inSection.length)
+                    return A;
+                return b `
+                      <div class="arr-section">
+                        <div class="arr-section-title">${section.title}</div>
+                        <div class="arr-section-blurb">${section.blurb}</div>
+                        ${inSection.map((f) => this._renderFinding(f))}
+                      </div>
+                    `;
+            })}
+                `}
+            ${this._error ? b `<div class="arr-error">${this._error}</div>` : A}
+          </div>
+
+          <div class="dialog-footer">
+            <button class="btn btn-outline" @click=${() => this.dispatchEvent(new CustomEvent("close"))}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    }
+};
+ArrangementDialog.styles = [
+    sharedStyles,
+    i$3 `
+      .arr-intro {
+        font-size: 0.85em;
+        color: var(--wc-text-secondary);
+        margin-bottom: 14px;
+      }
+
+      .arr-section {
+        margin-bottom: 18px;
+      }
+
+      .arr-section-title {
+        font-weight: 600;
+        font-size: 0.9em;
+        margin-bottom: 2px;
+      }
+
+      .arr-section-blurb {
+        font-size: 0.78em;
+        color: var(--wc-text-secondary);
+        margin-bottom: 8px;
+      }
+
+      .arr-finding {
+        border: 1px solid var(--wc-border);
+        border-radius: 10px;
+        padding: 10px 12px;
+        margin-bottom: 8px;
+      }
+
+      .arr-title {
+        font-weight: 600;
+        font-size: 0.88em;
+      }
+
+      .arr-detail {
+        font-size: 0.78em;
+        color: var(--wc-text-secondary);
+        margin-top: 3px;
+      }
+
+      .arr-moves {
+        margin-top: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .arr-move {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.78em;
+        flex-wrap: wrap;
+      }
+
+      .arr-move-where {
+        color: var(--wc-text-secondary);
+      }
+
+      .arr-move-arrow {
+        opacity: 0.6;
+      }
+
+      .arr-actions {
+        margin-top: 10px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .arr-empty {
+        text-align: center;
+        padding: 28px 12px;
+        color: var(--wc-text-secondary);
+        font-size: 0.9em;
+      }
+
+      .arr-error {
+        color: #c62828;
+        font-size: 0.8em;
+        margin-top: 8px;
+      }
+    `,
+];
+__decorate([
+    n({ type: Boolean })
+], ArrangementDialog.prototype, "open", void 0);
+__decorate([
+    n({ attribute: false })
+], ArrangementDialog.prototype, "hass", void 0);
+__decorate([
+    n({ attribute: false })
+], ArrangementDialog.prototype, "wines", void 0);
+__decorate([
+    n({ attribute: false })
+], ArrangementDialog.prototype, "cabinets", void 0);
+__decorate([
+    n({ attribute: false })
+], ArrangementDialog.prototype, "dismissed", void 0);
+__decorate([
+    r()
+], ArrangementDialog.prototype, "_busy", void 0);
+__decorate([
+    r()
+], ArrangementDialog.prototype, "_error", void 0);
+ArrangementDialog = __decorate([
+    t("arrangement-dialog")
+], ArrangementDialog);
+
 let CabinetGrid = class CabinetGrid extends i {
     constructor() {
         super(...arguments);
@@ -2112,6 +2957,48 @@ StarRating = __decorate([
     t("star-rating")
 ], StarRating);
 
+// Shared camera diagnostics.
+//
+// Both camera components used to decide what went wrong by substring-matching
+// err.message ("NotAllowed", "Permission"). The name is in err.name, and
+// Safari's message text ("The request is not allowed by the user agent or the
+// platform in the current context.") matches neither, so on iOS every failure
+// fell through to a generic "could not access camera" that told the user
+// nothing about the actual cause.
+// Why the live camera cannot even be attempted, or "" when it can be.
+//
+// Over plain http:// the page is not a secure context and the browser does not
+// expose navigator.mediaDevices at all — calling getUserMedia throws a
+// TypeError that reads like a mysterious failure. There is no code-side fix
+// for that, so the honest move is to say it up front and point at the device's
+// own camera, which needs no secure context.
+function cameraBlockedReason() {
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+        return ("The live camera needs a secure connection. Home Assistant is being served over " +
+            "http://, and browsers only allow camera access over https:// (or on localhost).");
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+        return "This browser does not offer live camera access.";
+    }
+    return "";
+}
+// A getUserMedia failure, in words that suggest what to do about it.
+function describeCameraError(err) {
+    switch (err?.name) {
+        case "NotAllowedError":
+        case "SecurityError":
+            return "Camera access was denied. Allow it for this site in your browser settings.";
+        case "NotFoundError":
+        case "OverconstrainedError":
+            return "No camera found on this device.";
+        case "NotReadableError":
+        case "AbortError":
+            return "The camera is busy or unavailable — another app may be using it.";
+        default:
+            return `Could not access the camera${err?.name ? ` (${err.name})` : ""}.`;
+    }
+}
+
 let LabelCamera = class LabelCamera extends i {
     constructor() {
         super(...arguments);
@@ -2139,6 +3026,14 @@ let LabelCamera = class LabelCamera extends i {
     }
     async _startCamera() {
         this._error = "";
+        // Ask why before asking for the camera: over http:// there is nothing to
+        // ask, and a TypeError from a missing navigator.mediaDevices would read as
+        // a generic failure.
+        const blocked = cameraBlockedReason();
+        if (blocked) {
+            this._error = blocked;
+            return;
+        }
         try {
             this._stream = await navigator.mediaDevices.getUserMedia({
                 video: {
@@ -2156,13 +3051,7 @@ let LabelCamera = class LabelCamera extends i {
             }
         }
         catch (err) {
-            const msg = err?.message || String(err);
-            if (msg.includes("NotAllowed") || msg.includes("Permission")) {
-                this._error = "Camera access denied. Use the upload button below instead.";
-            }
-            else {
-                this._error = "Could not access camera. Use the upload button below instead.";
-            }
+            this._error = describeCameraError(err);
         }
     }
     _stopCamera() {
@@ -2252,7 +3141,12 @@ let LabelCamera = class LabelCamera extends i {
         }
         return b `
       ${this._error
-            ? b `<div class="error-message">${this._error}</div>`
+            ? b `
+            <div class="error-message">${this._error}</div>
+            <div class="hint">
+              The button below opens your device's own camera, which works either way.
+            </div>
+          `
             : b `
             <div class="camera-container">
               <video autoplay playsinline muted></video>
@@ -2265,7 +3159,7 @@ let LabelCamera = class LabelCamera extends i {
 
       <div class="fallback-area">
         <label class="file-input-label">
-          📁 Upload from gallery
+          ${this._error ? "📷 Take a photo" : "📁 Upload from gallery"}
           <input type="file" accept="image/*" capture="environment" @change=${this._onFileSelected} />
         </label>
       </div>
@@ -3940,332 +4834,6 @@ WineDetailDialog = __decorate([
     t("wine-detail-dialog")
 ], WineDetailDialog);
 
-// A bin's real capacity: for a box row the sum of its boxes, otherwise the
-// row's own capacity.
-function zoneCapacity(sr) {
-    return sr.type === "box"
-        ? (sr.boxes || []).reduce((sum, b) => sum + b, 0) || sr.capacity || 0
-        : sr.capacity || 0;
-}
-function storageRowFor(cabinet, zone) {
-    if (!cabinet || !zone || zone === "bottom")
-        return undefined;
-    return (cabinet.storage_rows || []).find((sr) => `storage-${sr.row}` === zone);
-}
-function containerKey(c) {
-    return `${c.cabinetId}|${c.zone}|${c.row ?? ""}|${c.col ?? ""}`;
-}
-function sameContainer(a, b) {
-    return containerKey(a) === containerKey(b);
-}
-// The container a bottle currently sits in, or null when it is unassigned.
-function containerOf(wine) {
-    if (!wine.cabinet_id)
-        return null;
-    if (wine.zone === "bottom") {
-        return { cabinetId: wine.cabinet_id, kind: "bottom", zone: "bottom", row: null, col: null };
-    }
-    if (wine.zone) {
-        return { cabinetId: wine.cabinet_id, kind: "zone", zone: wine.zone, row: null, col: null };
-    }
-    if (wine.row !== null && wine.col !== null) {
-        return { cabinetId: wine.cabinet_id, kind: "slot", zone: "", row: wine.row, col: wine.col };
-    }
-    return null;
-}
-function winesInContainer(c, wines) {
-    return wines.filter((w) => {
-        const wc = containerOf(w);
-        return wc !== null && sameContainer(wc, c);
-    });
-}
-function containerCapacity(c, cabinet) {
-    if (!cabinet)
-        return 0;
-    if (c.kind === "bottom")
-        return 0; // unlimited
-    if (c.kind === "zone") {
-        const sr = storageRowFor(cabinet, c.zone);
-        return sr ? zoneCapacity(sr) : 0;
-    }
-    return cabinet.depth || 1;
-}
-function containerUsage(c, cabinet, wines) {
-    const capacity = containerCapacity(c, cabinet);
-    const occupied = new Set(winesInContainer(c, wines).map((w) => w.depth || 0));
-    // First free slot rather than "one past the last": a bottle removed from the
-    // middle leaves a gap that should be reused, not skipped over.
-    let nextDepth = 0;
-    while (occupied.has(nextDepth))
-        nextDepth++;
-    const unlimited = capacity <= 0;
-    return {
-        used: occupied.size,
-        capacity,
-        nextDepth,
-        free: unlimited ? Infinity : Math.max(0, capacity - occupied.size),
-        full: !unlimited && (occupied.size >= capacity || nextDepth >= capacity),
-    };
-}
-// Human-readable name for the container itself — no slot number, since a
-// container holds several bottles.
-function containerLabel(c, cabinets) {
-    const cabinet = cabinets.find((cab) => cab.id === c.cabinetId);
-    if (!cabinet)
-        return "Unassigned";
-    if (c.kind === "bottom")
-        return `${cabinet.name} · ${cabinet.bottom_zone_name || "Storage"}`;
-    if (c.kind === "zone") {
-        const sr = storageRowFor(cabinet, c.zone);
-        return `${cabinet.name} · ${sr?.name || (sr?.type === "box" ? "Box" : "Bulk Bin")}`;
-    }
-    const idx = getRackSlots(cabinet).findIndex((s) => s.row === c.row && s.col === c.col);
-    const slot = idx >= 0 ? `Slot ${idx + 1}` : `R${(c.row ?? 0) + 1}C${(c.col ?? 0) + 1}`;
-    return `${cabinet.name} · ${slot}`;
-}
-// Every container in a cabinet, in the order the grid draws them: bins and
-// boxes first, then the bottom zone, then the grid slots in reading order.
-function containersOf(cabinet) {
-    const out = [];
-    for (const sr of cabinet.storage_rows || []) {
-        out.push({ cabinetId: cabinet.id, kind: "zone", zone: `storage-${sr.row}`, row: null, col: null });
-    }
-    if (cabinet.has_bottom_zone) {
-        out.push({ cabinetId: cabinet.id, kind: "bottom", zone: "bottom", row: null, col: null });
-    }
-    for (const s of getRackSlots(cabinet)) {
-        out.push({ cabinetId: cabinet.id, kind: "slot", zone: "", row: s.row, col: s.col });
-    }
-    return out;
-}
-// The wine-shaped patch that puts a bottle into `c`, at its first free depth.
-// Returns null when the container has no room left.
-function placementIn(c, cabinet, wines) {
-    const usage = containerUsage(c, cabinet, wines);
-    if (usage.full)
-        return null;
-    return {
-        cabinet_id: c.cabinetId,
-        zone: c.zone,
-        row: c.row,
-        col: c.col,
-        depth: usage.nextDepth,
-    };
-}
-// Where each of `count` identical bottles would land, given a chosen
-// destination. Returns fewer entries than asked when the destination runs out
-// of room, so the caller can clamp rather than silently dropping bottles.
-function planSlots(target, cabinets, wines, count) {
-    const cabinet = cabinets.find((c) => c.id === target.cabinet_id);
-    const unplaced = { row: null, col: null, zone: "", depth: 0 };
-    // No rack chosen: the bottles go in unassigned, where nothing can clash.
-    if (!cabinet)
-        return Array.from({ length: count }, () => ({ ...unplaced }));
-    const out = [];
-    const placed = [];
-    const known = () => [...wines, ...placed];
-    const fill = (c) => {
-        while (out.length < count) {
-            const usage = containerUsage(c, cabinet, known());
-            if (usage.full)
-                break;
-            out.push({ row: c.row, col: c.col, zone: c.zone, depth: usage.nextDepth });
-            // Feed each placement back in so the next bottle sees the slot as taken.
-            placed.push({
-                cabinet_id: c.cabinetId,
-                zone: c.zone,
-                row: c.row,
-                col: c.col,
-                depth: usage.nextDepth,
-            });
-        }
-    };
-    if (target.zone) {
-        const c = {
-            cabinetId: cabinet.id,
-            kind: target.zone === "bottom" ? "bottom" : "zone",
-            zone: target.zone,
-            row: null,
-            col: null,
-        };
-        // An unlimited container would never stop filling; cap it at the request.
-        if (c.kind === "zone" && !storageRowFor(cabinet, target.zone))
-            return out;
-        fill(c);
-        return out;
-    }
-    // Grid: fill the chosen slot's depths first, then carry on through the
-    // rack's remaining slots in reading order — a six-pack should not stop at
-    // the first slot just because it only holds one bottle.
-    const slots = getRackSlots(cabinet);
-    const startIdx = Math.max(0, slots.findIndex((x) => x.row === target.row && x.col === target.col));
-    const ordered = [...slots.slice(startIdx), ...slots.slice(0, startIdx)];
-    for (const slot of ordered) {
-        fill({ cabinetId: cabinet.id, kind: "slot", zone: "", row: slot.row, col: slot.col });
-        if (out.length >= count)
-            break;
-    }
-    return out;
-}
-// Free space at a chosen destination; Infinity when there is no limit.
-function freeAt(target, cabinets, wines) {
-    const cabinet = cabinets.find((c) => c.id === target.cabinet_id);
-    if (!cabinet)
-        return Infinity;
-    if (target.zone) {
-        const c = {
-            cabinetId: cabinet.id,
-            kind: target.zone === "bottom" ? "bottom" : "zone",
-            zone: target.zone,
-            row: null,
-            col: null,
-        };
-        if (c.kind === "zone" && !storageRowFor(cabinet, target.zone))
-            return 0;
-        return containerUsage(c, cabinet, wines).free;
-    }
-    // No zone: everything still free across the cabinet's grid slots.
-    const total = getRackSlots(cabinet).length * (cabinet.depth || 1);
-    const used = wines.filter((w) => w.cabinet_id === cabinet.id && w.row !== null && w.col !== null).length;
-    return Math.max(0, total - used);
-}
-
-const TIER_ORDER = ["same-wine", "same-winery", "same-family"];
-const key = (value) => normalizeText(value).trim();
-// Names are free text and a good half of them carry the vintage ("Sassicaia
-// 2019") or a bottling note ("Margaux 2018 (Case #2)"). Comparing them raw
-// would make "same wine, any vintage" almost never fire, which is the one
-// tier the user actually cares about.
-function cuveeKey(value) {
-    return key(value)
-        .replace(/\((?:[^()]*)\)/g, " ")
-        .replace(/\b(?:19|20)\d{2}\b/g, " ")
-        .replace(/[^a-z0-9]+/g, " ")
-        .trim();
-}
-function tierOf(draft, wine) {
-    const dName = cuveeKey(draft.name);
-    const dWinery = key(draft.winery);
-    const wName = cuveeKey(wine.name);
-    const wWinery = key(wine.winery);
-    // Same wine, any vintage: the cuvée is what identifies it, not the year.
-    // With no winery recorded on either side the name has to carry it alone.
-    if (dName && dName === wName && (!dWinery || !wWinery || dWinery === wWinery))
-        return "same-wine";
-    if (dWinery && dWinery === wWinery)
-        return "same-winery";
-    const dRegion = key(draft.region);
-    if (dRegion && dRegion === key(wine.region) && draft.type && draft.type === wine.type) {
-        return "same-family";
-    }
-    return null;
-}
-function vintageList(wines) {
-    const years = Array.from(new Set(wines.map((w) => w.vintage).filter((v) => typeof v === "number"))).sort((a, b) => a - b);
-    return years.join(", ");
-}
-function reasonFor(tier, draft, matches) {
-    const n = matches.length;
-    const bottles = n === 1 ? "1 bottle" : `${n} bottles`;
-    if (tier === "same-wine") {
-        const years = vintageList(matches);
-        const sameYear = matches.every((w) => w.vintage === draft.vintage);
-        if (sameYear)
-            return `${bottles} of this exact wine already here`;
-        return years ? `${bottles} of this wine here (${years})` : `${bottles} of this wine already here`;
-    }
-    if (tier === "same-winery") {
-        const winery = matches[0]?.winery || draft.winery || "this winery";
-        return `${bottles} from ${winery} here`;
-    }
-    const first = matches[0];
-    const region = first?.region || draft.region || "";
-    const type = first ? WINE_TYPE_LABELS[first.type] || "" : "";
-    return `${bottles} of ${[region, type].filter(Boolean).join(" ")} here`.replace(/\s+/g, " ");
-}
-// The best place to send the bottle instead, when the natural destination is
-// full: somewhere in the same cabinet with room, preferring a container that
-// already holds relatives, then simply the nearest one with space.
-function alternativeFor(full, cabinet, wines, matchIds) {
-    const all = containersOf(cabinet);
-    const fullIdx = all.findIndex((c) => sameContainer(c, full));
-    const scored = all
-        .map((c, idx) => ({ c, idx, usage: containerUsage(c, cabinet, wines) }))
-        .filter((x) => !sameContainer(x.c, full) && !x.usage.full)
-        .map((x) => ({
-        ...x,
-        relatives: wines.filter((w) => {
-            const wc = containerOf(w);
-            return wc !== null && sameContainer(wc, x.c) && matchIds.has(w.id);
-        }).length,
-    }));
-    if (!scored.length)
-        return null;
-    scored.sort((a, b) => b.relatives - a.relatives ||
-        Math.abs(a.idx - fullIdx) - Math.abs(b.idx - fullIdx) ||
-        b.usage.free - a.usage.free);
-    const best = scored[0];
-    return {
-        container: best.c,
-        label: containerLabel(best.c, [cabinet]),
-        free: best.usage.free,
-    };
-}
-// Ranked destinations for a bottle about to be added. Empty when the cellar
-// holds nothing related — better to say nothing than to invent a reason.
-function suggestDestinations(draft, wines, cabinets, limit = 3) {
-    const byContainer = new Map();
-    for (const wine of wines) {
-        const container = containerOf(wine);
-        if (!container)
-            continue;
-        // Never point at a bin the rack layout no longer knows about: bottles can
-        // outlive a deleted storage row, but sending a new one there would be
-        // sending it nowhere.
-        const cabinet = cabinets.find((c) => c.id === container.cabinetId);
-        if (!cabinet)
-            continue;
-        if (container.kind === "zone" && !storageRowFor(cabinet, container.zone))
-            continue;
-        if (container.kind === "bottom" && !cabinet.has_bottom_zone)
-            continue;
-        const tier = tierOf(draft, wine);
-        if (!tier)
-            continue;
-        const k = `${containerKey(container)}::${tier}`;
-        const entry = byContainer.get(k);
-        if (entry)
-            entry.matches.push(wine);
-        else
-            byContainer.set(k, { container, tier, matches: [wine] });
-    }
-    // A container reached through several tiers is only worth listing once, at
-    // its most specific tier.
-    const bestPerContainer = new Map();
-    for (const entry of byContainer.values()) {
-        const k = containerKey(entry.container);
-        const current = bestPerContainer.get(k);
-        if (!current || TIER_ORDER.indexOf(entry.tier) < TIER_ORDER.indexOf(current.tier)) {
-            bestPerContainer.set(k, entry);
-        }
-    }
-    const ranked = Array.from(bestPerContainer.values()).sort((a, b) => TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier) || b.matches.length - a.matches.length);
-    return ranked.slice(0, limit).map((entry) => {
-        const cabinet = cabinets.find((c) => c.id === entry.container.cabinetId);
-        const usage = containerUsage(entry.container, cabinet, wines);
-        const matchIds = new Set(entry.matches.map((w) => w.id));
-        return {
-            container: entry.container,
-            label: containerLabel(entry.container, cabinets),
-            usage,
-            tier: entry.tier,
-            reason: reasonFor(entry.tier, draft, entry.matches),
-            matches: entry.matches,
-            alternative: usage.full && cabinet ? alternativeFor(entry.container, cabinet, wines, matchIds) : null,
-        };
-    });
-}
-
 let BarcodeScanner = class BarcodeScanner extends i {
     constructor() {
         super(...arguments);
@@ -4304,6 +4872,16 @@ let BarcodeScanner = class BarcodeScanner extends i {
             }));
             return;
         }
+        const blocked = cameraBlockedReason();
+        if (blocked) {
+            this._error = `${blocked} Enter the barcode manually below.`;
+            this.dispatchEvent(new CustomEvent("scanner-error", {
+                detail: { error: this._error },
+                bubbles: true,
+                composed: true,
+            }));
+            return;
+        }
         try {
             this._stream = await navigator.mediaDevices.getUserMedia({
                 video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -4322,16 +4900,7 @@ let BarcodeScanner = class BarcodeScanner extends i {
             this._scanFrame();
         }
         catch (err) {
-            const msg = err?.message || String(err);
-            if (msg.includes("NotAllowed") || msg.includes("Permission")) {
-                this._error = "Camera access denied. Please allow camera access in your browser settings.";
-            }
-            else if (msg.includes("NotFound") || msg.includes("no camera")) {
-                this._error = "No camera found on this device.";
-            }
-            else {
-                this._error = `Camera error: ${msg}`;
-            }
+            this._error = `${describeCameraError(err)} Enter the barcode manually below.`;
             this.dispatchEvent(new CustomEvent("scanner-error", {
                 detail: { error: this._error },
                 bubbles: true,
@@ -11081,6 +11650,8 @@ let WineCellarCard = class WineCellarCard extends i {
         this._showVivinoAiSettings = false;
         this._showWineList = false;
         this._showInventory = false;
+        this._showArrangement = false;
+        this._dismissedArrangements = [];
         this._buyList = [];
         this._addToBuyListMode = false;
         this._movingBuyListItem = null;
@@ -11156,6 +11727,7 @@ let WineCellarCard = class WineCellarCard extends i {
             this._metadataCurrency = capResult?.metadata_currency || "USD";
             this._supportedCurrencies = capResult?.supported_currencies || ["USD", "EUR", "GBP", "CHF"];
             this._aiFallbackAlways = capResult?.ai_fallback_always || false;
+            this._dismissedArrangements = capResult?.dismissed_arrangements || [];
             this._buyList = buyListResult?.buy_list || [];
             // Refresh selected wine if detail dialog is open
             if (this._selectedWine) {
@@ -12122,6 +12694,32 @@ let WineCellarCard = class WineCellarCard extends i {
         }
         this._analyzing = false;
     }
+    // --- Arrangement ---
+    // Recomputed on render rather than cached: it reads the same wines and
+    // cabinets the card already holds, and a stale count would point at moves
+    // that have since been made.
+    get _arrangementFindings() {
+        return analyzeArrangement(this._wines, this._cabinets, this._dismissedArrangements);
+    }
+    // "Leave it as it is" has to stick, or the count becomes a badge people
+    // learn to ignore. Applied locally first so the finding disappears at once.
+    async _dismissArrangement(id) {
+        if (this._dismissedArrangements.includes(id))
+            return;
+        const previous = this._dismissedArrangements;
+        const next = [...previous, id];
+        this._dismissedArrangements = next;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/update_settings",
+                updates: { dismissed_arrangements: next },
+            });
+        }
+        catch (err) {
+            this._dismissedArrangements = previous;
+            this._showToast("Failed to dismiss the suggestion");
+        }
+    }
     // --- Metadata language (Vivino/AI) ---
     async _setMetadataLanguage(lang) {
         if (lang === this._metadataLanguage)
@@ -12410,6 +13008,18 @@ let WineCellarCard = class WineCellarCard extends i {
                   <span class="stat-value">${this._stats.available_slots}</span>
                   available
                 </div>
+                ${this._arrangementFindings.length
+                ? b `
+                      <div
+                        class="stat stat-action"
+                        title="Suggestions read from where your bottles already are"
+                        @click=${() => (this._showArrangement = true)}
+                      >
+                        <span class="stat-value">🧹 ${this._arrangementFindings.length}</span>
+                        ${this._arrangementFindings.length === 1 ? "tidy-up" : "tidy-ups"}
+                      </div>
+                    `
+                : A}
                 ${this._stats.total_value
                 ? b `
                       <div class="stat">
@@ -12852,6 +13462,18 @@ let WineCellarCard = class WineCellarCard extends i {
           @wine-added=${this._onWineAdded}
           @buy-list-updated=${() => this._loadData()}
         ></wine-list-dialog>
+
+        <!-- Arrangement report -->
+        <arrangement-dialog
+          .open=${this._showArrangement}
+          .hass=${this.hass}
+          .wines=${this._wines}
+          .cabinets=${this._cabinets}
+          .dismissed=${this._dismissedArrangements}
+          @close=${() => (this._showArrangement = false)}
+          @moves-applied=${() => this._loadData()}
+          @dismiss-finding=${(e) => this._dismissArrangement(e.detail.id)}
+        ></arrangement-dialog>
 
         <!-- Inventory Dialog -->
         <inventory-dialog
@@ -13522,6 +14144,22 @@ WineCellarCard.styles = [
         font-size: 0.9em;
       }
 
+      /* The arrangement count is the only stat you can act on, and it is only
+         there at all when the cellar has something to say. */
+      .stat-action {
+        cursor: pointer;
+        border-radius: 6px;
+        padding: 2px 8px;
+        margin: -2px 0;
+        border: 1px solid var(--wc-border);
+        transition: all 0.15s;
+      }
+
+      .stat-action:hover {
+        border-color: var(--wc-primary);
+        background: rgba(114, 47, 55, 0.08);
+      }
+
       /* Phone: stack cabinets vertically */
       @media (max-width: 599px) {
         .header-row {
@@ -13664,6 +14302,12 @@ __decorate([
 __decorate([
     r()
 ], WineCellarCard.prototype, "_showInventory", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_showArrangement", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_dismissedArrangements", void 0);
 __decorate([
     r()
 ], WineCellarCard.prototype, "_buyList", void 0);

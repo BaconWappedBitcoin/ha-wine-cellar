@@ -42,7 +42,7 @@ const key = (value: unknown) => normalizeText(value).trim();
 // 2019") or a bottling note ("Margaux 2018 (Case #2)"). Comparing them raw
 // would make "same wine, any vintage" almost never fire, which is the one
 // tier the user actually cares about.
-function cuveeKey(value: unknown): string {
+export function cuveeKey(value: unknown): string {
   return key(value)
     .replace(/\((?:[^()]*)\)/g, " ")
     .replace(/\b(?:19|20)\d{2}\b/g, " ")
