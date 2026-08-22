@@ -194,7 +194,7 @@ def _register_frontend_resource(hass: HomeAssistant) -> None:
             )
 
     # If HA is already running (e.g. integration reload), register immediately.
-    # Otherwise wait for full startup so lovelace_resources is available.
+    # Otherwise wait for full startup so the resource collection exists.
     if hass.is_running:
         hass.async_create_task(_async_add_resource())
     else:
