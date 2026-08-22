@@ -5089,6 +5089,10 @@ let AddWineDialog = class AddWineDialog extends i {
         this._frontImageRaw = "";
         this._showBackPrompt = false;
         this._searchResults = [];
+        this._vivinoEnriching = false;
+        // Bumped per enrichment so a late reply from a previous bottle cannot land
+        // in the current one.
+        this._enrichToken = 0;
     }
     get _steps() {
         return this.buyListMode
@@ -5111,6 +5115,9 @@ let AddWineDialog = class AddWineDialog extends i {
                 this._captureStage = "front";
                 this._frontImageRaw = "";
                 this._showBackPrompt = false;
+                // Any enrichment still in flight belongs to the previous bottle.
+                this._enrichToken++;
+                this._vivinoEnriching = false;
                 this._wineData = {
                     name: "",
                     winery: "",
@@ -5316,6 +5323,8 @@ let AddWineDialog = class AddWineDialog extends i {
                 this._step = "details";
                 this._captureStage = "front";
                 this._frontImageRaw = "";
+                // Deliberately not awaited: the form is already usable.
+                void this._enrichFromVivino(++this._enrichToken);
             }
             else {
                 // Show specific error from backend if available
@@ -5330,6 +5339,75 @@ let AddWineDialog = class AddWineDialog extends i {
             this._error = `Label recognition error: ${msg}`;
         }
         this._labelLoading = false;
+    }
+    // The label path is AI-only: the model reads what is printed on the bottle,
+    // but Vivino's rating, review count and id exist nowhere in that reading —
+    // so a wine added by photo used to arrive with none of them, and without a
+    // vivino_id it could never be refreshed the cheap way afterwards. Since a
+    // barcode that finds no match also falls through to the label, that covered
+    // every bottle whose barcode is not in a grocery database.
+    //
+    // It runs behind the details step rather than in front of it. Waiting on a
+    // second lookup before showing anything would spend the user's time on data
+    // they are not reading yet.
+    async _enrichFromVivino(token) {
+        const d = this._wineData;
+        const query = [d.winery, d.name, d.vintage].filter(Boolean).join(" ").trim();
+        if (!query)
+            return;
+        this._vivinoEnriching = true;
+        try {
+            const res = await this.hass.callWS({ type: "wine_cellar/search_wine", query });
+            const top = res?.results?.[0];
+            // Bail if the user has moved on, scanned something else, or closed up:
+            // writing into _wineData then would be writing into a different bottle.
+            if (!top || token !== this._enrichToken)
+                return;
+            if (!this._looksLikeSameWine(top))
+                return;
+            const cur = this._wineData;
+            const keepExisting = (mine, theirs) => mine !== undefined && mine !== null && mine !== "" ? mine : theirs || mine;
+            this._wineData = {
+                ...cur,
+                // Only Vivino can supply these, so they are always taken.
+                rating: top.rating ?? cur.rating,
+                ratings_count: top.ratings_count ?? cur.ratings_count,
+                vivino_id: top.vivino_id ?? cur.vivino_id,
+                vivino_updated_at: new Date().toISOString(),
+                vivino_checked_at: new Date().toISOString(),
+                // These the AI may already have read off the bottle, and it was
+                // looking at the actual bottle — fill the gaps, do not overwrite.
+                region: keepExisting(cur.region, top.region),
+                country: keepExisting(cur.country, top.country),
+                grape_variety: keepExisting(cur.grape_variety, top.grape_variety),
+                alcohol: keepExisting(cur.alcohol, top.alcohol),
+                description: keepExisting(cur.description, top.description),
+                food_pairings: keepExisting(cur.food_pairings, top.food_pairings),
+            };
+            // name, winery, vintage and image_url are deliberately left alone: the
+            // photo is the user's own, and Vivino's nearest match is not necessarily
+            // spelled the way the label is.
+        }
+        catch (err) {
+            // Enrichment is a bonus. Failing it must not turn into an error the
+            // user has to dismiss on a wine that was recognised perfectly well.
+            console.warn("Wine Cellar: Vivino enrichment failed", err);
+        }
+        finally {
+            if (token === this._enrichToken)
+                this._vivinoEnriching = false;
+        }
+    }
+    // Vivino answers every query with something. Attaching a stranger's rating
+    // to this bottle would be worse than having no rating at all.
+    _looksLikeSameWine(candidate) {
+        const d = this._wineData;
+        const winery = normalizeText(d.winery).trim();
+        const theirWinery = normalizeText(candidate.winery).trim();
+        if (winery && theirWinery && winery === theirWinery)
+            return true;
+        const name = cuveeKey(d.name);
+        return !!name && name === cuveeKey(candidate.name);
     }
     _goToStep(step) {
         this._step = step;
@@ -5670,6 +5748,9 @@ let AddWineDialog = class AddWineDialog extends i {
     _renderDetailsStep() {
         return b `
       <div class="dialog-body">
+        ${this._vivinoEnriching
+            ? b `<div class="vivino-enriching">🍇 Checking Vivino for a rating…</div>`
+            : A}
         <div class="form-group">
           <label>Wine Name *</label>
           <input
@@ -6318,6 +6399,12 @@ AddWineDialog.styles = [
         margin-top: 12px;
       }
 
+      .vivino-enriching {
+        font-size: 0.78em;
+        color: var(--wc-text-secondary);
+        margin-bottom: 10px;
+      }
+
       .suggest-strip {
         display: flex;
         flex-direction: column;
@@ -6729,6 +6816,9 @@ __decorate([
 __decorate([
     r()
 ], AddWineDialog.prototype, "_searchResults", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_vivinoEnriching", void 0);
 AddWineDialog = __decorate([
     t("add-wine-dialog")
 ], AddWineDialog);
