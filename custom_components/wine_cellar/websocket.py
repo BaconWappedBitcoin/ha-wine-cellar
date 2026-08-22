@@ -18,6 +18,8 @@ from .const import (
     CONF_METADATA_CURRENCY,
     CONF_METADATA_LANGUAGE,
     CONF_SERVER_BACKUP_KEEP,
+    CONF_WINE_HISTORY,
+    CONF_WINES,
     DEFAULT_METADATA_CURRENCY,
     DEFAULT_METADATA_LANGUAGE,
     DEFAULT_SERVER_BACKUP_KEEP,
@@ -26,6 +28,7 @@ from .const import (
     SUPPORTED_METADATA_CURRENCIES,
     SUPPORTED_METADATA_LANGUAGES,
 )
+from . import photos
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -366,6 +369,9 @@ async def ws_add_wine(
     """Add a new wine, then auto-enrich with Vivino data."""
     storage = hass.data[DOMAIN]["storage"]
     wine = storage.add_wine(msg["wine"])
+    # A photo arrives inline from the camera; it goes to disk immediately so it
+    # never becomes part of what every later page load has to carry.
+    await photos.store_wine_photos(hass, wine)
     await storage.async_save()
     hass.bus.async_fire(f"{DOMAIN}_updated")
     connection.send_result(msg["id"], {"wine": wine})
@@ -414,6 +420,7 @@ async def ws_update_wine(
     updates = msg["updates"]
     wine = storage.update_wine(msg["wine_id"], updates)
     if wine:
+        await photos.store_wine_photos(hass, wine)
         # Propagate user_rating/tasting_notes to duplicates (same name+winery+vintage)
         rating_fields = {"user_rating", "tasting_notes"} & set(updates.keys())
         if rating_fields:
@@ -1558,8 +1565,8 @@ async def ws_restore_wine(
 
 
 @websocket_api.websocket_command({vol.Required("type"): "wine_cellar/get_backup"})
-@callback
-def ws_get_backup(
+@websocket_api.async_response
+async def ws_get_backup(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
@@ -1567,6 +1574,13 @@ def ws_get_backup(
     """Return a full backup of all cellar data."""
     storage = hass.data[DOMAIN]["storage"]
     backup = storage.get_backup_data()
+    # Photos live on disk now, but a backup has to stand on its own: read them
+    # back inline so restoring onto a fresh install does not depend on files
+    # this backup never carried. Paid once per backup, not once per page load.
+    backup[CONF_WINES] = await photos.inline_for_backup(hass, backup[CONF_WINES])
+    backup[CONF_WINE_HISTORY] = await photos.inline_for_backup(
+        hass, backup[CONF_WINE_HISTORY]
+    )
     backup["version"] = "1.0"
     backup["timestamp"] = datetime.now(timezone.utc).isoformat()
     connection.send_result(msg["id"], backup)
@@ -1602,6 +1616,11 @@ async def ws_restore_backup(
         return
 
     counts = storage.restore_data(wines, cabinets, buy_list, wine_history, settings)
+    # A backup carries its photos inline; put them back on disk, and drop any
+    # file the restored cellar no longer refers to.
+    await photos.externalise_all(hass, storage.wines)
+    await photos.externalise_all(hass, storage.wine_history)
+    await photos.prune(hass, storage.wines, storage.wine_history)
     await storage.async_save()
     hass.bus.async_fire(f"{DOMAIN}_updated")
 
