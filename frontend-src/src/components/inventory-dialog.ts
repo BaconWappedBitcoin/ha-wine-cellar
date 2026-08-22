@@ -2298,14 +2298,14 @@ export class InventoryDialog extends LitElement {
               `
             : nothing}
 
+          ${this._renderEnrichBar()}
+
           <!-- Wine List -->
           <div class="inv-list">
             ${filteredWines.length === 0
               ? html`<div class="inv-empty">No wines match your search</div>`
               : filteredWines.map((w) => this._renderWineItem(w))}
           </div>
-
-          ${this._renderEnrichBar()}
 
           <!-- Footer -->
           <div class="inv-footer">
