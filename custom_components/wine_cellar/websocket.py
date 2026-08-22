@@ -137,6 +137,48 @@ def _vivino_match_is_trustworthy(subject: dict[str, Any], lookup: dict[str, Any]
     return overlap >= 0.15
 
 
+# Racks are described by plain numbers that the storage layer writes wherever
+# it is told. A negative or absurd row count is not a shape any cellar has, and
+# once written it makes every position calculation nonsense, so it is refused
+# at the edge rather than repaired later.
+_CABINET_LIMITS = {"rows": (1, 50), "cols": (1, 50), "depth": (1, 20)}
+
+
+def _cabinet_shape_error(fields: dict[str, Any]) -> str | None:
+    """Say what is wrong with a cabinet's dimensions, or None if nothing is."""
+    for key, (low, high) in _CABINET_LIMITS.items():
+        if key not in fields or fields[key] is None:
+            continue
+        value = fields[key]
+        if isinstance(value, bool) or not isinstance(value, int):
+            return f"{key} must be a whole number"
+        if not low <= value <= high:
+            return f"{key} must be between {low} and {high}"
+
+    rows = fields.get("storage_rows")
+    if rows is not None:
+        if not isinstance(rows, list):
+            return "storage_rows must be a list"
+        for entry in rows:
+            if not isinstance(entry, dict):
+                return "each storage row must be an object"
+            row = entry.get("row")
+            if isinstance(row, bool) or not isinstance(row, int) or row < 0:
+                return "each storage row needs a row index of 0 or more"
+            capacity = entry.get("capacity")
+            if capacity is not None and (
+                isinstance(capacity, bool) or not isinstance(capacity, int) or capacity < 0
+            ):
+                return "a storage row's capacity cannot be negative"
+            boxes = entry.get("boxes")
+            if boxes is not None:
+                if not isinstance(boxes, list) or any(
+                    isinstance(b, bool) or not isinstance(b, int) or b < 0 for b in boxes
+                ):
+                    return "box sizes must be whole numbers of 0 or more"
+    return None
+
+
 async def _auto_enrich_wine(hass: HomeAssistant, wine: dict[str, Any]) -> None:
     """Background task: enrich a newly added wine with Vivino data."""
     try:
@@ -179,8 +221,11 @@ async def _auto_enrich_wine(hass: HomeAssistant, wine: dict[str, Any]) -> None:
             if val and not wine.get(key):
                 updates[key] = val
 
-        # Vivino price as retail_price
-        if lookup.get("price"):
+        # Vivino price as retail_price, but only into an empty field. Every
+        # other field here fills gaps rather than overwriting; this one used to
+        # replace whatever was there, including an AI estimate the user had
+        # already seen on screen.
+        if lookup.get("price") and not wine.get("retail_price"):
             updates["retail_price"] = lookup["price"]
             updates["retail_price_currency"] = currency
 
@@ -548,6 +593,10 @@ async def ws_update_cabinet(
 ) -> None:
     """Update a cabinet."""
     storage = hass.data[DOMAIN]["storage"]
+    problem = _cabinet_shape_error(msg["updates"])
+    if problem:
+        connection.send_result(msg["id"], {"error": problem})
+        return
     cabinet = storage.update_cabinet(msg["cabinet_id"], msg["updates"])
     if cabinet:
         await storage.async_save()
@@ -569,6 +618,10 @@ async def ws_add_cabinet(
 ) -> None:
     """Add a new cabinet."""
     storage = hass.data[DOMAIN]["storage"]
+    problem = _cabinet_shape_error(msg["cabinet"])
+    if problem:
+        connection.send_result(msg["id"], {"error": problem})
+        return
     cabinet = storage.add_cabinet(msg["cabinet"])
     await storage.async_save()
     hass.bus.async_fire(f"{DOMAIN}_updated")

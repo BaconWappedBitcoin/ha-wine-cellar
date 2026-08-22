@@ -699,8 +699,8 @@ export class WineListDialog extends LitElement {
                   ${wine.bottle_size && wine.bottle_size !== "750ml"
                     ? html`<div class="wl-detail-row"><span class="wl-detail-label">Size:</span>${wine.bottle_size}</div>`
                     : nothing}
-                  ${wine.vivino_ratings_count
-                    ? html`<div class="wl-detail-row"><span class="wl-detail-label">Vivino:</span>${wine.vivino_rating?.toFixed(1)} (${wine.vivino_ratings_count.toLocaleString()} ratings)</div>`
+                  ${wine.vivino_rating
+                    ? html`<div class="wl-detail-row"><span class="wl-detail-label">Vivino:</span>${wine.vivino_rating.toFixed(1)}${wine.vivino_ratings_count ? ` (${wine.vivino_ratings_count.toLocaleString()} ratings)` : ""}</div>`
                     : nothing}
                 </div>
               `

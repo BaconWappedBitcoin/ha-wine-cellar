@@ -15,6 +15,11 @@ import "./components/wine-list-dialog";
 import "./components/inventory-dialog";
 import "./components/vivino-ai-settings-dialog";
 
+// How long an incoming change waits before the card re-fetches, and the floor
+// on how often it may do so at all.
+const REFRESH_DEBOUNCE_MS = 400;
+const REFRESH_MIN_INTERVAL_MS = 3000;
+
 interface WineCellarCardConfig {
   type: string;
   title?: string;
@@ -55,6 +60,19 @@ export class WineCellarCard extends LitElement {
   @state() private _showVivinoAiSettings = false;
   @state() private _showWineList = false;
   @state() private _showInventory = false;
+  private _findingsCache: {
+    wines: Wine[];
+    cabinets: Cabinet[];
+    dismissed: string[];
+    findings: Finding[];
+  } | null = null;
+  private _unsubscribe: (() => void) | null = null;
+  private _subscribing = false;
+  private _connectionGeneration = 0;
+  private _refreshTimer = 0;
+  private _lastRefresh = 0;
+  private _toastTimer = 0;
+
   @state() private _showArrangement = false;
   @state() private _dismissedArrangements: string[] = [];
   @state() private _buyList: Wine[] = [];
@@ -432,12 +450,80 @@ export class WineCellarCard extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this._loadData();
+    this._subscribeToUpdates();
   }
 
-  updated(changedProps: Map<string, unknown>) {
-    if (changedProps.has("hass") && this.hass) {
-      // Refresh on HA state changes (lightweight check)
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    // Invalidates any subscription still being set up.
+    this._connectionGeneration++;
+    this._unsubscribe?.();
+    this._unsubscribe = null;
+    if (this._refreshTimer) {
+      clearTimeout(this._refreshTimer);
+      this._refreshTimer = 0;
     }
+    if (this._toastTimer) {
+      clearTimeout(this._toastTimer);
+      this._toastTimer = 0;
+    }
+  }
+
+  // The backend announces every change it makes on the event bus, and nobody
+  // was listening. Work it does on its own — the Vivino lookup fired after a
+  // wine is added, most visibly — landed in storage and stayed invisible
+  // until the user happened to do something that reloaded the card. That is
+  // why an added bottle could look like Vivino had never been consulted.
+  private async _subscribeToUpdates() {
+    if (!this.hass?.connection || this._unsubscribe || this._subscribing) {
+      if (!this.hass) setTimeout(() => this._subscribeToUpdates(), 500);
+      return;
+    }
+    this._subscribing = true;
+    const generation = this._connectionGeneration;
+    try {
+      const unsubscribe = await this.hass.connection.subscribeEvents(
+        () => this._scheduleRefresh(),
+        "wine_cellar_updated"
+      );
+      // Home Assistant detaches and reattaches a dashboard view when the user
+      // switches tabs, which can happen while this is still in flight. Storing
+      // the handle now would leave a subscription nothing can ever cancel,
+      // reloading a card that is no longer on screen — once per tab switch.
+      //
+      // Keyed on a counter the detach bumps rather than on isConnected, so it
+      // holds however the element was taken down.
+      if (generation !== this._connectionGeneration) {
+        unsubscribe();
+        return;
+      }
+      this._unsubscribe = unsubscribe;
+    } catch (err) {
+      // Without this the card still works, it just will not notice background
+      // work. Not worth an error the user has to dismiss.
+      console.warn("Wine Cellar: could not subscribe to updates", err);
+    } finally {
+      this._subscribing = false;
+    }
+  }
+
+  // Batch operations fire one event per bottle, and they pace themselves with
+  // a sleep of half a second to a second between wines. A plain debounce is
+  // the wrong shape for that: the gaps are longer than any sensible debounce,
+  // so every event would still get its own full reload. What is needed is a
+  // floor on how often the cellar is re-fetched.
+  //
+  // An already-pending refresh absorbs anything that arrives before it fires,
+  // so a tight burst still costs one reload. An isolated change still shows up
+  // within REFRESH_DEBOUNCE_MS.
+  private _scheduleRefresh() {
+    if (this._refreshTimer) return;
+    const since = Date.now() - this._lastRefresh;
+    const wait = Math.max(REFRESH_DEBOUNCE_MS, REFRESH_MIN_INTERVAL_MS - since);
+    this._refreshTimer = window.setTimeout(() => {
+      this._refreshTimer = 0;
+      this._loadData();
+    }, wait);
   }
 
   private async _loadData() {
@@ -446,6 +532,9 @@ export class WineCellarCard extends LitElement {
       setTimeout(() => this._loadData(), 500);
       return;
     }
+    // Counts against the refresh floor: the card's own actions already reload,
+    // and the event they cause must not reload a second time straight after.
+    this._lastRefresh = Date.now();
 
     const isInitialLoad = this._wines.length === 0 && this._cabinets.length === 0;
     if (isInitialLoad) this._loading = true;
@@ -515,7 +604,13 @@ export class WineCellarCard extends LitElement {
 
   private _showToast(message: string) {
     this._toast = message;
-    setTimeout(() => (this._toast = ""), 2500);
+    // Each toast gets its own full 2.5s: the previous timer would otherwise
+    // still be running and cut the new message short.
+    if (this._toastTimer) clearTimeout(this._toastTimer);
+    this._toastTimer = window.setTimeout(() => {
+      this._toastTimer = 0;
+      this._toast = "";
+    }, 2500);
   }
 
   // --- Copy/Paste wine ---
@@ -804,13 +899,18 @@ export class WineCellarCard extends LitElement {
           updates: { cabinet_id: "", row: null, col: null, zone: "", depth: 0 },
         });
       }
-      for (let i = slotIndex + 1; i < this._zonePanelWines.length; i++) {
+      // Closing the gap is one renumbering of the zone, not one round trip per
+      // bottle behind the deleted slot — emptying slot 1 of a full 20-bottle
+      // bin used to mean nineteen calls, each with its own disk write.
+      const remaining = this._zonePanelWines
+        .filter((_, i) => i !== slotIndex)
+        .map((w) => w.id);
+      if (remaining.length) {
         await this.hass.callWS({
-          type: "wine_cellar/move_wine",
-          wine_id: this._zonePanelWines[i].id,
+          type: "wine_cellar/reorder_zone",
           cabinet_id: this._zonePanelCabinet.id,
           zone: this._zonePanelZone,
-          depth: i - 1,
+          wine_ids: remaining,
         });
       }
 
@@ -1499,7 +1599,30 @@ export class WineCellarCard extends LitElement {
   // cabinets the card already holds, and a stale count would point at moves
   // that have since been made.
   private get _arrangementFindings(): Finding[] {
-    return analyzeArrangement(this._wines, this._cabinets, this._dismissedArrangements);
+    // Read from render(), so it ran on every keystroke in the search box even
+    // though typing cannot change how the cellar is arranged. Cached against
+    // the three things it actually depends on — all replaced wholesale rather
+    // than mutated, so identity is a sound key.
+    if (
+      this._findingsCache &&
+      this._findingsCache.wines === this._wines &&
+      this._findingsCache.cabinets === this._cabinets &&
+      this._findingsCache.dismissed === this._dismissedArrangements
+    ) {
+      return this._findingsCache.findings;
+    }
+    const findings = analyzeArrangement(
+      this._wines,
+      this._cabinets,
+      this._dismissedArrangements
+    );
+    this._findingsCache = {
+      wines: this._wines,
+      cabinets: this._cabinets,
+      dismissed: this._dismissedArrangements,
+      findings,
+    };
+    return findings;
   }
 
   // "Leave it as it is" has to stick, or the count becomes a badge people

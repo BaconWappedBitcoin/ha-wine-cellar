@@ -66,7 +66,11 @@ def parse_json_response(raw_text: str) -> Any:
     )
     if start != -1:
         end = None
-        brace_depth = 0
+        # Both bracket kinds, or a root-level array wrapped in prose would be
+        # cut off after its first object — the scan would see {...} close and
+        # stop there, handing json.loads a "[{...}" that cannot parse. The
+        # docstring promised arrays; only objects worked.
+        depth = 0
         in_string = False
         escaped = False
         for idx in range(start, len(text)):
@@ -81,11 +85,11 @@ def parse_json_response(raw_text: str) -> Any:
                 continue
             if char == '"':
                 in_string = True
-            elif char == "{":
-                brace_depth += 1
-            elif char == "}":
-                brace_depth -= 1
-                if brace_depth == 0:
+            elif char in "{[":
+                depth += 1
+            elif char in "}]":
+                depth -= 1
+                if depth == 0:
                     end = idx + 1
                     break
 
