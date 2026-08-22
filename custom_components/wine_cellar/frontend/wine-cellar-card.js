@@ -415,6 +415,75 @@ const sharedStyles = i$3 `
     gap: 2px;
   }
 
+  .depth-panel-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .depth-panel-sort {
+    background: none;
+    border: 1px solid var(--wc-border, #ddd);
+    border-radius: 12px;
+    color: var(--wc-text-secondary, #888);
+    cursor: pointer;
+    font-size: 0.72em;
+    padding: 4px 9px;
+    white-space: nowrap;
+  }
+
+  .depth-panel-sort:hover:not(:disabled) {
+    border-color: var(--wc-primary, #722f37);
+    color: var(--wc-primary, #722f37);
+  }
+
+  .depth-panel-sort:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .depth-panel-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0 12px 8px;
+    padding: 10px 12px;
+    border: 1px solid #c98a00;
+    border-radius: 8px;
+    background: rgba(201, 138, 0, 0.08);
+    font-size: 0.76em;
+    color: var(--wc-text-secondary, #888);
+    line-height: 1.4;
+  }
+
+  .depth-panel-confirm strong {
+    color: var(--wc-text, #333);
+  }
+
+  .depth-panel-confirm-btns {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  .depth-panel-confirm-btns button {
+    background: none;
+    border: 1px solid var(--wc-border, #ddd);
+    border-radius: 8px;
+    color: var(--wc-text-secondary, #888);
+    cursor: pointer;
+    font-size: 1em;
+    padding: 5px 12px;
+  }
+
+  .depth-panel-confirm-btns button.primary {
+    background: var(--wc-primary, #722f37);
+    border-color: var(--wc-primary, #722f37);
+    color: #fff;
+    font-weight: 600;
+  }
+
   .depth-panel-rack {
     font-size: 0.78em;
     font-weight: 500;
@@ -10334,6 +10403,8 @@ let WineCellarCard = class WineCellarCard extends i {
         this._rackPanelDragOverKey = null;
         // Briefly highlights a wine's slot after "locate" is used from the detail dialog.
         this._highlightWineId = null;
+        this._confirmZoneSort = false;
+        this._zoneSorting = false;
     }
     setConfig(config) {
         this._config = config;
@@ -10520,11 +10591,26 @@ let WineCellarCard = class WineCellarCard extends i {
             this._showAddDialog = true;
         }
     }
+    // The slot a new bottle takes in a bin: the first free one, so a gap left
+    // by a removed bottle is reused rather than skipped. Every path into a bin
+    // — add dialog, click-to-place, drag-and-drop — must agree, or two bottles
+    // end up sharing a depth and the order becomes undefined.
+    _firstFreeDepth(cabinetId, zone, excludeWineId) {
+        const occupied = new Set(this._wines
+            .filter((w) => w.cabinet_id === cabinetId && w.zone === zone && w.id !== excludeWineId)
+            .map((w) => w.depth || 0));
+        let depth = 0;
+        while (occupied.has(depth))
+            depth++;
+        return depth;
+    }
     // --- Zone side panel (boxes, bulk bins) ---
     _onZoneContainerClick(e) {
         const { cabinet, zone, storageRow } = e.detail;
-        const nextDepth = this._wines.filter((w) => w.cabinet_id === cabinet.id && w.zone === zone).length;
-        const hasRoom = nextDepth < (storageRow.capacity || 20);
+        const occupantCount = this._wines.filter((w) => w.cabinet_id === cabinet.id && w.zone === zone).length;
+        const nextDepth = this._firstFreeDepth(cabinet.id, zone);
+        const capacity = storageRow.capacity || 20;
+        const hasRoom = occupantCount < capacity && nextDepth < capacity;
         // If we have a copied wine, paste it in this zone instead of opening panel
         if (this._copiedWine) {
             if (!hasRoom) {
@@ -10792,6 +10878,47 @@ let WineCellarCard = class WineCellarCard extends i {
             console.error("Failed to reorder wine:", err);
             this._showToast("Failed to reorder wine");
         }
+    }
+    // Renumber the bin's slots so bottles sit in the order they were added.
+    // `added_at` is the only entry timestamp stored; wines without one (very
+    // old records) keep their relative position at the end rather than jumping
+    // to the front, which is what an empty date would otherwise sort as.
+    async _sortZoneByDateAdded() {
+        this._confirmZoneSort = false;
+        if (!this._zonePanelCabinet)
+            return;
+        const ordered = [...this._zonePanelWines].sort((a, b) => {
+            const aDate = a.added_at || "";
+            const bDate = b.added_at || "";
+            if (!aDate && !bDate)
+                return (a.depth || 0) - (b.depth || 0);
+            if (!aDate)
+                return 1;
+            if (!bDate)
+                return -1;
+            return aDate.localeCompare(bDate);
+        });
+        this._zoneSorting = true;
+        try {
+            for (let i = 0; i < ordered.length; i++) {
+                if ((ordered[i].depth || 0) === i)
+                    continue;
+                await this.hass.callWS({
+                    type: "wine_cellar/move_wine",
+                    wine_id: ordered[i].id,
+                    cabinet_id: this._zonePanelCabinet.id,
+                    zone: this._zonePanelZone,
+                    depth: i,
+                });
+            }
+            this._showToast("Sorted by date added");
+            await this._loadData();
+        }
+        catch (err) {
+            console.error("Failed to sort zone:", err);
+            this._showToast("Failed to sort");
+        }
+        this._zoneSorting = false;
     }
     _getZoneSlotLabel(_type, index) {
         return `Slot ${index + 1}`;
@@ -11145,11 +11272,12 @@ let WineCellarCard = class WineCellarCard extends i {
                 const targetCabinet = this._cabinets.find((c) => c.id === d.targetCabinetId);
                 const rowIdx = parseInt(d.targetZone.replace("storage-", ""), 10);
                 const storageRow = targetCabinet?.storage_rows?.find((s) => s.row === rowIdx);
-                if (storageRow && occupants.length >= (storageRow.capacity || 20)) {
+                const capacity = storageRow?.capacity || 20;
+                targetDepth = this._firstFreeDepth(d.targetCabinetId, d.targetZone, d.wineId);
+                if (storageRow && (occupants.length >= capacity || targetDepth >= capacity)) {
                     this._showToast(`"${storageRow.name || "Zone"}" is full — cannot move here.`);
                     return;
                 }
-                targetDepth = occupants.reduce((max, w) => Math.max(max, w.depth || 0), -1) + 1;
             }
             // Move dragged wine to target
             await this.hass.callWS({
@@ -12122,8 +12250,37 @@ let WineCellarCard = class WineCellarCard extends i {
                       ${this._zonePanelType === "box" ? "bottles" : "stored"}
                     </span>
                   </span>
-                  <button class="depth-panel-close" @click=${this._closeZonePanel}>✕</button>
+                  <span class="depth-panel-actions">
+                    ${this._zonePanelWines.length > 1
+                ? b `<button
+                          class="depth-panel-sort"
+                          ?disabled=${this._zoneSorting}
+                          title="Renumber the slots so bottles sit in the order they were added"
+                          @click=${() => (this._confirmZoneSort = true)}
+                        >
+                          ${this._zoneSorting ? "Sorting…" : "↕ By date added"}
+                        </button>`
+                : A}
+                    <button class="depth-panel-close" @click=${this._closeZonePanel}>✕</button>
+                  </span>
                 </div>
+                ${this._confirmZoneSort
+                ? b `
+                      <div class="depth-panel-confirm">
+                        <strong>Reorder by date added?</strong>
+                        <span>
+                          Every bottle in ${this._zonePanelName} moves to a slot matching when
+                          it was added. Any order you arranged by hand is lost.
+                        </span>
+                        <span class="depth-panel-confirm-btns">
+                          <button @click=${() => (this._confirmZoneSort = false)}>Cancel</button>
+                          <button class="primary" @click=${this._sortZoneByDateAdded}>
+                            Reorder
+                          </button>
+                        </span>
+                      </div>
+                    `
+                : A}
                 <div class="depth-panel-slots">
                   ${this._zonePanelType === "bulk"
                 ? b `
@@ -12843,6 +13000,12 @@ __decorate([
 __decorate([
     r()
 ], WineCellarCard.prototype, "_highlightWineId", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_confirmZoneSort", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_zoneSorting", void 0);
 WineCellarCard = __decorate([
     t("wine-cellar-card")
 ], WineCellarCard);

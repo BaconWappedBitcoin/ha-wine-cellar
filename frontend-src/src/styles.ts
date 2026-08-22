@@ -343,6 +343,75 @@ export const sharedStyles = css`
     gap: 2px;
   }
 
+  .depth-panel-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .depth-panel-sort {
+    background: none;
+    border: 1px solid var(--wc-border, #ddd);
+    border-radius: 12px;
+    color: var(--wc-text-secondary, #888);
+    cursor: pointer;
+    font-size: 0.72em;
+    padding: 4px 9px;
+    white-space: nowrap;
+  }
+
+  .depth-panel-sort:hover:not(:disabled) {
+    border-color: var(--wc-primary, #722f37);
+    color: var(--wc-primary, #722f37);
+  }
+
+  .depth-panel-sort:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .depth-panel-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0 12px 8px;
+    padding: 10px 12px;
+    border: 1px solid #c98a00;
+    border-radius: 8px;
+    background: rgba(201, 138, 0, 0.08);
+    font-size: 0.76em;
+    color: var(--wc-text-secondary, #888);
+    line-height: 1.4;
+  }
+
+  .depth-panel-confirm strong {
+    color: var(--wc-text, #333);
+  }
+
+  .depth-panel-confirm-btns {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  .depth-panel-confirm-btns button {
+    background: none;
+    border: 1px solid var(--wc-border, #ddd);
+    border-radius: 8px;
+    color: var(--wc-text-secondary, #888);
+    cursor: pointer;
+    font-size: 1em;
+    padding: 5px 12px;
+  }
+
+  .depth-panel-confirm-btns button.primary {
+    background: var(--wc-primary, #722f37);
+    border-color: var(--wc-primary, #722f37);
+    color: #fff;
+    font-weight: 600;
+  }
+
   .depth-panel-rack {
     font-size: 0.78em;
     font-weight: 500;
