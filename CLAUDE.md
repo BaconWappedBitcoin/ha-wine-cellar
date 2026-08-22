@@ -13,9 +13,9 @@ Home Assistant custom integration + Lovelace card for managing a wine cellar: ra
 
 ## Current state (as of 2026-08-22)
 
-**Latest round: PRs #32 (rack shrinking no longer strands bottles), #33 (photos served from disk instead of inlined in every payload) and #35 (two code-review passes) merged, released as `v2.14.1` (`FRONTEND_VERSION = 20260823b`). Not yet confirmed on the user's Synology.**
+**Latest round: PRs #32 (rack shrinking no longer strands bottles), #33 (photos served from disk instead of inlined in every payload), #35 (two code-review passes) and #37 (the areas #35 skipped) merged, released as `v2.14.2` (`FRONTEND_VERSION = 20260823c`). Not yet confirmed on the user's Synology.**
 
-**#35 was two passes, and the second found four bugs in the first pass's own fixes** — worth remembering before trusting a single review. Areas still never reviewed in depth: `vivino.py`'s HTML scraping, the inventory dialog's backup/CSV paths, `cabinet-grid.ts` drag-and-drop, and `config_flow.py`. The "write state back after an await without re-checking the target" bug class was fixed in `wine-detail-dialog.ts` only; the other dialogs were not audited for it.
+**Reviewing is three rounds deep now, and every round found bugs in the previous round's fixes** — treat one pass as a start, never as a verdict. #35 was two passes; #37 then audited what #35 had skipped and found real bugs in each of those areas, the worst being Vivino's HTML scrape storing `Ch\u00e2teau` instead of `Château`. Covered so far: the whole backend, the card, the add/detail/list/inventory/rack dialogs, the Vivino scrape, the CSV parser, `config_flow.py`, grid drag-and-drop. Audited and deliberately left alone because they are sound: the CSV state machine, `config_flow.py`'s key handling, the grid's drag-state cleanup.
 
 Before that: PRs #22–#26 and #29, released as `v2.13.0`, confirmed working. In order: #22 suggested destinations in the add dialog, #23 iOS camera diagnostics, #24 the arrangement analysis, #25 the mobile search field, #26 Lovelace resource auto-registration, #29 Vivino enrichment on the label path plus parallel Vivino requests. (#27 and #28 were the v2.12.0 version bump and a docs refresh.)
 
