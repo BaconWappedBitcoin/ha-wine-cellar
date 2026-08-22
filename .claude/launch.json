@@ -10,7 +10,7 @@
     },
     {
       "name": "preview-server",
-      "runtimeExecutable": "python",
+      "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "5051"],
       "port": 5051,
       "cwd": "custom_components/wine_cellar/frontend"
