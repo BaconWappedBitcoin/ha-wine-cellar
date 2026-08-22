@@ -5,7 +5,7 @@ import { sharedStyles } from "../styles";
 @customElement("wine-search-bar")
 export class WineSearchBar extends LitElement {
   @property({ type: String }) value = "";
-  @state() private _filter = "all";
+  @property({ type: String }) filter = "all";
 
   static styles = [
     sharedStyles,
@@ -86,7 +86,7 @@ export class WineSearchBar extends LitElement {
     const value = (e.target as HTMLInputElement).value;
     this.dispatchEvent(
       new CustomEvent("search-change", {
-        detail: { query: value, filter: this._filter },
+        detail: { query: value, filter: this.filter },
         bubbles: true,
         composed: true,
       })
@@ -94,7 +94,7 @@ export class WineSearchBar extends LitElement {
   }
 
   private _onFilterChange(filter: string) {
-    this._filter = filter;
+    this.filter = filter;
     const input = this.shadowRoot?.querySelector("input") as HTMLInputElement;
     this.dispatchEvent(
       new CustomEvent("search-change", {
@@ -130,7 +130,7 @@ export class WineSearchBar extends LitElement {
           ${filters.map(
             (f) => html`
               <button
-                class="chip ${this._filter === f.id ? "active" : ""}"
+                class="chip ${this.filter === f.id ? "active" : ""}"
                 @click=${() => this._onFilterChange(f.id)}
               >
                 ${f.label}

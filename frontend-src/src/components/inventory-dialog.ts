@@ -90,6 +90,9 @@ export class InventoryDialog extends LitElement {
   @state() private _backupKeep = 10;
   @state() private _backupKeepChoices: number[] = [0, 5, 10, 20, 50];
   @state() private _storageInfo: any = null;
+  @state() private _enriching: "" | "vivino" | "ai" = "";
+  @state() private _confirmEnrich: "" | "vivino" | "ai" = "";
+  @state() private _confirmEnrichRetry = false;
   @state() private _viewMode: "inventory" | "history" = "inventory";
   @state() private _historyItems: WineHistoryItem[] = [];
   @state() private _historyLoading = false;
@@ -333,6 +336,46 @@ export class InventoryDialog extends LitElement {
 
       .inv-drink-by {
         opacity: 0.8;
+      }
+
+      .inv-enrich {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin: 0 16px 10px;
+        padding: 8px 10px;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        font-size: 0.75em;
+        color: var(--wc-text-secondary);
+      }
+
+      .inv-enrich-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .inv-enrich-row.retry {
+        opacity: 0.75;
+        border-top: 1px solid var(--wc-border);
+        padding-top: 6px;
+      }
+
+      .inv-enrich-text {
+        line-height: 1.4;
+      }
+
+      .inv-enrich-text strong {
+        color: var(--wc-text);
+      }
+
+      .inv-enrich-btns {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
       }
 
       .inv-storage-info {
@@ -732,6 +775,8 @@ export class InventoryDialog extends LitElement {
       this._detailWine = null;
       this._statusMsg = "";
       this._confirmRestore = false;
+      this._confirmEnrich = "";
+      this._confirmEnrichRetry = false;
       this._confirmImport = false;
       this._pendingImport = null;
       this._showServerRestore = false;
@@ -855,6 +900,89 @@ export class InventoryDialog extends LitElement {
 
   private _winesWithoutPairings(): number {
     return this.wines.filter((w) => !splitMulti(w.food_pairings).length).length;
+  }
+
+  // ── Enrichment ────────────────────────────────────────────────
+
+  // Vivino is the *only* source of food pairings; it also supplies the
+  // description. Rating and photo are deliberately not part of the test —
+  // Vivino has no match for plenty of bottles, and a wine that will never
+  // gain a photo must not sit in this list forever nagging the user.
+  private _missingVivinoData(w: Wine): boolean {
+    return !w.food_pairings || !w.description;
+  }
+
+  // The AI supplies the drinking verdict and window; it never returns food
+  // pairings. Critic scores are excluded for the same reason as the photo
+  // above — the AI legitimately has none for many wines.
+  private _missingAIData(w: Wine): boolean {
+    return !w.disposition || !w.drink_window;
+  }
+
+  // Never consulted: the source has genuinely not been asked yet.
+  private _winesNeedingVivino(): Wine[] {
+    return this.wines.filter((w) => !w.vivino_checked_at && this._missingVivinoData(w));
+  }
+
+  private _winesNeedingAI(): Wine[] {
+    return this.wines.filter((w) => !w.ai_checked_at && this._missingAIData(w));
+  }
+
+  // Asked, and the source had nothing. Kept apart from the counts above so a
+  // retry is a deliberate act rather than an endless nag: Vivino does add
+  // bottles to its catalogue over time, so retrying later is worth offering,
+  // just not automatically.
+  private _winesVivinoNotFound(): Wine[] {
+    return this.wines.filter((w) => !!w.vivino_checked_at && this._missingVivinoData(w));
+  }
+
+  private _winesAINotFound(): Wine[] {
+    return this.wines.filter((w) => !!w.ai_checked_at && this._missingAIData(w));
+  }
+
+  private async _runEnrich(source: "vivino" | "ai", retry = false) {
+    const wines = retry
+      ? source === "vivino"
+        ? this._winesVivinoNotFound()
+        : this._winesAINotFound()
+      : source === "vivino"
+        ? this._winesNeedingVivino()
+        : this._winesNeedingAI();
+    this._confirmEnrich = "";
+    this._confirmEnrichRetry = false;
+    if (!wines.length) return;
+
+    const sourceLabel = source === "vivino" ? "Vivino" : "the AI";
+    this._enriching = source;
+    this._statusMsg = `Refreshing ${wines.length} wines via ${sourceLabel}…`;
+    try {
+      const result = await this.hass.callWS({
+        type: source === "vivino" ? "wine_cellar/batch_refresh_vivino" : "wine_cellar/batch_analyze_wines",
+        wine_ids: wines.map((w) => w.id),
+      });
+      if (result?.error) {
+        this._statusMsg = `Refresh failed: ${result.error}`;
+      } else {
+        const updated = result?.updated ?? 0;
+        const unchanged = result?.unchanged ?? 0;
+        const errors = result?.errors ?? 0;
+        const source = sourceLabel;
+        const parts = [`${updated} updated`];
+        if (unchanged) parts.push(`${unchanged} had nothing new on ${source}`);
+        if (errors) parts.push(`${errors} could not be reached`);
+        this._statusMsg =
+          `${parts.join(", ")}.` +
+          (unchanged
+            ? retry
+              ? " Their check date is updated — try again later."
+              : " Their check date is updated; they move to the retry line."
+            : "");
+        this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+      }
+    } catch (err: any) {
+      this._statusMsg = `Refresh failed: ${err.message || err}`;
+    }
+    this._enriching = "";
   }
 
   // ── Filtering & sorting ───────────────────────────────────────
@@ -1117,6 +1245,136 @@ export class InventoryDialog extends LitElement {
           : nothing}
         <div class="inv-footer-btns">
           <button class="inv-btn" @click=${this._clearHistory}>Clear History</button>
+        </div>
+      </div>
+    `;
+  }
+
+  // Sits under the list: how many bottles are still missing data, and the two
+  // actions that can fill it. Each source is labelled with what it actually
+  // supplies, so nobody runs AI hoping for food pairings.
+  private _renderEnrichRow(
+    source: "vivino" | "ai",
+    wines: Wine[],
+    retry: boolean,
+    text: unknown,
+    label: string
+  ) {
+    if (!wines.length) return nothing;
+    if (source === "ai" && !this.hasGemini) return nothing;
+    const busy = !!this._enriching;
+    return html`
+      <div class="inv-enrich-row ${retry ? "retry" : ""}">
+        <span class="inv-enrich-text">${text}</span>
+        <button
+          class="inv-btn"
+          ?disabled=${busy}
+          @click=${() => {
+            this._confirmEnrich = source;
+            this._confirmEnrichRetry = retry;
+          }}
+        >
+          ${this._enriching === source ? "Working…" : `${label} (${wines.length})`}
+        </button>
+      </div>
+    `;
+  }
+
+  private _renderEnrichBar() {
+    const needVivino = this._winesNeedingVivino();
+    const needAI = this._winesNeedingAI();
+    const missVivino = this._winesVivinoNotFound();
+    const missAI = this._winesAINotFound();
+    if (!needVivino.length && !needAI.length && !missVivino.length && !missAI.length) {
+      return nothing;
+    }
+
+    return html`
+      <div class="inv-enrich">
+        ${this._renderEnrichRow(
+          "vivino",
+          needVivino,
+          false,
+          html`<strong>${needVivino.length}</strong> missing pairings or description, never
+            checked against Vivino`,
+          "Fill from Vivino"
+        )}
+        ${this._renderEnrichRow(
+          "ai",
+          needAI,
+          false,
+          html`<strong>${needAI.length}</strong> missing a drink window or verdict, never
+            analyzed by AI`,
+          "Analyze with AI"
+        )}
+        ${this._renderEnrichRow(
+          "vivino",
+          missVivino,
+          true,
+          html`<strong>${missVivino.length}</strong> checked against Vivino, still nothing —
+            Vivino does add bottles over time`,
+          "Retry Vivino"
+        )}
+        ${this._renderEnrichRow(
+          "ai",
+          missAI,
+          true,
+          html`<strong>${missAI.length}</strong> analyzed by AI, still without a verdict`,
+          "Retry AI"
+        )}
+      </div>
+    `;
+  }
+
+  private _renderEnrichConfirm() {
+    if (!this._confirmEnrich) return nothing;
+    const source = this._confirmEnrich;
+    const retry = this._confirmEnrichRetry;
+    const count = retry
+      ? source === "vivino"
+        ? this._winesVivinoNotFound().length
+        : this._winesAINotFound().length
+      : source === "vivino"
+        ? this._winesNeedingVivino().length
+        : this._winesNeedingAI().length;
+    return html`
+      <div class="inv-confirm-overlay" @click=${() => (this._confirmEnrich = "")}>
+        <div class="inv-confirm-box" @click=${(e: Event) => e.stopPropagation()}>
+          <h3>
+            ${source === "vivino"
+              ? retry
+                ? "🍇 Retry Vivino?"
+                : "🍇 Fill from Vivino?"
+              : retry
+                ? "🤖 Retry AI analysis?"
+                : "🤖 Analyze with AI?"}
+          </h3>
+          <p>
+            ${count} wine${count > 1 ? "s" : ""} will be looked up one at a time. This is a
+            slow, rate-limited network call — expect it to run for a while, and leave the
+            dialog open until it finishes.
+          </p>
+          <div class="inv-confirm-stats">
+            ${retry
+              ? html`These were already checked and came back empty. The check date is
+                  updated either way, so you can always see when the last attempt was.`
+              : html`Some will come back with nothing new — not every bottle exists in
+                  ${source === "vivino" ? "Vivino's catalogue" : "what the AI can infer"}.
+                  Those move to the retry line below rather than staying here.`}
+          </div>
+          <div class="inv-confirm-stats">
+            ${source === "vivino"
+              ? "Fills food pairings, description, rating and the label photo where Vivino has them. Existing values are kept."
+              : "Fills the drinking verdict, drink window and critic scores where the AI can infer them. Existing values are kept."}
+          </div>
+          <div class="inv-confirm-btns">
+            <button class="inv-confirm-cancel" @click=${() => (this._confirmEnrich = "")}>
+              Cancel
+            </button>
+            <button class="inv-confirm-go" @click=${() => this._runEnrich(source, retry)}>
+              Start
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -1663,7 +1921,8 @@ export class InventoryDialog extends LitElement {
           ${missingPairings
             ? html`<small class="inv-filter-hint"
                 >${missingPairings} wine${missingPairings > 1 ? "s have" : " has"} no pairing
-                data — refresh them via Vivino or AI to make them findable here.</small
+                data. Only Vivino supplies pairings — use “Fill from Vivino” below the
+                list.</small
               >`
             : nothing}
         </label>
@@ -1856,13 +2115,21 @@ export class InventoryDialog extends LitElement {
       { value: "cabinet", label: "Cabinet" },
     ];
 
-    const presets: { id: Preset; label: string }[] = [
-      { id: "all", label: "All" },
-      { id: "drink_this_year", label: "Drink this year" },
-      { id: "past_peak", label: "Past peak" },
-      { id: "unrated", label: "Not rated" },
-      { id: "incomplete", label: "Incomplete" },
-      { id: "recent", label: "Added recently" },
+    const presets: { id: Preset; label: string; hint: string }[] = [
+      { id: "all", label: "All", hint: "Every wine in the cellar" },
+      {
+        id: "drink_this_year",
+        label: "Drink this year",
+        hint: `Drink-by year ${new Date().getFullYear()} or earlier, or marked "Drink now" with no year. Excludes past peak.`,
+      },
+      { id: "past_peak", label: "Past peak", hint: 'Marked "Past peak" by the AI analysis' },
+      { id: "unrated", label: "Not rated", hint: "You have not given these a personal star rating" },
+      {
+        id: "incomplete",
+        label: "Missing data",
+        hint: "Missing at least one of: food pairings, description, drink window, label photo",
+      },
+      { id: "recent", label: "Added recently", hint: "Added to the cellar in the last 30 days" },
     ];
 
     const filters: { id: string; label: string }[] = [
@@ -1985,6 +2252,7 @@ export class InventoryDialog extends LitElement {
               (p) => html`
                 <button
                   class="inv-chip preset ${this._preset === p.id ? "active" : ""}"
+                  title=${p.hint}
                   @click=${() => {
                     this._preset = p.id;
                     this._savePrefs();
@@ -2029,6 +2297,8 @@ export class InventoryDialog extends LitElement {
                 </div>
               `
             : nothing}
+
+          ${this._renderEnrichBar()}
 
           <!-- Wine List -->
           <div class="inv-list">
@@ -2182,6 +2452,8 @@ export class InventoryDialog extends LitElement {
                 </div>
               `
             : nothing}
+
+          ${this._renderEnrichConfirm()}
 
           <!-- CSV Import Mode Overlay -->
           ${this._confirmImport && this._pendingImport

@@ -39,8 +39,14 @@ export interface Wine {
   disposition: string;
   drink_window: string;
   ai_ratings: Record<string, number> | null;
+  // `*_updated_at` is when the data last actually changed; `*_checked_at` is
+  // when the source was last consulted. A checked_at newer than updated_at
+  // means the last lookup found nothing new — which is worth knowing, and
+  // was impossible to tell when one field carried both meanings.
   vivino_updated_at: string | null;
+  vivino_checked_at: string | null;
   ai_updated_at: string | null;
+  ai_checked_at: string | null;
   vivino_id: number | null;
 }
 

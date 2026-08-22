@@ -916,6 +916,20 @@ export class WineDetailDialog extends LitElement {
     return !!(n.aroma || n.taste || n.finish || n.overall);
   }
 
+  // A check later than the last update means that attempt found nothing —
+  // worth showing, so a fruitless retry stays visibly different from never
+  // having tried at all.
+  private _renderSourceDates(updatedAt: string | null, checkedAt: string | null) {
+    if (!updatedAt) {
+      return html`nothing found · checked ${this._formatUpdatedAt(checkedAt)}`;
+    }
+    if (checkedAt && checkedAt > updatedAt) {
+      return html`${this._formatUpdatedAt(updatedAt)} · rechecked
+        ${this._formatUpdatedAt(checkedAt)}, nothing new`;
+    }
+    return html`${this._formatUpdatedAt(updatedAt)}`;
+  }
+
   private _formatUpdatedAt(iso: string | null): string {
     if (!iso) return "";
     const d = new Date(iso);
@@ -1174,10 +1188,10 @@ export class WineDetailDialog extends LitElement {
                   <button class="btn btn-primary" style="background:#c62828"
                     @click=${this._onRemove}>✕ Remove</button>
                 </div>
-                ${wine.vivino_updated_at || wine.ai_updated_at
+                ${wine.vivino_checked_at || wine.ai_checked_at || wine.vivino_updated_at || wine.ai_updated_at
                   ? html`
                       <div style="text-align:center;font-size:0.68em;color:var(--wc-text-secondary);margin-top:-6px;padding-bottom:10px">
-                        ${wine.vivino_updated_at
+                        ${wine.vivino_checked_at || wine.vivino_updated_at
                           ? html`${wine.vivino_id
                               ? html`<a
                                   href="https://www.vivino.com/w/${wine.vivino_id}"
@@ -1186,10 +1200,18 @@ export class WineDetailDialog extends LitElement {
                                   style="color:inherit;text-decoration:underline"
                                   @click=${(e: Event) => e.stopPropagation()}
                                 >Vivino</a>`
-                              : html`Vivino`}: ${this._formatUpdatedAt(wine.vivino_updated_at)}`
+                              : html`Vivino`}: ${this._renderSourceDates(
+                                wine.vivino_updated_at,
+                                wine.vivino_checked_at
+                              )}`
                           : nothing}
-                        ${wine.vivino_updated_at && wine.ai_updated_at ? " · " : nothing}
-                        ${wine.ai_updated_at ? html`AI: ${this._formatUpdatedAt(wine.ai_updated_at)}` : nothing}
+                        ${(wine.vivino_checked_at || wine.vivino_updated_at) &&
+                        (wine.ai_checked_at || wine.ai_updated_at)
+                          ? " · "
+                          : nothing}
+                        ${wine.ai_checked_at || wine.ai_updated_at
+                          ? html`AI: ${this._renderSourceDates(wine.ai_updated_at, wine.ai_checked_at)}`
+                          : nothing}
                       </div>
                     `
                   : nothing}
