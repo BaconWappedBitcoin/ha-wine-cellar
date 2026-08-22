@@ -5111,6 +5111,12 @@ let AddWineDialog = class AddWineDialog extends i {
         this._frontImageRaw = "";
         this._showBackPrompt = false;
         this._searchResults = [];
+        // Bumped every time the dialog opens. Label recognition waits up to 45
+        // seconds on the AI, which is long enough to cancel, close, and start
+        // adding a different bottle — and the late reply would then overwrite that
+        // bottle's form with the previous one's reading and jump to the details
+        // step. Every async handler here checks the session it started in.
+        this._session = 0;
     }
     get _steps() {
         return this.buyListMode
@@ -5128,6 +5134,7 @@ let AddWineDialog = class AddWineDialog extends i {
                 this._loading = false;
                 this._quantity = 1;
                 this._addProgress = 0;
+                this._session++;
                 this._labelLoading = false;
                 this._searchResults = [];
                 this._captureStage = "front";
@@ -5179,6 +5186,7 @@ let AddWineDialog = class AddWineDialog extends i {
     async _lookupBarcode() {
         if (!this._barcode.trim())
             return;
+        const session = this._session;
         this._loading = true;
         this._error = "";
         try {
@@ -5186,6 +5194,8 @@ let AddWineDialog = class AddWineDialog extends i {
                 type: "wine_cellar/lookup_barcode",
                 barcode: this._barcode.trim(),
             });
+            if (session !== this._session)
+                return;
             if (result.result) {
                 this._lookupResult = result.result;
                 this._wineData = {
@@ -5215,6 +5225,8 @@ let AddWineDialog = class AddWineDialog extends i {
             }
         }
         catch (err) {
+            if (session !== this._session)
+                return;
             this._wineData = { ...this._wineData, barcode: this._barcode.trim() };
             this._onBarcodeLookupFailed("Barcode lookup failed.");
         }
@@ -5237,6 +5249,7 @@ let AddWineDialog = class AddWineDialog extends i {
         }
     }
     async _searchWine() {
+        const session = this._session;
         const input = this.shadowRoot?.querySelector(".search-input");
         if (!input?.value.trim())
             return;
@@ -5248,6 +5261,8 @@ let AddWineDialog = class AddWineDialog extends i {
                 type: "wine_cellar/search_wine",
                 query: input.value.trim(),
             });
+            if (session !== this._session)
+                return;
             if (result.results && result.results.length > 0) {
                 this._searchResults = result.results;
             }
@@ -5298,6 +5313,7 @@ let AddWineDialog = class AddWineDialog extends i {
         }
     }
     async _finishLabelScan(backImageRaw) {
+        const session = this._session;
         this._showBackPrompt = false;
         this._labelLoading = true;
         this._error = "";
@@ -5307,6 +5323,10 @@ let AddWineDialog = class AddWineDialog extends i {
                 image: this._frontImageRaw,
                 ...(backImageRaw ? { back_image: backImageRaw } : {}),
             });
+            // The slowest wait in the app. If the dialog was reopened meanwhile,
+            // this reading belongs to a bottle the user has moved on from.
+            if (session !== this._session)
+                return;
             if (result.result) {
                 // Resize captured photos to thumbnails for storage
                 const thumbUrl = await resizeImageForStorage(this._frontImageRaw);
@@ -5347,6 +5367,8 @@ let AddWineDialog = class AddWineDialog extends i {
             }
         }
         catch (err) {
+            if (session !== this._session)
+                return;
             const msg = err?.message || String(err);
             console.error("Wine Cellar: label recognition error:", msg);
             this._error = `Label recognition error: ${msg}`;
@@ -12670,17 +12692,15 @@ let WineCellarCard = class WineCellarCard extends i {
                 if (toIdx === -1)
                     return;
                 zoneWines.splice(d.insertBefore ? toIdx : toIdx + 1, 0, moved);
-                for (let i = 0; i < zoneWines.length; i++) {
-                    if ((zoneWines[i].depth || 0) !== i) {
-                        await this.hass.callWS({
-                            type: "wine_cellar/move_wine",
-                            wine_id: zoneWines[i].id,
-                            cabinet_id: d.targetCabinetId,
-                            zone: d.targetZone,
-                            depth: i,
-                        });
-                    }
-                }
+                // One renumbering rather than a move per bottle: dragging within a
+                // full twenty-bottle bin used to fire up to twenty calls, each with
+                // its own disk write on the other side.
+                await this.hass.callWS({
+                    type: "wine_cellar/reorder_zone",
+                    cabinet_id: d.targetCabinetId,
+                    zone: d.targetZone,
+                    wine_ids: zoneWines.map((w) => w.id),
+                });
                 this._showToast("Wine reordered");
                 await this._loadData();
             }
@@ -12695,6 +12715,9 @@ let WineCellarCard = class WineCellarCard extends i {
         // silently block reordering within the same zone.
         if (!d.targetZone && d.sourceCabinetId === d.targetCabinetId && d.sourceRow === d.targetRow && d.sourceCol === d.targetCol && d.sourceZone === d.targetZone)
             return;
+        // Set once the first half of a swap has happened, so a failure in the
+        // second half can be undone.
+        let swappedBack = null;
         try {
             // Check if target cell has a wine (swap)
             let targetWine;
@@ -12713,6 +12736,17 @@ let WineCellarCard = class WineCellarCard extends i {
                     // only include them when they're actually set.
                     ...(d.sourceRow !== null && d.sourceRow !== undefined ? { row: d.sourceRow } : {}),
                     ...(d.sourceCol !== null && d.sourceCol !== undefined ? { col: d.sourceCol } : {}),
+                });
+                // Half of a swap is not a state the rack can be in: the target bottle
+                // is now sitting where the dragged one still is. If the second half
+                // fails, put it back before reporting the failure.
+                swappedBack = () => this.hass.callWS({
+                    type: "wine_cellar/move_wine",
+                    wine_id: targetWine.id,
+                    cabinet_id: d.targetCabinetId,
+                    zone: d.targetZone || "",
+                    ...(d.targetRow !== null && d.targetRow !== undefined ? { row: d.targetRow } : {}),
+                    ...(d.targetCol !== null && d.targetCol !== undefined ? { col: d.targetCol } : {}),
                 });
             }
             // Dropped into a bulk/box zone's general area (not swapped onto a
@@ -12757,7 +12791,19 @@ let WineCellarCard = class WineCellarCard extends i {
         }
         catch (err) {
             console.error("Failed to move wine:", err);
+            if (swappedBack) {
+                try {
+                    await swappedBack();
+                }
+                catch (undoErr) {
+                    console.error("Failed to undo half-completed swap:", undoErr);
+                    this._showToast("Move failed and could not be undone — check both slots");
+                    await this._loadData();
+                    return;
+                }
+            }
             this._showToast("Failed to move wine");
+            await this._loadData();
         }
     }
     _copyWine(wine) {

@@ -57,6 +57,12 @@ export class AddWineDialog extends LitElement {
   @state() private _frontImageRaw = "";
   @state() private _showBackPrompt = false;
   @state() private _searchResults: BarcodeLookupResult[] = [];
+  // Bumped every time the dialog opens. Label recognition waits up to 45
+  // seconds on the AI, which is long enough to cancel, close, and start
+  // adding a different bottle — and the late reply would then overwrite that
+  // bottle's form with the previous one's reading and jump to the details
+  // step. Every async handler here checks the session it started in.
+  private _session = 0;
 
   static styles = [
     sharedStyles,
@@ -580,6 +586,7 @@ export class AddWineDialog extends LitElement {
         this._loading = false;
         this._quantity = 1;
         this._addProgress = 0;
+        this._session++;
         this._labelLoading = false;
         this._searchResults = [];
         this._captureStage = "front";
@@ -631,6 +638,7 @@ export class AddWineDialog extends LitElement {
 
   private async _lookupBarcode() {
     if (!this._barcode.trim()) return;
+    const session = this._session;
     this._loading = true;
     this._error = "";
 
@@ -640,6 +648,7 @@ export class AddWineDialog extends LitElement {
         barcode: this._barcode.trim(),
       });
 
+      if (session !== this._session) return;
       if (result.result) {
         this._lookupResult = result.result;
         this._wineData = {
@@ -667,6 +676,7 @@ export class AddWineDialog extends LitElement {
         this._onBarcodeLookupFailed("No match for this barcode.");
       }
     } catch (err) {
+      if (session !== this._session) return;
       this._wineData = { ...this._wineData, barcode: this._barcode.trim() };
       this._onBarcodeLookupFailed("Barcode lookup failed.");
     }
@@ -691,6 +701,7 @@ export class AddWineDialog extends LitElement {
   }
 
   private async _searchWine() {
+    const session = this._session;
     const input = this.shadowRoot?.querySelector(
       ".search-input"
     ) as HTMLInputElement;
@@ -706,6 +717,7 @@ export class AddWineDialog extends LitElement {
         query: input.value.trim(),
       });
 
+      if (session !== this._session) return;
       if (result.results && result.results.length > 0) {
         this._searchResults = result.results;
       } else {
@@ -758,6 +770,7 @@ export class AddWineDialog extends LitElement {
   }
 
   private async _finishLabelScan(backImageRaw?: string) {
+    const session = this._session;
     this._showBackPrompt = false;
     this._labelLoading = true;
     this._error = "";
@@ -769,6 +782,9 @@ export class AddWineDialog extends LitElement {
         ...(backImageRaw ? { back_image: backImageRaw } : {}),
       });
 
+      // The slowest wait in the app. If the dialog was reopened meanwhile,
+      // this reading belongs to a bottle the user has moved on from.
+      if (session !== this._session) return;
       if (result.result) {
         // Resize captured photos to thumbnails for storage
         const thumbUrl = await resizeImageForStorage(this._frontImageRaw);
@@ -807,6 +823,7 @@ export class AddWineDialog extends LitElement {
         console.error("Wine Cellar: label recognition failed:", errorDetail);
       }
     } catch (err: any) {
+      if (session !== this._session) return;
       const msg = err?.message || String(err);
       console.error("Wine Cellar: label recognition error:", msg);
       this._error = `Label recognition error: ${msg}`;

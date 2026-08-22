@@ -1400,17 +1400,15 @@ export class WineCellarCard extends LitElement {
         if (toIdx === -1) return;
         zoneWines.splice(d.insertBefore ? toIdx : toIdx + 1, 0, moved);
 
-        for (let i = 0; i < zoneWines.length; i++) {
-          if ((zoneWines[i].depth || 0) !== i) {
-            await this.hass.callWS({
-              type: "wine_cellar/move_wine",
-              wine_id: zoneWines[i].id,
-              cabinet_id: d.targetCabinetId,
-              zone: d.targetZone,
-              depth: i,
-            });
-          }
-        }
+        // One renumbering rather than a move per bottle: dragging within a
+        // full twenty-bottle bin used to fire up to twenty calls, each with
+        // its own disk write on the other side.
+        await this.hass.callWS({
+          type: "wine_cellar/reorder_zone",
+          cabinet_id: d.targetCabinetId,
+          zone: d.targetZone,
+          wine_ids: zoneWines.map((w) => w.id),
+        });
         this._showToast("Wine reordered");
         await this._loadData();
       } catch (err) {
@@ -1425,6 +1423,9 @@ export class WineCellarCard extends LitElement {
     // silently block reordering within the same zone.
     if (!d.targetZone && d.sourceCabinetId === d.targetCabinetId && d.sourceRow === d.targetRow && d.sourceCol === d.targetCol && d.sourceZone === d.targetZone) return;
 
+    // Set once the first half of a swap has happened, so a failure in the
+    // second half can be undone.
+    let swappedBack: (() => Promise<any>) | null = null;
     try {
       // Check if target cell has a wine (swap)
       let targetWine: Wine | undefined;
@@ -1447,6 +1448,18 @@ export class WineCellarCard extends LitElement {
           ...(d.sourceRow !== null && d.sourceRow !== undefined ? { row: d.sourceRow } : {}),
           ...(d.sourceCol !== null && d.sourceCol !== undefined ? { col: d.sourceCol } : {}),
         });
+        // Half of a swap is not a state the rack can be in: the target bottle
+        // is now sitting where the dragged one still is. If the second half
+        // fails, put it back before reporting the failure.
+        swappedBack = () =>
+          this.hass.callWS({
+            type: "wine_cellar/move_wine",
+            wine_id: targetWine!.id,
+            cabinet_id: d.targetCabinetId,
+            zone: d.targetZone || "",
+            ...(d.targetRow !== null && d.targetRow !== undefined ? { row: d.targetRow } : {}),
+            ...(d.targetCol !== null && d.targetCol !== undefined ? { col: d.targetCol } : {}),
+          });
       }
 
       // Dropped into a bulk/box zone's general area (not swapped onto a
@@ -1495,7 +1508,18 @@ export class WineCellarCard extends LitElement {
       await this._loadData();
     } catch (err) {
       console.error("Failed to move wine:", err);
+      if (swappedBack) {
+        try {
+          await swappedBack();
+        } catch (undoErr) {
+          console.error("Failed to undo half-completed swap:", undoErr);
+          this._showToast("Move failed and could not be undone — check both slots");
+          await this._loadData();
+          return;
+        }
+      }
       this._showToast("Failed to move wine");
+      await this._loadData();
     }
   }
 
