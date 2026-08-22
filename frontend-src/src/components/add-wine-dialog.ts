@@ -7,6 +7,7 @@ import {
   StorageRow,
   WineType,
   WINE_TYPE_LABELS,
+  getRackSlots,
 } from "../models";
 import { sharedStyles } from "../styles";
 import { resizeImageForStorage } from "../utils/image";
@@ -35,6 +36,8 @@ export class AddWineDialog extends LitElement {
   @state() private _scanMode: ScanMode = "idle";
   @state() private _barcode = "";
   @state() private _loading = false;
+  @state() private _quantity = 1;
+  @state() private _addProgress = 0;
   @state() private _lookupResult: BarcodeLookupResult | null = null;
   @state() private _wineData: Partial<Wine> = {};
   @state() private _error = "";
@@ -273,6 +276,67 @@ export class AddWineDialog extends LitElement {
         to { transform: rotate(360deg); }
       }
 
+      .qty-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .qty-label {
+        font-size: 0.85em;
+        font-weight: 500;
+        color: var(--wc-text-secondary);
+      }
+
+      .qty-stepper {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .qty-btn {
+        width: 32px;
+        height: 32px;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        font-size: 1.1em;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      .qty-btn:hover:not(:disabled) {
+        border-color: var(--wc-primary);
+        color: var(--wc-primary);
+      }
+
+      .qty-btn:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+
+      .qty-input {
+        width: 56px;
+        padding: 6px 4px;
+        text-align: center;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        font-size: 1em;
+        font-weight: 600;
+      }
+
+      .qty-hint {
+        margin-top: 6px;
+        font-size: 0.78em;
+        color: var(--wc-text-secondary);
+        line-height: 1.4;
+      }
+
       .confirm-summary {
         background: rgba(128, 128, 128, 0.08);
         border-radius: 10px;
@@ -413,6 +477,8 @@ export class AddWineDialog extends LitElement {
         this._lookupResult = null;
         this._error = "";
         this._loading = false;
+        this._quantity = 1;
+        this._addProgress = 0;
         this._labelLoading = false;
         this._searchResults = [];
         this._captureStage = "front";
@@ -700,6 +766,91 @@ export class AddWineDialog extends LitElement {
     };
   }
 
+  // Where each of `count` identical bottles would land. Returns fewer than
+  // asked when the destination runs out of room, so the caller can clamp
+  // rather than silently dropping bottles.
+  private _planSlots(count: number): { row: number | null; col: number | null; zone: string; depth: number }[] {
+    const d = this._wineData;
+    const cabinet = this.cabinets.find((c) => c.id === d.cabinet_id);
+    const unplaced = { row: null, col: null, zone: "", depth: 0 };
+    // No rack chosen: the bottles go in unassigned, where nothing can clash.
+    if (!cabinet) return Array.from({ length: count }, () => ({ ...unplaced }));
+
+    const key = (zone: string, row: number | null, col: number | null, depth: number) =>
+      `${zone}|${row ?? ""}|${col ?? ""}|${depth}`;
+    const taken = new Set(
+      this.wines
+        .filter((w) => w.cabinet_id === cabinet.id)
+        .map((w) => key(w.zone || "", w.row, w.col, w.depth || 0))
+    );
+
+    const out: { row: number | null; col: number | null; zone: string; depth: number }[] = [];
+
+    if (d.zone) {
+      const sr = (cabinet.storage_rows || []).find((x) => `storage-${x.row}` === d.zone);
+      if (!sr) return out;
+      const capacity =
+        sr.type === "box"
+          ? (sr.boxes || []).reduce((sum, b) => sum + b, 0) || sr.capacity || 0
+          : sr.capacity || 0;
+      for (let depth = 0; depth < capacity && out.length < count; depth++) {
+        const k = key(d.zone, null, null, depth);
+        if (taken.has(k)) continue;
+        taken.add(k);
+        out.push({ row: null, col: null, zone: d.zone, depth });
+      }
+      return out;
+    }
+
+    // Grid: fill the chosen slot's depths first, then carry on through the
+    // rack's remaining slots in reading order — a six-pack should not stop
+    // at the first slot just because it only holds one bottle.
+    const rackDepth = cabinet.depth || 1;
+    const slots = getRackSlots(cabinet);
+    const startIdx = Math.max(
+      0,
+      slots.findIndex((x) => x.row === d.row && x.col === d.col)
+    );
+    const ordered = [...slots.slice(startIdx), ...slots.slice(0, startIdx)];
+    for (const slot of ordered) {
+      for (let depth = 0; depth < rackDepth && out.length < count; depth++) {
+        const k = key("", slot.row, slot.col, depth);
+        if (taken.has(k)) continue;
+        taken.add(k);
+        out.push({ row: slot.row, col: slot.col, zone: "", depth });
+      }
+      if (out.length >= count) break;
+    }
+    return out;
+  }
+
+  // Free space at the chosen destination; null when there is no limit.
+  private _availableSlots(): number | null {
+    const d = this._wineData;
+    const cabinet = this.cabinets.find((c) => c.id === d.cabinet_id);
+    if (!cabinet) return null;
+    const inCabinet = this.wines.filter((w) => w.cabinet_id === cabinet.id);
+
+    if (d.zone) {
+      const sr = (cabinet.storage_rows || []).find((x) => `storage-${x.row}` === d.zone);
+      if (!sr) return 0;
+      const capacity =
+        sr.type === "box"
+          ? (sr.boxes || []).reduce((sum, b) => sum + b, 0) || sr.capacity || 0
+          : sr.capacity || 0;
+      return Math.max(0, capacity - inCabinet.filter((w) => w.zone === d.zone).length);
+    }
+
+    const total = getRackSlots(cabinet).length * (cabinet.depth || 1);
+    return Math.max(0, total - inCabinet.filter((w) => w.row !== null && w.col !== null).length);
+  }
+
+  private _setQuantity(value: number) {
+    const available = this._availableSlots();
+    const max = available === null ? 99 : Math.max(1, Math.min(99, available));
+    this._quantity = Math.max(1, Math.min(max, Math.round(value) || 1));
+  }
+
   private async _addWine() {
     this._loading = true;
     try {
@@ -712,10 +863,21 @@ export class AddWineDialog extends LitElement {
           new CustomEvent("buy-list-updated", { bubbles: true, composed: true })
         );
       } else {
-        await this.hass.callWS({
-          type: "wine_cellar/add_wine",
-          wine: this._wineData,
-        });
+        const slots = this._planSlots(this._quantity);
+        if (!slots.length) {
+          this._error = "No free slot left at that destination.";
+          this._loading = false;
+          return;
+        }
+        // Each bottle is added at its own slot, so identical bottles never
+        // stack on top of each other.
+        for (let i = 0; i < slots.length; i++) {
+          this._addProgress = i + 1;
+          await this.hass.callWS({
+            type: "wine_cellar/add_wine",
+            wine: { ...this._wineData, ...slots[i] },
+          });
+        }
         this.dispatchEvent(
           new CustomEvent("wine-added", { bubbles: true, composed: true })
         );
@@ -724,6 +886,7 @@ export class AddWineDialog extends LitElement {
     } catch (err) {
       this._error = this.buyListMode ? "Failed to add to buy list." : "Failed to add wine.";
     }
+    this._addProgress = 0;
     this._loading = false;
   }
 
@@ -1273,6 +1436,51 @@ export class AddWineDialog extends LitElement {
     this._goToStep("confirm");
   }
 
+  private _renderQuantityPicker() {
+    const available = this._availableSlots();
+    const max = available === null ? 99 : Math.max(1, Math.min(99, available));
+    const destination = this._wineData.cabinet_id
+      ? this._planSlots(this._quantity)
+      : null;
+
+    return html`
+      <div class="qty-row">
+        <span class="qty-label">Bottles</span>
+        <div class="qty-stepper">
+          <button
+            class="qty-btn"
+            ?disabled=${this._quantity <= 1}
+            @click=${() => this._setQuantity(this._quantity - 1)}
+          >−</button>
+          <input
+            class="qty-input"
+            type="number"
+            min="1"
+            max=${max}
+            .value=${String(this._quantity)}
+            @change=${(e: Event) =>
+              this._setQuantity(Number((e.target as HTMLInputElement).value))}
+          />
+          <button
+            class="qty-btn"
+            ?disabled=${this._quantity >= max}
+            @click=${() => this._setQuantity(this._quantity + 1)}
+          >+</button>
+        </div>
+      </div>
+      <div class="qty-hint">
+        ${available === null
+          ? "Identical bottles, added unassigned."
+          : available === 0
+            ? "That destination is full."
+            : html`${available} slot${available > 1 ? "s" : ""} free here.
+              ${destination && destination.length > 1
+                ? `The ${destination.length} bottles take consecutive free slots.`
+                : ""}`}
+      </div>
+    `;
+  }
+
   private _renderConfirmStep() {
     const cabinetName =
       this.cabinets.find((c) => c.id === this._wineData.cabinet_id)?.name ||
@@ -1340,6 +1548,8 @@ export class AddWineDialog extends LitElement {
             : nothing}
         </div>
 
+        ${this.buyListMode ? nothing : this._renderQuantityPicker()}
+
         ${this._error
           ? html`<div class="error-msg">${this._error}</div>`
           : nothing}
@@ -1351,8 +1561,14 @@ export class AddWineDialog extends LitElement {
         </button>
         <button class="btn btn-primary" @click=${this._addWine}>
           ${this._loading
-            ? html`<span class="loading-spinner"></span>`
-            : this.buyListMode ? "Add to Buy List" : "Add Wine"}
+            ? html`<span class="loading-spinner"></span>${this._addProgress && this._quantity > 1
+                ? html` ${this._addProgress}/${this._quantity}`
+                : nothing}`
+            : this.buyListMode
+              ? "Add to Buy List"
+              : this._quantity > 1
+                ? `Add ${this._quantity} Bottles`
+                : "Add Wine"}
         </button>
       </div>
     `;
