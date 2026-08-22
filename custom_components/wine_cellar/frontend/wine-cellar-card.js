@@ -7715,8 +7715,9 @@ let InventoryDialog = class InventoryDialog extends i {
         this._confirmEnrich = "";
         if (!wines.length)
             return;
+        const sourceLabel = source === "vivino" ? "Vivino" : "the AI";
         this._enriching = source;
-        this._statusMsg = `Refreshing ${wines.length} wines via ${source === "vivino" ? "Vivino" : "AI"}…`;
+        this._statusMsg = `Refreshing ${wines.length} wines via ${sourceLabel}…`;
         try {
             const result = await this.hass.callWS({
                 type: source === "vivino" ? "wine_cellar/batch_refresh_vivino" : "wine_cellar/batch_analyze_wines",
@@ -7727,10 +7728,17 @@ let InventoryDialog = class InventoryDialog extends i {
             }
             else {
                 const updated = result?.updated ?? 0;
+                const unchanged = result?.unchanged ?? 0;
                 const errors = result?.errors ?? 0;
+                const source = sourceLabel;
+                const parts = [`${updated} updated`];
+                if (unchanged)
+                    parts.push(`${unchanged} had nothing new on ${source}`);
+                if (errors)
+                    parts.push(`${errors} could not be reached`);
                 this._statusMsg =
-                    `Updated ${updated} of ${result?.total ?? wines.length} wines` +
-                        (errors ? ` — ${errors} could not be looked up.` : ".");
+                    `${parts.join(", ")}.` +
+                        (unchanged ? " Those are marked as checked and no longer counted here." : "");
                 this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
             }
         }
@@ -7987,11 +7995,11 @@ let InventoryDialog = class InventoryDialog extends i {
       <div class="inv-enrich">
         <span class="inv-enrich-text">
           ${needVivino
-            ? b `<strong>${needVivino}</strong> never looked up on Vivino (pairings,
-                description)`
+            ? b `<strong>${needVivino}</strong> missing pairings or description, never
+                checked against Vivino`
             : A}${needVivino && needAI ? " · " : ""}${needAI
-            ? b `<strong>${needAI}</strong> never analyzed by AI (drink window,
-                verdict)`
+            ? b `<strong>${needAI}</strong> missing a drink window or verdict, never
+                analyzed by AI`
             : A}
         </span>
         <span class="inv-enrich-btns">
@@ -8031,6 +8039,11 @@ let InventoryDialog = class InventoryDialog extends i {
             slow, rate-limited network call — expect it to run for a while, and leave the
             dialog open until it finishes.
           </p>
+          <div class="inv-confirm-stats">
+            Some will come back with nothing new — not every bottle exists in
+            ${source === "vivino" ? "Vivino's catalogue" : "what the AI can infer"}. Those
+            are marked as checked so they stop being counted here.
+          </div>
           <div class="inv-confirm-stats">
             ${source === "vivino"
             ? "Fills food pairings, description, rating and the label photo where Vivino has them. Existing values are kept."
@@ -8737,12 +8750,20 @@ let InventoryDialog = class InventoryDialog extends i {
             { value: "cabinet", label: "Cabinet" },
         ];
         const presets = [
-            { id: "all", label: "All" },
-            { id: "drink_this_year", label: "Drink this year" },
-            { id: "past_peak", label: "Past peak" },
-            { id: "unrated", label: "Not rated" },
-            { id: "incomplete", label: "Incomplete" },
-            { id: "recent", label: "Added recently" },
+            { id: "all", label: "All", hint: "Every wine in the cellar" },
+            {
+                id: "drink_this_year",
+                label: "Drink this year",
+                hint: `Drink-by year ${new Date().getFullYear()} or earlier, or marked "Drink now" with no year. Excludes past peak.`,
+            },
+            { id: "past_peak", label: "Past peak", hint: 'Marked "Past peak" by the AI analysis' },
+            { id: "unrated", label: "Not rated", hint: "You have not given these a personal star rating" },
+            {
+                id: "incomplete",
+                label: "Missing data",
+                hint: "Missing at least one of: food pairings, description, drink window, label photo",
+            },
+            { id: "recent", label: "Added recently", hint: "Added to the cellar in the last 30 days" },
         ];
         const filters = [
             { id: "all", label: "All" },
@@ -8856,6 +8877,7 @@ let InventoryDialog = class InventoryDialog extends i {
             ${presets.map((p) => b `
                 <button
                   class="inv-chip preset ${this._preset === p.id ? "active" : ""}"
+                  title=${p.hint}
                   @click=${() => {
             this._preset = p.id;
             this._savePrefs();

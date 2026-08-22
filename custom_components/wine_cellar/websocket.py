@@ -773,7 +773,12 @@ async def ws_refresh_wine(
         # No usable Vivino match (no results, or the best match looks
         # unrelated). Don't silently fall back to AI — flag it so the
         # frontend can ask the user first (unless they've opted into
-        # always-use-AI).
+        # always-use-AI). The attempt is still recorded, so the wine stops
+        # being reported as never checked.
+        storage.update_wine(
+            msg["wine_id"], {"vivino_updated_at": datetime.now(timezone.utc).isoformat()}
+        )
+        await storage.async_save()
         connection.send_result(msg["id"], {
             "error": f"No confident Vivino match for '{query}'.",
             "no_vivino_match": True,
@@ -847,28 +852,29 @@ async def ws_refresh_wine(
         if val and not wine.get(key):
             updates[key] = val
 
-    if updates:
-        updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
-        if lookup.get("vivino_id"):
-            updates["vivino_id"] = lookup["vivino_id"]
-        if ai_price_used:
-            updates["ai_updated_at"] = updates["vivino_updated_at"]
-        updated_wine = storage.update_wine(msg["wine_id"], updates)
-        await storage.async_save()
-        hass.bus.async_fire(f"{DOMAIN}_updated")
-        connection.send_result(msg["id"], {
-            "wine": updated_wine,
-            "updated_fields": list(updates.keys()),
-            "vivino_image_url": vivino_image_url,
-            "price_needs_ai": price_needs_ai,
-        })
-    else:
-        connection.send_result(msg["id"], {
-            "wine": wine,
-            "updated_fields": [],
-            "vivino_image_url": vivino_image_url,
-            "price_needs_ai": price_needs_ai,
-        })
+    # The field list reported to the frontend is the real changes only; the
+    # bookkeeping keys added below would otherwise show up as "1 field
+    # updated" on a lookup that changed nothing.
+    changed_fields = list(updates.keys())
+
+    # Stamp the check even when nothing changed — it records "we asked
+    # Vivino", not "Vivino told us something new". Without it a wine Vivino
+    # has nothing for is reported as never looked up forever.
+    updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
+    if lookup.get("vivino_id"):
+        updates["vivino_id"] = lookup["vivino_id"]
+    if ai_price_used:
+        updates["ai_updated_at"] = updates["vivino_updated_at"]
+
+    updated_wine = storage.update_wine(msg["wine_id"], updates)
+    await storage.async_save()
+    hass.bus.async_fire(f"{DOMAIN}_updated")
+    connection.send_result(msg["id"], {
+        "wine": updated_wine,
+        "updated_fields": changed_fields,
+        "vivino_image_url": vivino_image_url,
+        "price_needs_ai": price_needs_ai,
+    })
 
 
 @websocket_api.websocket_command(
@@ -908,14 +914,13 @@ async def ws_analyze_single_wine(
     updates = _build_ai_updates(wine, result, currency)
 
     _LOGGER.debug("Final updates for wine %s: %s", msg["wine_id"], list(updates.keys()))
-    if updates:
-        updates["ai_updated_at"] = datetime.now(timezone.utc).isoformat()
-        updated_wine = storage.update_wine(msg["wine_id"], updates)
-        await storage.async_save()
-        hass.bus.async_fire(f"{DOMAIN}_updated")
-        connection.send_result(msg["id"], {"wine": updated_wine, "analysis": result})
-    else:
-        connection.send_result(msg["id"], {"wine": wine, "analysis": result})
+    # Same as the Vivino path: record that the AI was asked, so a wine it can
+    # add nothing to stops being reported as never analyzed.
+    updates["ai_updated_at"] = datetime.now(timezone.utc).isoformat()
+    updated_wine = storage.update_wine(msg["wine_id"], updates)
+    await storage.async_save()
+    hass.bus.async_fire(f"{DOMAIN}_updated")
+    connection.send_result(msg["id"], {"wine": updated_wine, "analysis": result})
 
 
 @websocket_api.websocket_command(
@@ -948,6 +953,7 @@ async def ws_batch_analyze_wines(
     language = _get_metadata_language(hass)
     currency = _get_metadata_currency(hass)
     updated = 0
+    unchanged = 0
     errors = 0
     total = len(wines)
 
@@ -963,11 +969,18 @@ async def ws_batch_analyze_wines(
                 continue
 
             updates = _build_ai_updates(wine, result, currency)
+            had_changes = bool(updates)
 
-            if updates:
-                updates["ai_updated_at"] = datetime.now(timezone.utc).isoformat()
-                storage.update_wine(wine["id"], updates)
+            # Stamp the timestamp even when nothing changed. It marks "we
+            # asked", not "we learned something" — without that, a wine the
+            # AI can add nothing to is reported as never analyzed forever,
+            # and every re-run finds the same nothing.
+            updates["ai_updated_at"] = datetime.now(timezone.utc).isoformat()
+            storage.update_wine(wine["id"], updates)
+            if had_changes:
                 updated += 1
+            else:
+                unchanged += 1
 
             # Small delay between API calls to avoid rate limits
             await asyncio.sleep(0.5)
@@ -978,13 +991,13 @@ async def ws_batch_analyze_wines(
             )
             errors += 1
 
-    if updated:
+    if updated or unchanged:
         await storage.async_save()
         hass.bus.async_fire(f"{DOMAIN}_updated")
 
     connection.send_result(
         msg["id"],
-        {"updated": updated, "total": total, "errors": errors},
+        {"updated": updated, "unchanged": unchanged, "total": total, "errors": errors},
     )
 
 
@@ -1022,6 +1035,7 @@ async def ws_batch_refresh_vivino(
     language = _get_metadata_language(hass)
     currency = _get_metadata_currency(hass)
     updated = 0
+    unchanged = 0
     errors = 0
     photos_updated = 0
     photos_kept = 0
@@ -1068,6 +1082,7 @@ async def ws_batch_refresh_vivino(
                 # No usable Vivino match. Only fall back to AI if the user
                 # opted into it upfront for this batch run — never silently.
                 mismatched += 1
+                gained_data = False
                 gemini = hass.data[DOMAIN].get("gemini") if ai_fallback_mode == "use" else None
                 if gemini:
                     try:
@@ -1079,10 +1094,21 @@ async def ws_batch_refresh_vivino(
                                 storage.update_wine(wine["id"], ai_updates)
                                 updated += 1
                                 ai_fallback_used += 1
+                                gained_data = True
                     except Exception as err:
                         _LOGGER.debug(
                             "Batch: AI fallback failed for wine %s: %s", wine.get("id"), err
                         )
+                # Record the Vivino check even though it found nothing, or the
+                # wine is reported as never looked up forever. Counted as
+                # unchanged only when the AI fallback didn't rescue it either,
+                # so no wine lands in both totals.
+                storage.update_wine(
+                    wine["id"],
+                    {"vivino_updated_at": datetime.now(timezone.utc).isoformat()},
+                )
+                if not gained_data:
+                    unchanged += 1
                 await asyncio.sleep(1.0)
                 continue
 
@@ -1145,14 +1171,17 @@ async def ws_batch_refresh_vivino(
                 if val and not wine.get(key):
                     updates[key] = val
 
-            if updates:
-                updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
-                if lookup.get("vivino_id"):
-                    updates["vivino_id"] = lookup["vivino_id"]
-                if ai_price_used:
-                    updates["ai_updated_at"] = updates["vivino_updated_at"]
-                storage.update_wine(wine["id"], updates)
+            had_changes = bool(updates)
+            updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
+            if lookup.get("vivino_id"):
+                updates["vivino_id"] = lookup["vivino_id"]
+            if ai_price_used:
+                updates["ai_updated_at"] = updates["vivino_updated_at"]
+            storage.update_wine(wine["id"], updates)
+            if had_changes:
                 updated += 1
+            else:
+                unchanged += 1
 
             # Small delay to avoid rate limits
             await asyncio.sleep(1.0)
@@ -1163,7 +1192,7 @@ async def ws_batch_refresh_vivino(
             )
             errors += 1
 
-    if updated:
+    if updated or unchanged:
         await storage.async_save()
         hass.bus.async_fire(f"{DOMAIN}_updated")
 
@@ -1171,6 +1200,7 @@ async def ws_batch_refresh_vivino(
         msg["id"],
         {
             "updated": updated,
+            "unchanged": unchanged,
             "total": total,
             "errors": errors,
             "photos_updated": photos_updated,
