@@ -85,6 +85,7 @@
       ], order: 3 },
     ];
 
+    let mockIdSeq = 1;
     let mockBackupKeep = 10;
     const mockServerBackups = [
       { filename: "wine_cellar_20260307_150000.json", timestamp: "2026-03-07T15:00:00Z", wines: 19, cabinets: 3, buy_list: 4, size: 12500 },
@@ -144,7 +145,7 @@
             if (cabIdx >= 0) mockCabinets.splice(cabIdx, 1);
             return { success: true };
           case "wine_cellar/add_wine":
-            mockWines.push({ ...msg.wine, id: "new-" + Date.now(), added_at: new Date().toISOString() });
+            mockWines.push({ ...msg.wine, id: "new-" + (mockIdSeq++), added_at: new Date().toISOString() });
             return { wine: mockWines[mockWines.length - 1] };
           case "wine_cellar/remove_wine":
             const idx = mockWines.findIndex(w => w.id === msg.wine_id);
@@ -308,6 +309,19 @@
               aN++;
             }
             return { updated: aN, unchanged: 0, total: aIds.length, errors: 1 };
+          }
+          case "wine_cellar/reorder_zone": {
+            const inZone = mockWines.filter(
+              (w) => w.cabinet_id === msg.cabinet_id && (w.zone || "") === msg.zone
+            );
+            const byId = Object.fromEntries(inZone.map((w) => [w.id, w]));
+            const listed = (msg.wine_ids || []).map((id) => byId[id]).filter(Boolean);
+            const listedIds = new Set(listed.map((w) => w.id));
+            const rest = inZone
+              .filter((w) => !listedIds.has(w.id))
+              .sort((a, b) => (a.depth || 0) - (b.depth || 0));
+            [...listed, ...rest].forEach((w, i) => { w.depth = i; });
+            return { reordered: listed.length + rest.length };
           }
           case "wine_cellar/get_storage_info": {
             const bytes = (v) => new TextEncoder().encode(JSON.stringify(v)).length;

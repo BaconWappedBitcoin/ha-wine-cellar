@@ -295,6 +295,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_backup)
     websocket_api.async_register_command(hass, ws_restore_backup)
     websocket_api.async_register_command(hass, ws_import_wines)
+    websocket_api.async_register_command(hass, ws_reorder_zone)
     websocket_api.async_register_command(hass, ws_server_backup_delete)
     websocket_api.async_register_command(hass, ws_get_storage_info)
     websocket_api.async_register_command(hass, ws_server_backup_save)
@@ -324,6 +325,29 @@ def ws_get_cabinets(
     """Return all cabinets."""
     storage = hass.data[DOMAIN]["storage"]
     connection.send_result(msg["id"], {"cabinets": storage.cabinets})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "wine_cellar/reorder_zone",
+        vol.Required("cabinet_id"): str,
+        vol.Required("zone"): str,
+        vol.Required("wine_ids"): [str],
+    }
+)
+@websocket_api.async_response
+async def ws_reorder_zone(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Renumber a bin's slots in one pass, instead of a move per bottle."""
+    storage = hass.data[DOMAIN]["storage"]
+    count = storage.reorder_zone(msg["cabinet_id"], msg["zone"], msg["wine_ids"])
+    if count:
+        await storage.async_save()
+        hass.bus.async_fire(f"{DOMAIN}_updated")
+    connection.send_result(msg["id"], {"reordered": count})
 
 
 @websocket_api.websocket_command(

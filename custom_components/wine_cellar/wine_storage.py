@@ -486,6 +486,34 @@ class WineCellarStorage:
             "wine_history": len(self._data[CONF_WINE_HISTORY]),
         }
 
+    def reorder_zone(
+        self, cabinet_id: str, zone: str, wine_ids: list[str]
+    ) -> int:
+        """Assign slots 0..n-1 to a bin's bottles, in the order given.
+
+        One pass over the data instead of a move per bottle: the caller used
+        to issue N websocket commands, each rewriting the whole store, which
+        made shifting a full bin unusably slow. Bottles in the bin that the
+        caller did not list keep their relative order and follow the listed
+        ones, so a stale frontend list can never drop a bottle out of its bin.
+        """
+        in_zone = [
+            w for w in self._data[CONF_WINES]
+            if w.get("cabinet_id") == cabinet_id and (w.get("zone") or "") == zone
+        ]
+        by_id = {w["id"]: w for w in in_zone}
+
+        ordered = [by_id[wid] for wid in wine_ids if wid in by_id]
+        listed = {w["id"] for w in ordered}
+        remainder = sorted(
+            (w for w in in_zone if w["id"] not in listed),
+            key=lambda w: w.get("depth") or 0,
+        )
+
+        for index, wine in enumerate([*ordered, *remainder]):
+            wine["depth"] = index
+        return len(ordered) + len(remainder)
+
     # ── CSV location resolution ──────────────────────────────────────
 
     def _find_cabinet_by_name(self, name: str) -> dict[str, Any] | None:

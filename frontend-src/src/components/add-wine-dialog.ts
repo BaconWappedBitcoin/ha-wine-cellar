@@ -871,11 +871,26 @@ export class AddWineDialog extends LitElement {
         }
         // Each bottle is added at its own slot, so identical bottles never
         // stack on top of each other.
+        const addedIds: string[] = [];
         for (let i = 0; i < slots.length; i++) {
           this._addProgress = i + 1;
-          await this.hass.callWS({
+          const result = await this.hass.callWS({
             type: "wine_cellar/add_wine",
             wine: { ...this._wineData, ...slots[i] },
+          });
+          if (result?.wine?.id) addedIds.push(result.wine.id);
+        }
+
+        // A bin is a pile: what you just put in sits on top, so the new
+        // bottles take the first slots and the rest shift down. One call
+        // renumbers the bin; listing only the new ids is enough, the backend
+        // appends the others in their existing order.
+        if (this._wineData.zone && addedIds.length) {
+          await this.hass.callWS({
+            type: "wine_cellar/reorder_zone",
+            cabinet_id: this._wineData.cabinet_id,
+            zone: this._wineData.zone,
+            wine_ids: addedIds,
           });
         }
         this.dispatchEvent(

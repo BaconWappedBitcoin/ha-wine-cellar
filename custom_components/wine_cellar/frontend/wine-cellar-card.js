@@ -4576,11 +4576,26 @@ let AddWineDialog = class AddWineDialog extends i {
                 }
                 // Each bottle is added at its own slot, so identical bottles never
                 // stack on top of each other.
+                const addedIds = [];
                 for (let i = 0; i < slots.length; i++) {
                     this._addProgress = i + 1;
-                    await this.hass.callWS({
+                    const result = await this.hass.callWS({
                         type: "wine_cellar/add_wine",
                         wine: { ...this._wineData, ...slots[i] },
+                    });
+                    if (result?.wine?.id)
+                        addedIds.push(result.wine.id);
+                }
+                // A bin is a pile: what you just put in sits on top, so the new
+                // bottles take the first slots and the rest shift down. One call
+                // renumbers the bin; listing only the new ids is enough, the backend
+                // appends the others in their existing order.
+                if (this._wineData.zone && addedIds.length) {
+                    await this.hass.callWS({
+                        type: "wine_cellar/reorder_zone",
+                        cabinet_id: this._wineData.cabinet_id,
+                        zone: this._wineData.zone,
+                        wine_ids: addedIds,
                     });
                 }
                 this.dispatchEvent(new CustomEvent("wine-added", { bubbles: true, composed: true }));
@@ -10812,6 +10827,28 @@ let WineCellarCard = class WineCellarCard extends i {
             depth++;
         return depth;
     }
+    // Renumber a bin's slots in a single backend call. Looping a move per
+    // bottle rewrote the whole store each time, which made shifting a full bin
+    // far too slow to do on every add.
+    async _reorderZone(cabinetId, zone, wineIds) {
+        await this.hass.callWS({
+            type: "wine_cellar/reorder_zone",
+            cabinet_id: cabinetId,
+            zone,
+            wine_ids: wineIds,
+        });
+    }
+    // A bottle put into a bin lands on top of the pile, so slot 1 holds the one
+    // added last — slot 1 being the most accessible position, the same
+    // convention as depth 0 on a grid cell. Only the new bottles are listed:
+    // the backend appends every other bottle in the bin in its current order,
+    // which keeps this correct even when the card's copy of the cellar is a
+    // moment out of date.
+    async _placeOnTopOfBin(cabinetId, zone, newWineIds) {
+        if (!zone || !newWineIds.length)
+            return;
+        await this._reorderZone(cabinetId, zone, newWineIds);
+    }
     // --- Zone side panel (boxes, bulk bins) ---
     _onZoneContainerClick(e) {
         const { cabinet, zone, storageRow } = e.detail;
@@ -11032,17 +11069,7 @@ let WineCellarCard = class WineCellarCard extends i {
         const [moved] = wines.splice(fromIndex, 1);
         wines.splice(targetIndex, 0, moved);
         try {
-            for (let i = 0; i < wines.length; i++) {
-                if ((wines[i].depth || 0) !== i) {
-                    await this.hass.callWS({
-                        type: "wine_cellar/move_wine",
-                        wine_id: wines[i].id,
-                        cabinet_id: this._zonePanelCabinet.id,
-                        zone: this._zonePanelZone,
-                        depth: i,
-                    });
-                }
-            }
+            await this._reorderZone(this._zonePanelCabinet.id, this._zonePanelZone, wines.map((w) => w.id));
             this._showToast("Wine reordered");
             await this._loadData();
         }
@@ -11115,17 +11142,7 @@ let WineCellarCard = class WineCellarCard extends i {
         });
         this._zoneSorting = true;
         try {
-            for (let i = 0; i < ordered.length; i++) {
-                if ((ordered[i].depth || 0) === i)
-                    continue;
-                await this.hass.callWS({
-                    type: "wine_cellar/move_wine",
-                    wine_id: ordered[i].id,
-                    cabinet_id: this._zonePanelCabinet.id,
-                    zone: this._zonePanelZone,
-                    depth: i,
-                });
-            }
+            await this._reorderZone(this._zonePanelCabinet.id, this._zonePanelZone, ordered.map((w) => w.id));
             this._showToast(direction === "newest" ? "Newest bottles first" : "Oldest bottles first");
             await this._loadData();
         }
@@ -11399,6 +11416,8 @@ let WineCellarCard = class WineCellarCard extends i {
                 ...(row !== null ? { row } : {}),
                 ...(col !== null ? { col } : {}),
             });
+            if (zone)
+                await this._placeOnTopOfBin(cabinetId, zone, [this._movingWine.id]);
             this._showToast(`Moved "${this._movingWine.name}"`);
             this._movingWine = null;
             await this._loadData();
@@ -11504,6 +11523,12 @@ let WineCellarCard = class WineCellarCard extends i {
                 ...(d.targetCol !== null && d.targetCol !== undefined ? { col: d.targetCol } : {}),
                 ...(targetDepth !== undefined ? { depth: targetDepth } : {}),
             });
+            // Dropped into a bin's open area rather than onto a specific bottle:
+            // that is putting it on the pile, so it lands on top. A drop *onto* a
+            // bottle is a deliberate position and is left exactly where it fell.
+            if (d.targetZone && !targetWine) {
+                await this._placeOnTopOfBin(d.targetCabinetId, d.targetZone, [d.wineId]);
+            }
             // Same container (rack/bin/box) = reordering; a different one = an
             // actual move between containers.
             const sameContainer = d.sourceCabinetId === d.targetCabinetId;
@@ -11529,7 +11554,7 @@ let WineCellarCard = class WineCellarCard extends i {
         if (!this._copiedWine)
             return;
         try {
-            await this.hass.callWS({
+            const result = await this.hass.callWS({
                 type: "wine_cellar/add_wine",
                 wine: {
                     barcode: this._copiedWine.barcode,
@@ -11570,6 +11595,9 @@ let WineCellarCard = class WineCellarCard extends i {
                     vivino_id: this._copiedWine.vivino_id,
                 },
             });
+            const pasted = result?.wine?.id;
+            if (zone && pasted)
+                await this._placeOnTopOfBin(cabinetId, zone, [pasted]);
             this._showToast("Wine pasted! Tap more empty cells or click ✕ to stop.");
             await this._loadData();
         }
@@ -11727,7 +11755,7 @@ let WineCellarCard = class WineCellarCard extends i {
         if (!this._movingBuyListItem)
             return;
         try {
-            await this.hass.callWS({
+            const result = await this.hass.callWS({
                 type: "wine_cellar/move_to_cellar",
                 item_id: this._movingBuyListItem.id,
                 cabinet_id: cabinetId,
@@ -11736,6 +11764,9 @@ let WineCellarCard = class WineCellarCard extends i {
                 zone,
                 depth,
             });
+            const moved = result?.wine?.id;
+            if (zone && moved)
+                await this._placeOnTopOfBin(cabinetId, zone, [moved]);
             this._showToast(`Moved "${this._movingBuyListItem.name}" to cellar`);
             this._movingBuyListItem = null;
             await this._loadData();
