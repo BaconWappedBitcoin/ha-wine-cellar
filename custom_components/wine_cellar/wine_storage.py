@@ -345,6 +345,71 @@ class WineCellarStorage:
                 capacity += sr.get("capacity", 0)
         return capacity
 
+    @staticmethod
+    def _storage_row_capacity(storage_row: dict[str, Any]) -> int:
+        if storage_row.get("type") == "box":
+            return sum(storage_row.get("boxes", []))
+        return storage_row.get("capacity", 0)
+
+    def _placement_is_lost(self, wine: dict[str, Any]) -> str | None:
+        """Say why a bottle's recorded position no longer exists, or None.
+
+        A bottle can be left pointing at a slot its rack no longer has —
+        shrinking a rack past it, or deleting the bin it sat in, never
+        deleted the bottle (nothing here ever does) but also never moved it.
+        It then counts towards the cellar total while being undrawable on
+        the rack, which is the one kind of wrong an inventory must not be.
+        """
+        cabinet_id = wine.get("cabinet_id")
+        if not cabinet_id:
+            return None
+        cabinet = next((c for c in self.cabinets if c["id"] == cabinet_id), None)
+        if cabinet is None:
+            return "its rack no longer exists"
+
+        zone = wine.get("zone") or ""
+        depth = wine.get("depth") or 0
+        if zone:
+            storage_rows = cabinet.get("storage_rows", []) or []
+            sr = next((s for s in storage_rows if f"storage-{s.get('row')}" == zone), None)
+            if sr is None:
+                return "the bin it was in no longer exists"
+            if depth >= self._storage_row_capacity(sr):
+                return f"{sr.get('name') or 'that bin'} was shrunk past its slot"
+            return None
+
+        row, col = wine.get("row"), wine.get("col")
+        if row is None or col is None:
+            return None
+        if row >= cabinet.get("rows", 0) or col >= cabinet.get("cols", 0):
+            return "the rack was shrunk past its slot"
+        if depth >= (cabinet.get("depth", 1) or 1):
+            return "the rack was made shallower than its slot"
+        if any(s.get("row") == row for s in cabinet.get("storage_rows", []) or []):
+            return "its row became a bin"
+        return None
+
+    def reconcile_placements(self) -> list[dict[str, str]]:
+        """Unassign bottles whose recorded slot no longer exists.
+
+        Returns what was moved, so the caller can tell the user rather than
+        quietly rearranging their cellar. Unassigning only — the bottle keeps
+        every other field and reappears under Unassigned, where it can be put
+        back somewhere real.
+        """
+        fixed: list[dict[str, str]] = []
+        for wine in self._data[CONF_WINES]:
+            reason = self._placement_is_lost(wine)
+            if reason is None:
+                continue
+            fixed.append({"name": wine.get("name") or "Unnamed wine", "reason": reason})
+            wine["cabinet_id"] = ""
+            wine["row"] = None
+            wine["col"] = None
+            wine["zone"] = ""
+            wine["depth"] = 0
+        return fixed
+
     def get_stats(self) -> dict[str, Any]:
         """Get cellar statistics."""
         total_bottles = len(self.wines)

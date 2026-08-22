@@ -221,6 +221,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     storage = WineCellarStorage(hass)
     await storage.async_load()
 
+    # Bottles left pointing at a slot their rack no longer has — from an
+    # older version that shrank racks without moving them — count towards
+    # the cellar total while being undrawable on the rack. Put them back
+    # under Unassigned, and say which, rather than rearranging in silence.
+    displaced = storage.reconcile_placements()
+    if displaced:
+        await storage.async_save()
+        lines = "\n".join(f"- {item['name']} — {item['reason']}" for item in displaced[:20])
+        more = f"\n…and {len(displaced) - 20} more." if len(displaced) > 20 else ""
+        _LOGGER.warning("Moved %d bottle(s) to Unassigned: their slot no longer exists", len(displaced))
+        persistent_notification.async_create(
+            hass,
+            f"{len(displaced)} bottle(s) were in racks that have since been resized or "
+            f"had bins removed, so their recorded slot no longer exists. Nothing was "
+            f"deleted — they are now under **Unassigned**, ready to be put back:\n\n"
+            f"{lines}{more}",
+            title="Cork Dork: bottles moved to Unassigned",
+            notification_id=f"{DOMAIN}_displaced_bottles",
+        )
+
     # Initialize Vivino client
     vivino = VivinoClient(hass)
 

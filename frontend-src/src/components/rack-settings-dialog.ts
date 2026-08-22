@@ -104,6 +104,13 @@ export class RackSettingsDialog extends LitElement {
         margin-top: 12px;
       }
 
+      .warning-list {
+        margin-top: 6px;
+        padding-left: 10px;
+        font-size: 0.95em;
+        opacity: 0.85;
+      }
+
       .delete-info {
         font-size: 0.95em;
         margin: 12px 0;
@@ -456,18 +463,48 @@ export class RackSettingsDialog extends LitElement {
     return this.wines.filter((w) => w.cabinet_id === cabinetId).length;
   }
 
-  private _winesOutOfBounds(
-    cabinetId: string,
-    newRows: number,
-    newCols: number
-  ): number {
-    return this.wines.filter(
-      (w) =>
-        w.cabinet_id === cabinetId &&
-        w.row != null &&
-        w.col != null &&
-        (w.row >= newRows || w.col >= newCols)
-    ).length;
+  // Storage rows that survive the pending row count — a bin on a row that no
+  // longer exists is gone, whatever the editor still holds.
+  private _survivingStorageRows(): StorageRow[] {
+    const newRows = this._editCabinet.rows || 1;
+    return this._editStorageRows.filter((sr) => sr.row < newRows);
+  }
+
+  private static _capacityOf(sr: StorageRow): number {
+    return sr.type === "box"
+      ? (sr.boxes || []).reduce((sum, b) => sum + b, 0)
+      : sr.capacity || 0;
+  }
+
+  // Every bottle the pending edit would leave without a slot that exists.
+  //
+  // The warning and the save both read this, so what the user is promised
+  // and what actually happens cannot drift apart. It used to consider only
+  // rows and columns, which meant three ways of losing a bottle's position
+  // went unwarned and unhandled: making a rack shallower, shrinking a bin
+  // past its contents, and deleting a bin outright. None of them ever
+  // deleted a bottle — they left it pointing at a slot the rack no longer
+  // had, counted in the total and drawn nowhere.
+  private _displacedWines(): Wine[] {
+    const cabinetId = this._editCabinet.id;
+    if (!cabinetId) return [];
+    const newRows = this._editCabinet.rows || 1;
+    const newCols = this._editCabinet.cols || 8;
+    const newDepth = this._editCabinet.depth || 1;
+    const rows = this._survivingStorageRows();
+
+    return this.wines.filter((w) => {
+      if (w.cabinet_id !== cabinetId) return false;
+      if (w.zone) {
+        const sr = rows.find((s) => `storage-${s.row}` === w.zone);
+        if (!sr) return true;
+        return (w.depth || 0) >= RackSettingsDialog._capacityOf(sr);
+      }
+      if (w.row == null || w.col == null) return false;
+      if (w.row >= newRows || w.col >= newCols) return true;
+      if ((w.depth || 0) >= newDepth) return true;
+      return rows.some((sr) => sr.row === w.row);
+    });
   }
 
   private _startAdd() {
@@ -643,7 +680,11 @@ export class RackSettingsDialog extends LitElement {
       const newCols = this._editCabinet.cols || 8;
 
       // Filter out storage rows beyond the new row count
-      const validStorageRows = this._editStorageRows.filter((sr) => sr.row < newRows);
+      const validStorageRows = this._survivingStorageRows();
+
+      // Worked out before the rack changes shape: afterwards the old slot
+      // is unrecoverable, and this is the same list the warning showed.
+      const displaced = this._displacedWines();
 
       await this.hass.callWS({
         type: "wine_cellar/update_cabinet",
@@ -660,19 +701,11 @@ export class RackSettingsDialog extends LitElement {
         },
       });
 
-      // Unassign wines that are out of bounds or on rows that became storage
-      const outOfBounds = this.wines.filter(
-        (w) =>
-          w.cabinet_id === cabinetId &&
-          w.row != null &&
-          w.col != null &&
-          (w.row >= newRows || w.col >= newCols || validStorageRows.some((sr) => sr.row === w.row))
-      );
-      for (const wine of outOfBounds) {
+      for (const wine of displaced) {
         await this.hass.callWS({
           type: "wine_cellar/update_wine",
           wine_id: wine.id,
-          updates: { cabinet_id: "", row: null, col: null, zone: "" },
+          updates: { cabinet_id: "", row: null, col: null, zone: "", depth: 0 },
         });
       }
 
@@ -812,22 +845,8 @@ export class RackSettingsDialog extends LitElement {
     const numCols = this._editCabinet.cols || 8;
     const numDepth = (this._editCabinet as any).depth || 1;
 
-    // Calculate out-of-bounds warning for edits
-    let oobCount = 0;
-    if (isEdit && this._editCabinet.id) {
-      const orig = this.cabinets.find((c) => c.id === this._editCabinet.id);
-      if (orig) {
-        const newRows = this._editCabinet.rows || orig.rows;
-        const newCols = this._editCabinet.cols || orig.cols;
-        if (newRows < orig.rows || newCols < orig.cols) {
-          oobCount = this._winesOutOfBounds(
-            this._editCabinet.id!,
-            newRows,
-            newCols
-          );
-        }
-      }
-    }
+    // Which bottles this edit would displace, whichever way it shrinks.
+    const displaced = isEdit ? this._displacedWines() : [];
 
     return html`
       <div class="dialog-body">
@@ -967,10 +986,22 @@ export class RackSettingsDialog extends LitElement {
           <!-- Use the Rows stepper above to add/remove rows -->
         </div>
 
-        ${oobCount > 0
+        ${displaced.length > 0
           ? html`
               <div class="warning-msg">
-                Shrinking will unassign ${oobCount} wine${oobCount > 1 ? "s" : ""} that are outside the new grid bounds.
+                This leaves ${displaced.length}
+                bottle${displaced.length > 1 ? "s" : ""} without a slot.
+                ${displaced.length > 1 ? "They" : "It"} will be moved to
+                <strong>Unassigned</strong> — nothing is deleted, and you can put
+                ${displaced.length > 1 ? "them" : "it"} back anywhere.
+                <div class="warning-list">
+                  ${displaced.slice(0, 6).map(
+                    (w) => html`<div>${w.name || "Unnamed wine"}</div>`
+                  )}
+                  ${displaced.length > 6
+                    ? html`<div>…and ${displaced.length - 6} more</div>`
+                    : nothing}
+                </div>
               </div>
             `
           : nothing}
