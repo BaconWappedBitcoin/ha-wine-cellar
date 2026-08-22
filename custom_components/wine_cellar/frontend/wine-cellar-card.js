@@ -2724,6 +2724,19 @@ let WineDetailDialog = class WineDetailDialog extends i {
         const n = this._tastingNotes;
         return !!(n.aroma || n.taste || n.finish || n.overall);
     }
+    // A check later than the last update means that attempt found nothing —
+    // worth showing, so a fruitless retry stays visibly different from never
+    // having tried at all.
+    _renderSourceDates(updatedAt, checkedAt) {
+        if (!updatedAt) {
+            return b `nothing found · checked ${this._formatUpdatedAt(checkedAt)}`;
+        }
+        if (checkedAt && checkedAt > updatedAt) {
+            return b `${this._formatUpdatedAt(updatedAt)} · rechecked
+        ${this._formatUpdatedAt(checkedAt)}, nothing new`;
+        }
+        return b `${this._formatUpdatedAt(updatedAt)}`;
+    }
     _formatUpdatedAt(iso) {
         if (!iso)
             return "";
@@ -2975,10 +2988,10 @@ let WineDetailDialog = class WineDetailDialog extends i {
                   <button class="btn btn-primary" style="background:#c62828"
                     @click=${this._onRemove}>✕ Remove</button>
                 </div>
-                ${wine.vivino_updated_at || wine.ai_updated_at
+                ${wine.vivino_checked_at || wine.ai_checked_at || wine.vivino_updated_at || wine.ai_updated_at
                 ? b `
                       <div style="text-align:center;font-size:0.68em;color:var(--wc-text-secondary);margin-top:-6px;padding-bottom:10px">
-                        ${wine.vivino_updated_at
+                        ${wine.vivino_checked_at || wine.vivino_updated_at
                     ? b `${wine.vivino_id
                         ? b `<a
                                   href="https://www.vivino.com/w/${wine.vivino_id}"
@@ -2987,10 +3000,15 @@ let WineDetailDialog = class WineDetailDialog extends i {
                                   style="color:inherit;text-decoration:underline"
                                   @click=${(e) => e.stopPropagation()}
                                 >Vivino</a>`
-                        : b `Vivino`}: ${this._formatUpdatedAt(wine.vivino_updated_at)}`
+                        : b `Vivino`}: ${this._renderSourceDates(wine.vivino_updated_at, wine.vivino_checked_at)}`
                     : A}
-                        ${wine.vivino_updated_at && wine.ai_updated_at ? " · " : A}
-                        ${wine.ai_updated_at ? b `AI: ${this._formatUpdatedAt(wine.ai_updated_at)}` : A}
+                        ${(wine.vivino_checked_at || wine.vivino_updated_at) &&
+                    (wine.ai_checked_at || wine.ai_updated_at)
+                    ? " · "
+                    : A}
+                        ${wine.ai_checked_at || wine.ai_updated_at
+                    ? b `AI: ${this._renderSourceDates(wine.ai_updated_at, wine.ai_checked_at)}`
+                    : A}
                       </div>
                     `
                 : A}
@@ -4194,6 +4212,7 @@ let AddWineDialog = class AddWineDialog extends i {
                     food_pairings: result.result.food_pairings || "",
                     alcohol: result.result.alcohol || "",
                     vivino_updated_at: result.result.source === "vivino" ? new Date().toISOString() : this._wineData.vivino_updated_at,
+                    vivino_checked_at: result.result.source === "vivino" ? new Date().toISOString() : this._wineData.vivino_checked_at,
                 };
                 this._step = "details";
             }
@@ -4266,6 +4285,7 @@ let AddWineDialog = class AddWineDialog extends i {
             food_pairings: item.food_pairings || "",
             alcohol: item.alcohol || "",
             vivino_updated_at: new Date().toISOString(),
+            vivino_checked_at: new Date().toISOString(),
         };
         this._searchResults = [];
         this._step = "details";
@@ -4319,6 +4339,7 @@ let AddWineDialog = class AddWineDialog extends i {
                     image_url: thumbUrl,
                     back_image_url: backThumbUrl,
                     ai_updated_at: new Date().toISOString(),
+                    ai_checked_at: new Date().toISOString(),
                 };
                 this._scanMode = "idle";
                 this._step = "details";
@@ -7544,6 +7565,7 @@ let InventoryDialog = class InventoryDialog extends i {
         this._storageInfo = null;
         this._enriching = "";
         this._confirmEnrich = "";
+        this._confirmEnrichRetry = false;
         this._viewMode = "inventory";
         this._historyItems = [];
         this._historyLoading = false;
@@ -7559,6 +7581,7 @@ let InventoryDialog = class InventoryDialog extends i {
             this._statusMsg = "";
             this._confirmRestore = false;
             this._confirmEnrich = "";
+            this._confirmEnrichRetry = false;
             this._confirmImport = false;
             this._pendingImport = null;
             this._showServerRestore = false;
@@ -7700,19 +7723,42 @@ let InventoryDialog = class InventoryDialog extends i {
     // description. Rating and photo are deliberately not part of the test —
     // Vivino has no match for plenty of bottles, and a wine that will never
     // gain a photo must not sit in this list forever nagging the user.
-    // `vivino_updated_at` drops a wine out once it has actually been looked up.
-    _winesNeedingVivino() {
-        return this.wines.filter((w) => !w.vivino_updated_at && (!w.food_pairings || !w.description));
+    _missingVivinoData(w) {
+        return !w.food_pairings || !w.description;
     }
     // The AI supplies the drinking verdict and window; it never returns food
     // pairings. Critic scores are excluded for the same reason as the photo
     // above — the AI legitimately has none for many wines.
-    _winesNeedingAI() {
-        return this.wines.filter((w) => !w.ai_updated_at && (!w.disposition || !w.drink_window));
+    _missingAIData(w) {
+        return !w.disposition || !w.drink_window;
     }
-    async _runEnrich(source) {
-        const wines = source === "vivino" ? this._winesNeedingVivino() : this._winesNeedingAI();
+    // Never consulted: the source has genuinely not been asked yet.
+    _winesNeedingVivino() {
+        return this.wines.filter((w) => !w.vivino_checked_at && this._missingVivinoData(w));
+    }
+    _winesNeedingAI() {
+        return this.wines.filter((w) => !w.ai_checked_at && this._missingAIData(w));
+    }
+    // Asked, and the source had nothing. Kept apart from the counts above so a
+    // retry is a deliberate act rather than an endless nag: Vivino does add
+    // bottles to its catalogue over time, so retrying later is worth offering,
+    // just not automatically.
+    _winesVivinoNotFound() {
+        return this.wines.filter((w) => !!w.vivino_checked_at && this._missingVivinoData(w));
+    }
+    _winesAINotFound() {
+        return this.wines.filter((w) => !!w.ai_checked_at && this._missingAIData(w));
+    }
+    async _runEnrich(source, retry = false) {
+        const wines = retry
+            ? source === "vivino"
+                ? this._winesVivinoNotFound()
+                : this._winesAINotFound()
+            : source === "vivino"
+                ? this._winesNeedingVivino()
+                : this._winesNeedingAI();
         this._confirmEnrich = "";
+        this._confirmEnrichRetry = false;
         if (!wines.length)
             return;
         const sourceLabel = source === "vivino" ? "Vivino" : "the AI";
@@ -7738,7 +7784,11 @@ let InventoryDialog = class InventoryDialog extends i {
                     parts.push(`${errors} could not be reached`);
                 this._statusMsg =
                     `${parts.join(", ")}.` +
-                        (unchanged ? " Those are marked as checked and no longer counted here." : "");
+                        (unchanged
+                            ? retry
+                                ? " Their check date is updated — try again later."
+                                : " Their check date is updated; they move to the retry line."
+                            : "");
                 this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
             }
         }
@@ -7985,43 +8035,45 @@ let InventoryDialog = class InventoryDialog extends i {
     // Sits under the list: how many bottles are still missing data, and the two
     // actions that can fill it. Each source is labelled with what it actually
     // supplies, so nobody runs AI hoping for food pairings.
-    _renderEnrichBar() {
-        const needVivino = this._winesNeedingVivino().length;
-        const needAI = this._winesNeedingAI().length;
-        if (!needVivino && !needAI)
+    _renderEnrichRow(source, wines, retry, text, label) {
+        if (!wines.length)
+            return A;
+        if (source === "ai" && !this.hasGemini)
             return A;
         const busy = !!this._enriching;
         return b `
+      <div class="inv-enrich-row ${retry ? "retry" : ""}">
+        <span class="inv-enrich-text">${text}</span>
+        <button
+          class="inv-btn"
+          ?disabled=${busy}
+          @click=${() => {
+            this._confirmEnrich = source;
+            this._confirmEnrichRetry = retry;
+        }}
+        >
+          ${this._enriching === source ? "Working…" : `${label} (${wines.length})`}
+        </button>
+      </div>
+    `;
+    }
+    _renderEnrichBar() {
+        const needVivino = this._winesNeedingVivino();
+        const needAI = this._winesNeedingAI();
+        const missVivino = this._winesVivinoNotFound();
+        const missAI = this._winesAINotFound();
+        if (!needVivino.length && !needAI.length && !missVivino.length && !missAI.length) {
+            return A;
+        }
+        return b `
       <div class="inv-enrich">
-        <span class="inv-enrich-text">
-          ${needVivino
-            ? b `<strong>${needVivino}</strong> missing pairings or description, never
-                checked against Vivino`
-            : A}${needVivino && needAI ? " · " : ""}${needAI
-            ? b `<strong>${needAI}</strong> missing a drink window or verdict, never
-                analyzed by AI`
-            : A}
-        </span>
-        <span class="inv-enrich-btns">
-          ${needVivino
-            ? b `<button
-                class="inv-btn"
-                ?disabled=${busy}
-                @click=${() => (this._confirmEnrich = "vivino")}
-              >
-                ${this._enriching === "vivino" ? "Filling…" : `Fill from Vivino (${needVivino})`}
-              </button>`
-            : A}
-          ${needAI && this.hasGemini
-            ? b `<button
-                class="inv-btn"
-                ?disabled=${busy}
-                @click=${() => (this._confirmEnrich = "ai")}
-              >
-                ${this._enriching === "ai" ? "Analyzing…" : `Analyze with AI (${needAI})`}
-              </button>`
-            : A}
-        </span>
+        ${this._renderEnrichRow("vivino", needVivino, false, b `<strong>${needVivino.length}</strong> missing pairings or description, never
+            checked against Vivino`, "Fill from Vivino")}
+        ${this._renderEnrichRow("ai", needAI, false, b `<strong>${needAI.length}</strong> missing a drink window or verdict, never
+            analyzed by AI`, "Analyze with AI")}
+        ${this._renderEnrichRow("vivino", missVivino, true, b `<strong>${missVivino.length}</strong> checked against Vivino, still nothing —
+            Vivino does add bottles over time`, "Retry Vivino")}
+        ${this._renderEnrichRow("ai", missAI, true, b `<strong>${missAI.length}</strong> analyzed by AI, still without a verdict`, "Retry AI")}
       </div>
     `;
     }
@@ -8029,20 +8081,38 @@ let InventoryDialog = class InventoryDialog extends i {
         if (!this._confirmEnrich)
             return A;
         const source = this._confirmEnrich;
-        const count = source === "vivino" ? this._winesNeedingVivino().length : this._winesNeedingAI().length;
+        const retry = this._confirmEnrichRetry;
+        const count = retry
+            ? source === "vivino"
+                ? this._winesVivinoNotFound().length
+                : this._winesAINotFound().length
+            : source === "vivino"
+                ? this._winesNeedingVivino().length
+                : this._winesNeedingAI().length;
         return b `
       <div class="inv-confirm-overlay" @click=${() => (this._confirmEnrich = "")}>
         <div class="inv-confirm-box" @click=${(e) => e.stopPropagation()}>
-          <h3>${source === "vivino" ? "🍇 Fill from Vivino?" : "🤖 Analyze with AI?"}</h3>
+          <h3>
+            ${source === "vivino"
+            ? retry
+                ? "🍇 Retry Vivino?"
+                : "🍇 Fill from Vivino?"
+            : retry
+                ? "🤖 Retry AI analysis?"
+                : "🤖 Analyze with AI?"}
+          </h3>
           <p>
             ${count} wine${count > 1 ? "s" : ""} will be looked up one at a time. This is a
             slow, rate-limited network call — expect it to run for a while, and leave the
             dialog open until it finishes.
           </p>
           <div class="inv-confirm-stats">
-            Some will come back with nothing new — not every bottle exists in
-            ${source === "vivino" ? "Vivino's catalogue" : "what the AI can infer"}. Those
-            are marked as checked so they stop being counted here.
+            ${retry
+            ? b `These were already checked and came back empty. The check date is
+                  updated either way, so you can always see when the last attempt was.`
+            : b `Some will come back with nothing new — not every bottle exists in
+                  ${source === "vivino" ? "Vivino's catalogue" : "what the AI can infer"}.
+                  Those move to the retry line below rather than staying here.`}
           </div>
           <div class="inv-confirm-stats">
             ${source === "vivino"
@@ -8053,7 +8123,7 @@ let InventoryDialog = class InventoryDialog extends i {
             <button class="inv-confirm-cancel" @click=${() => (this._confirmEnrich = "")}>
               Cancel
             </button>
-            <button class="inv-confirm-go" @click=${() => this._runEnrich(source)}>
+            <button class="inv-confirm-go" @click=${() => this._runEnrich(source, retry)}>
               Start
             </button>
           </div>
@@ -9418,16 +9488,28 @@ InventoryDialog.styles = [
 
       .inv-enrich {
         display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        flex-wrap: wrap;
+        flex-direction: column;
+        gap: 6px;
         margin: 0 16px 10px;
         padding: 8px 10px;
         border: 1px solid var(--wc-border);
         border-radius: 8px;
         font-size: 0.75em;
         color: var(--wc-text-secondary);
+      }
+
+      .inv-enrich-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .inv-enrich-row.retry {
+        opacity: 0.75;
+        border-top: 1px solid var(--wc-border);
+        padding-top: 6px;
       }
 
       .inv-enrich-text {
@@ -9956,6 +10038,9 @@ __decorate([
 __decorate([
     r()
 ], InventoryDialog.prototype, "_confirmEnrich", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_confirmEnrichRetry", void 0);
 __decorate([
     r()
 ], InventoryDialog.prototype, "_viewMode", void 0);
@@ -11109,7 +11194,9 @@ let WineCellarCard = class WineCellarCard extends i {
                     drink_window: this._copiedWine.drink_window,
                     ai_ratings: this._copiedWine.ai_ratings,
                     vivino_updated_at: this._copiedWine.vivino_updated_at,
+                    vivino_checked_at: this._copiedWine.vivino_checked_at,
                     ai_updated_at: this._copiedWine.ai_updated_at,
+                    ai_checked_at: this._copiedWine.ai_checked_at,
                     vivino_id: this._copiedWine.vivino_id,
                 },
             });

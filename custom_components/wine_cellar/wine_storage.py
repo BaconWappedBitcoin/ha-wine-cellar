@@ -129,6 +129,17 @@ class WineCellarStorage:
                 wine["retail_price"] = None
             if "depth" not in wine:
                 wine["depth"] = 0
+            # Backfill the check timestamps: a wine that was updated from a
+            # source was certainly consulted, so seed checked_at from
+            # updated_at rather than reporting it as never looked up. Both
+            # keys are materialized so every wine has the same shape.
+            for source in ("vivino", "ai"):
+                updated_key = f"{source}_updated_at"
+                checked_key = f"{source}_checked_at"
+                if updated_key not in wine:
+                    wine[updated_key] = None
+                if checked_key not in wine:
+                    wine[checked_key] = wine[updated_key]
         # Ensure every top-level collection exists
         if CONF_BARCODE_CACHE not in self._data:
             self._data[CONF_BARCODE_CACHE] = {}
@@ -178,7 +189,9 @@ class WineCellarStorage:
             "ai_ratings": wine_data.get("ai_ratings"),
             "added_at": datetime.now(timezone.utc).isoformat(),
             "vivino_updated_at": wine_data.get("vivino_updated_at"),
+            "vivino_checked_at": wine_data.get("vivino_checked_at"),
             "ai_updated_at": wine_data.get("ai_updated_at"),
+            "ai_checked_at": wine_data.get("ai_checked_at"),
             "vivino_id": wine_data.get("vivino_id"),
         }
         self._data[CONF_WINES].append(wine)

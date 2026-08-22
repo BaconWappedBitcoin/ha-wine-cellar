@@ -492,6 +492,7 @@ export class AddWineDialog extends LitElement {
           food_pairings: result.result.food_pairings || "",
           alcohol: result.result.alcohol || "",
           vivino_updated_at: result.result.source === "vivino" ? new Date().toISOString() : this._wineData.vivino_updated_at,
+          vivino_checked_at: result.result.source === "vivino" ? new Date().toISOString() : this._wineData.vivino_checked_at,
         };
         this._step = "details";
       } else {
@@ -568,6 +569,7 @@ export class AddWineDialog extends LitElement {
       food_pairings: item.food_pairings || "",
       alcohol: item.alcohol || "",
       vivino_updated_at: new Date().toISOString(),
+      vivino_checked_at: new Date().toISOString(),
     };
     this._searchResults = [];
     this._step = "details";
@@ -625,6 +627,7 @@ export class AddWineDialog extends LitElement {
           image_url: thumbUrl,
           back_image_url: backThumbUrl,
           ai_updated_at: new Date().toISOString(),
+          ai_checked_at: new Date().toISOString(),
         };
         this._scanMode = "idle";
         this._step = "details";

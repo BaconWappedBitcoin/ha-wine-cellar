@@ -773,10 +773,11 @@ async def ws_refresh_wine(
         # No usable Vivino match (no results, or the best match looks
         # unrelated). Don't silently fall back to AI — flag it so the
         # frontend can ask the user first (unless they've opted into
-        # always-use-AI). The attempt is still recorded, so the wine stops
-        # being reported as never checked.
+        # always-use-AI). The attempt is still recorded — as a *check*, not
+        # an update — so the wine stops being reported as never looked up
+        # while still showing that Vivino had nothing for it.
         storage.update_wine(
-            msg["wine_id"], {"vivino_updated_at": datetime.now(timezone.utc).isoformat()}
+            msg["wine_id"], {"vivino_checked_at": datetime.now(timezone.utc).isoformat()}
         )
         await storage.async_save()
         connection.send_result(msg["id"], {
@@ -856,15 +857,19 @@ async def ws_refresh_wine(
     # bookkeeping keys added below would otherwise show up as "1 field
     # updated" on a lookup that changed nothing.
     changed_fields = list(updates.keys())
+    now = datetime.now(timezone.utc).isoformat()
 
-    # Stamp the check even when nothing changed — it records "we asked
-    # Vivino", not "Vivino told us something new". Without it a wine Vivino
-    # has nothing for is reported as never looked up forever.
-    updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
+    # checked_at records every completed lookup; updated_at only moves when
+    # the wine actually gained something. Comparing the two is what tells a
+    # fruitless retry apart from a fruitful one.
+    updates["vivino_checked_at"] = now
+    if changed_fields:
+        updates["vivino_updated_at"] = now
     if lookup.get("vivino_id"):
         updates["vivino_id"] = lookup["vivino_id"]
     if ai_price_used:
-        updates["ai_updated_at"] = updates["vivino_updated_at"]
+        updates["ai_updated_at"] = now
+        updates["ai_checked_at"] = now
 
     updated_wine = storage.update_wine(msg["wine_id"], updates)
     await storage.async_save()
@@ -914,9 +919,12 @@ async def ws_analyze_single_wine(
     updates = _build_ai_updates(wine, result, currency)
 
     _LOGGER.debug("Final updates for wine %s: %s", msg["wine_id"], list(updates.keys()))
-    # Same as the Vivino path: record that the AI was asked, so a wine it can
-    # add nothing to stops being reported as never analyzed.
-    updates["ai_updated_at"] = datetime.now(timezone.utc).isoformat()
+    # Same split as the Vivino path: the check is always recorded, the update
+    # only when the AI actually added something.
+    now = datetime.now(timezone.utc).isoformat()
+    if updates:
+        updates["ai_updated_at"] = now
+    updates["ai_checked_at"] = now
     updated_wine = storage.update_wine(msg["wine_id"], updates)
     await storage.async_save()
     hass.bus.async_fire(f"{DOMAIN}_updated")
@@ -971,11 +979,13 @@ async def ws_batch_analyze_wines(
             updates = _build_ai_updates(wine, result, currency)
             had_changes = bool(updates)
 
-            # Stamp the timestamp even when nothing changed. It marks "we
-            # asked", not "we learned something" — without that, a wine the
-            # AI can add nothing to is reported as never analyzed forever,
-            # and every re-run finds the same nothing.
-            updates["ai_updated_at"] = datetime.now(timezone.utc).isoformat()
+            # The check is always recorded; the update timestamp only moves
+            # when the AI actually added something. A checked_at newer than
+            # updated_at is exactly "this retry found nothing new".
+            now = datetime.now(timezone.utc).isoformat()
+            if had_changes:
+                updates["ai_updated_at"] = now
+            updates["ai_checked_at"] = now
             storage.update_wine(wine["id"], updates)
             if had_changes:
                 updated += 1
@@ -1089,9 +1099,13 @@ async def ws_batch_refresh_vivino(
                         ai_result = await gemini.analyze_single_wine(wine, language, currency)
                         if "error" not in ai_result:
                             ai_updates = _build_ai_updates(wine, ai_result, currency)
-                            if ai_updates:
-                                ai_updates["ai_updated_at"] = datetime.now(timezone.utc).isoformat()
-                                storage.update_wine(wine["id"], ai_updates)
+                            had_ai_changes = bool(ai_updates)
+                            ai_now = datetime.now(timezone.utc).isoformat()
+                            if had_ai_changes:
+                                ai_updates["ai_updated_at"] = ai_now
+                            ai_updates["ai_checked_at"] = ai_now
+                            storage.update_wine(wine["id"], ai_updates)
+                            if had_ai_changes:
                                 updated += 1
                                 ai_fallback_used += 1
                                 gained_data = True
@@ -1100,12 +1114,13 @@ async def ws_batch_refresh_vivino(
                             "Batch: AI fallback failed for wine %s: %s", wine.get("id"), err
                         )
                 # Record the Vivino check even though it found nothing, or the
-                # wine is reported as never looked up forever. Counted as
+                # wine is reported as never looked up forever. It stays a
+                # check, not an update — nothing was learned. Counted as
                 # unchanged only when the AI fallback didn't rescue it either,
                 # so no wine lands in both totals.
                 storage.update_wine(
                     wine["id"],
-                    {"vivino_updated_at": datetime.now(timezone.utc).isoformat()},
+                    {"vivino_checked_at": datetime.now(timezone.utc).isoformat()},
                 )
                 if not gained_data:
                     unchanged += 1
@@ -1172,11 +1187,15 @@ async def ws_batch_refresh_vivino(
                     updates[key] = val
 
             had_changes = bool(updates)
-            updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(timezone.utc).isoformat()
+            updates["vivino_checked_at"] = now
+            if had_changes:
+                updates["vivino_updated_at"] = now
             if lookup.get("vivino_id"):
                 updates["vivino_id"] = lookup["vivino_id"]
             if ai_price_used:
-                updates["ai_updated_at"] = updates["vivino_updated_at"]
+                updates["ai_updated_at"] = now
+                updates["ai_checked_at"] = now
             storage.update_wine(wine["id"], updates)
             if had_changes:
                 updated += 1

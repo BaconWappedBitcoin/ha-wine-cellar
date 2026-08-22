@@ -1312,7 +1312,9 @@ export class WineCellarCard extends LitElement {
           drink_window: this._copiedWine.drink_window,
           ai_ratings: this._copiedWine.ai_ratings,
           vivino_updated_at: this._copiedWine.vivino_updated_at,
+          vivino_checked_at: this._copiedWine.vivino_checked_at,
           ai_updated_at: this._copiedWine.ai_updated_at,
+          ai_checked_at: this._copiedWine.ai_checked_at,
           vivino_id: this._copiedWine.vivino_id,
         },
       });
