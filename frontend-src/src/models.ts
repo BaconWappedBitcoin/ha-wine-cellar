@@ -18,8 +18,10 @@ export interface Wine {
   rating: number | null;
   ratings_count: number | null;
   image_url: string;
+  back_image_url: string;
   price: number | null;
   retail_price: number | null;
+  retail_price_currency: string | null;
   purchase_date: string;
   drink_by: string;
   notes: string;
@@ -37,6 +39,9 @@ export interface Wine {
   disposition: string;
   drink_window: string;
   ai_ratings: Record<string, number> | null;
+  vivino_updated_at: string | null;
+  ai_updated_at: string | null;
+  vivino_id: number | null;
 }
 
 export type StorageRowType = "bulk" | "box";
@@ -166,3 +171,49 @@ export const WINE_TYPE_LABELS: Record<WineType, string> = {
   sparkling: "Sparkling",
   dessert: "Dessert",
 };
+
+// Every physical (row, col) grid slot in a cabinet, in display order,
+// skipping rows configured as bulk/box storage zones.
+export function getRackSlots(cabinet: Cabinet): { row: number; col: number }[] {
+  const storageRowSet = new Set((cabinet.storage_rows || []).map((sr) => sr.row));
+  const slots: { row: number; col: number }[] = [];
+  for (let r = 0; r < cabinet.rows; r++) {
+    if (storageRowSet.has(r)) continue;
+    for (let c = 0; c < cabinet.cols; c++) slots.push({ row: r, col: c });
+  }
+  return slots;
+}
+
+export interface WineLocation {
+  text: string;
+  cabinet: Cabinet | null;
+  zone: string;
+  storageRow: StorageRow | null;
+}
+
+// A precise, human-readable location for a wine: cabinet name, plus the
+// zone name and slot number when it's in a bulk bin or wine box, or the
+// rack's linear slot number when it's in a grid cell.
+export function getWineLocation(wine: Wine, cabinets: Cabinet[]): WineLocation {
+  const cabinet = wine.cabinet_id ? cabinets.find((c) => c.id === wine.cabinet_id) || null : null;
+  if (!cabinet) return { text: "Unassigned", cabinet: null, zone: "", storageRow: null };
+
+  if (wine.row !== null && wine.col !== null) {
+    const slotIdx = getRackSlots(cabinet).findIndex((s) => s.row === wine.row && s.col === wine.col);
+    const slotLabel = slotIdx >= 0 ? `Slot ${slotIdx + 1}` : `R${wine.row + 1}C${wine.col + 1}`;
+    return { text: `${cabinet.name} · ${slotLabel}`, cabinet, zone: "", storageRow: null };
+  }
+
+  if (wine.zone && wine.zone !== "bottom") {
+    const rowIdx = parseInt(wine.zone.replace("storage-", ""), 10);
+    const storageRow = (cabinet.storage_rows || []).find((sr) => sr.row === rowIdx) || null;
+    const zoneName = storageRow?.name || "Storage";
+    return { text: `${cabinet.name} · ${zoneName} · Slot ${(wine.depth || 0) + 1}`, cabinet, zone: wine.zone, storageRow };
+  }
+
+  if (wine.zone === "bottom") {
+    return { text: `${cabinet.name} · ${cabinet.bottom_zone_name || "Storage"}`, cabinet, zone: "bottom", storageRow: null };
+  }
+
+  return { text: cabinet.name, cabinet, zone: "", storageRow: null };
+}

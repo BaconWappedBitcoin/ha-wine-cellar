@@ -21,8 +21,43 @@ VIVINO_SEARCH_URL = "https://www.vivino.com/search/wines?q={query}"
 OFF_API_URL = "https://world.openfoodfacts.org/api/v0/product/{barcode}.json"
 UPC_DB_URL = "https://api.upcitemdb.com/prod/trial/lookup?upc={barcode}"
 
+# Vivino's mobile-app-facing backend. Unlike the site's search (broken for
+# automated `q` queries) and HTML scraping (price is boilerplate/fake), this
+# needs no special headers, cookies, or session — but still has no price
+# endpoint. Only useful once a wine's id is already known from a prior
+# match; it's a by-id lookup, not a search.
+VIVINO_MOBILE_API_URL = "https://api.vivino.com"
+
+# Small, stable reference tables — fetched/cached once per process instead
+# of per-wine.
+_GRAPE_NAME_CACHE: dict[int, str] = {}
+_FOOD_NAME_CACHE: dict[int, str] = {}
+
 # All Vivino wine type IDs (required filter for explore API)
 ALL_WINE_TYPE_IDS = [1, 2, 3, 4, 7]  # red, white, sparkling, rosé, dessert
+
+# The explore API requires both a country and a currency code — pick a
+# country whose market Vivino actually prices in the chosen currency for.
+CURRENCY_COUNTRY_CODE = {
+    "USD": "US",
+    "EUR": "DE",
+    "GBP": "GB",
+    "CHF": "CH",
+}
+
+# The mobile API's region.country is a bare ISO code ("fr"), not a display
+# name — common wine-producing countries only, good enough since this is a
+# "fill only if empty" field (an already-matched wine typically has it set
+# from its first match already).
+COUNTRY_CODE_NAMES = {
+    "fr": "France", "it": "Italy", "es": "Spain", "pt": "Portugal",
+    "de": "Germany", "at": "Austria", "ch": "Switzerland",
+    "us": "United States", "ca": "Canada", "mx": "Mexico",
+    "au": "Australia", "nz": "New Zealand",
+    "ar": "Argentina", "cl": "Chile", "uy": "Uruguay",
+    "za": "South Africa", "gr": "Greece", "hu": "Hungary", "ge": "Georgia",
+    "gb": "United Kingdom", "uk": "United Kingdom",
+}
 
 HEADERS = {
     "User-Agent": (
@@ -32,6 +67,71 @@ HEADERS = {
     "Accept": "application/json",
 }
 
+# Without an explicit Accept-Language, Vivino's HTML page (food pairings,
+# description) comes back server-side-localized based on IP/session
+# heuristics rather than a fixed language — pin it to whatever the user has
+# picked instead of leaving it to chance.
+ACCEPT_LANGUAGE_BY_CODE = {
+    "en": "en-US,en;q=0.9",
+    "fr": "fr-FR,fr;q=0.9,en;q=0.5",
+    "de": "de-DE,de;q=0.9,en;q=0.5",
+}
+
+
+def _accept_language(language: str) -> str:
+    return ACCEPT_LANGUAGE_BY_CODE.get(language, ACCEPT_LANGUAGE_BY_CODE["en"])
+
+
+# Generic wine-domain words carry no identifying signal on their own, so
+# they're excluded before comparing query/result word overlap.
+_GENERIC_SEARCH_WORDS = {
+    "chateau", "château", "domaine", "clos", "cave", "caves", "cellar", "cellars",
+    "winery", "wine", "wines", "vineyard", "vineyards", "estate", "vignoble",
+    "rouge", "blanc", "rose", "rosé", "red", "white", "sparkling", "nv",
+    "de", "du", "des", "la", "le", "les", "et", "the", "of", "and",
+    "grand", "cru", "premier",
+}
+
+
+def _search_significant_words(text: str) -> set[str]:
+    return {w for w in text.lower().split() if w not in _GENERIC_SEARCH_WORDS and len(w) > 2}
+
+
+def _explore_result_matches_query(query: str, result: dict[str, Any]) -> bool:
+    """Guard against the explore API silently ignoring `q`.
+
+    It has been observed to return a fixed "trending wines" list unrelated
+    to the query instead of an empty/error response, so an empty result
+    list isn't a reliable-enough signal on its own that the search failed.
+    """
+    query_words = _search_significant_words(query)
+    result_words = _search_significant_words(f"{result.get('winery', '')} {result.get('name', '')}")
+    if not query_words or not result_words:
+        return True
+    overlap = len(query_words & result_words) / len(query_words | result_words)
+    return overlap >= 0.15
+
+
+def _prefer_matching_vintage(
+    results: list[dict[str, Any]], vintage: int | None
+) -> list[dict[str, Any]]:
+    """Reorder results to put an exact vintage match first, if one exists.
+
+    Vivino's search commonly returns several vintages of the same wine —
+    each has its own rating/price/photo — and the query text alone doesn't
+    guarantee the best-ranked result is the one for the wine's actual
+    vintage. Reorders rather than filters: the rest are kept as fallback so
+    a wine whose exact vintage isn't indexed still gets a close match.
+    """
+    if not vintage or not results:
+        return results
+    for i, r in enumerate(results):
+        if r.get("vintage") == vintage:
+            if i == 0:
+                return results
+            return [r] + results[:i] + results[i + 1:]
+    return results
+
 
 class VivinoClient:
     """Client for looking up wine data from multiple sources."""
@@ -40,7 +140,7 @@ class VivinoClient:
         """Initialize the client."""
         self._hass = hass
 
-    async def lookup_barcode(self, barcode: str) -> dict[str, Any] | None:
+    async def lookup_barcode(self, barcode: str, language: str = "en") -> dict[str, Any] | None:
         """Look up a wine by barcode using multiple sources."""
         # 1. Try UPC Item DB first (good barcode database)
         result = await self._lookup_upc_itemdb(barcode)
@@ -53,37 +153,279 @@ class VivinoClient:
             return result
 
         # 3. Try Vivino HTML search as last resort
-        html_results = await self._search_vivino_html(barcode)
+        html_results = await self._search_vivino_html(barcode, language)
         if html_results:
             return html_results[0]
 
         _LOGGER.warning("No results found for barcode: %s", barcode)
         return None
 
-    async def search_wine(self, query: str) -> list[dict[str, Any]]:
+    # ── Vivino Mobile API (by-id lookup) ──────────────────────────────
+
+    async def get_wine_by_id(
+        self, vivino_id: int, vintage: int | None = None
+    ) -> dict[str, Any] | None:
+        """Look up a wine directly by its Vivino wine id.
+
+        Far more reliable than text search for a wine we've already
+        matched once (no query ambiguity, no relevance guessing) — but
+        it's a lookup, not a search, so it only helps once `vivino_id` is
+        already known. Still has no price data.
+        """
+        session = async_get_clientsession(self._hass)
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with session.get(
+                f"{VIVINO_MOBILE_API_URL}/wines/{vivino_id}",
+                headers={"Accept": "application/json"},
+                timeout=timeout,
+            ) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug(
+                        "Vivino mobile API status %s for wine id %s", resp.status, vivino_id
+                    )
+                    return None
+                wine_data = await resp.json()
+        except Exception as err:
+            _LOGGER.debug("Vivino mobile API wine lookup failed for id %s: %s", vivino_id, err)
+            return None
+
+        winery = (wine_data.get("winery") or {}).get("name", "")
+        region_obj = wine_data.get("region") or {}
+        region = region_obj.get("name", "")
+        country = COUNTRY_CODE_NAMES.get((region_obj.get("country") or "").lower(), "")
+        wine_type = _map_wine_type(wine_data.get("type_id"))
+        stats = wine_data.get("statistics") or {}
+        rating = stats.get("ratings_average")
+        if rating and isinstance(rating, (int, float)) and rating > 0:
+            rating = round(float(rating), 1)
+        else:
+            rating = None
+
+        # Find the entry for the wine's actual vintage year, if given —
+        # the wine-level id/statistics above are aggregated across every
+        # vintage, but image/description/alcohol/grapes are per-vintage.
+        vintage_id = None
+        if vintage:
+            for v in wine_data.get("vintages") or []:
+                if str(v.get("year")) == str(vintage):
+                    vintage_id = v.get("id")
+                    break
+
+        result: dict[str, Any] = {
+            "name": wine_data.get("name", ""),
+            "winery": winery,
+            "region": region,
+            "country": country,
+            "vintage": vintage,
+            "type": wine_type,
+            "grape_variety": "",
+            "rating": rating,
+            "ratings_count": stats.get("ratings_count"),
+            "image_url": "",
+            "price": None,
+            "alcohol": "",
+            "description": "",
+            "food_pairings": "",
+            "vivino_id": vivino_id,
+            "source": "vivino_api",
+        }
+
+        if vintage_id:
+            result.update(await self._get_vintage_details(vintage_id))
+
+        return result
+
+    async def _get_vintage_details(self, vintage_id: int) -> dict[str, Any]:
+        """Fetch vintage-specific extras: image, description, alcohol, grapes, food."""
+        session = async_get_clientsession(self._hass)
+        details: dict[str, Any] = {}
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with session.get(
+                f"{VIVINO_MOBILE_API_URL}/vintages/{vintage_id}",
+                headers={"Accept": "application/json"},
+                timeout=timeout,
+            ) as resp:
+                if resp.status != 200:
+                    return details
+                data = await resp.json()
+        except Exception as err:
+            _LOGGER.debug("Vivino mobile API vintage lookup failed for id %s: %s", vintage_id, err)
+            return details
+
+        image_url = (data.get("image") or {}).get("location", "")
+        if image_url:
+            if image_url.startswith("//"):
+                image_url = "https:" + image_url
+            details["image_url"] = image_url
+
+        description = data.get("description") or ""
+        if description:
+            details["description"] = description
+
+        wine_facts = data.get("wine_facts") or {}
+        alcohol = wine_facts.get("alcohol")
+        if alcohol and isinstance(alcohol, (int, float)) and alcohol > 0:
+            details["alcohol"] = f"{alcohol}%"
+
+        wine_obj = data.get("wine") or {}
+
+        grape_composition = data.get("grape_composition") or {}
+        if grape_composition:
+            grape_parts = await self._resolve_grape_composition(grape_composition)
+            if grape_parts:
+                details["grape_variety"] = ", ".join(grape_parts)
+
+        food_ids = wine_obj.get("foods") or []
+        if food_ids:
+            food_names = await self._resolve_food_names(food_ids)
+            if food_names:
+                details["food_pairings"] = ", ".join(food_names)
+
+        return details
+
+    async def _resolve_grape_composition(self, composition: dict[str, Any]) -> list[str]:
+        """Resolve grape ids to names, prefixed with blend % for actual blends.
+
+        `composition` is `{grape_id: percent}`. A single-grape wine just
+        shows the name ("Merlot"); a blend shows each share ("70% Cabernet
+        Sauvignon, 30% Merlot") sorted by descending percentage.
+        """
+        entries = sorted(
+            composition.items(), key=lambda kv: -(kv[1] or 0)
+        )
+        show_percent = len(entries) > 1
+        parts: list[str] = []
+        for gid_str, pct in entries[:5]:
+            try:
+                gid = int(gid_str)
+            except (TypeError, ValueError):
+                continue
+            name = await self._resolve_grape_name(gid)
+            if not name:
+                continue
+            parts.append(f"{pct:g}% {name}" if show_percent and pct else name)
+        return parts
+
+    async def _resolve_grape_name(self, gid: int) -> str | None:
+        """Resolve a single grape id to its name (cached)."""
+        if gid in _GRAPE_NAME_CACHE:
+            return _GRAPE_NAME_CACHE[gid]
+        session = async_get_clientsession(self._hass)
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with session.get(
+                f"{VIVINO_MOBILE_API_URL}/grapes/{gid}",
+                headers={"Accept": "application/json"},
+                timeout=timeout,
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    name = data.get("name")
+                    if name:
+                        _GRAPE_NAME_CACHE[gid] = name
+                        return name
+        except Exception as err:
+            _LOGGER.debug("Vivino grape lookup failed for id %s: %s", gid, err)
+        return None
+
+    async def _resolve_food_names(self, food_ids: list[int]) -> list[str]:
+        """Resolve food ids to names via the small (~20-entry) foods table."""
+        if not _FOOD_NAME_CACHE:
+            session = async_get_clientsession(self._hass)
+            try:
+                timeout = aiohttp.ClientTimeout(total=10)
+                async with session.get(
+                    f"{VIVINO_MOBILE_API_URL}/foods",
+                    headers={"Accept": "application/json"},
+                    timeout=timeout,
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for item in data:
+                            if item.get("id") is not None and item.get("name"):
+                                _FOOD_NAME_CACHE[item["id"]] = item["name"]
+            except Exception as err:
+                _LOGGER.debug("Vivino foods table fetch failed: %s", err)
+        return [_FOOD_NAME_CACHE[fid] for fid in food_ids if fid in _FOOD_NAME_CACHE]
+
+    async def search_wine(
+        self,
+        query: str,
+        language: str = "en",
+        currency: str = "USD",
+        vintage: int | None = None,
+        fetch_extras: bool = True,
+    ) -> list[dict[str, Any]]:
         """Search for wines by name/text query.
 
-        Tries the explore API first (structured JSON), then HTML scrape fallback.
+        Tries the explore API first (structured JSON, reliable prices) then
+        HTML scrape fallback. The explore API never returns `description` or
+        `food_pairings` — those only come from the HTML page. For a
+        well-indexed wine the explore API almost always succeeds, so without
+        this backfill those two fields would never get set at all (only
+        obscure wines that fail the explore API would ever reach the HTML
+        path). `fetch_extras=False` skips this extra request (used by batch
+        refresh, to avoid ~doubling its request volume across many wines).
+
+        The explore API has been observed to silently ignore `q` for some
+        queries and return a generic "trending wines" list instead of an
+        actual search match (confirmed live: identical top results for
+        unrelated queries). Since that list is never empty, the old code
+        would accept it as-is and never try the HTML search page, which
+        still performs real text search. So the explore API's top result is
+        checked for basic relevance to the query before trusting it.
+
+        `vintage`, when given, reorders results so an exact vintage match is
+        used instead of whatever Vivino ranked first — the query text alone
+        (which includes the year) influences ranking but doesn't guarantee
+        the top hit is the right vintage among several Vivino returns.
         """
-        # Try explore API first — returns structured JSON with reliable prices
-        results = await self._search_vivino_explore(query)
-        if results:
+        results = await self._search_vivino_explore(query, language, currency)
+        results = _prefer_matching_vintage(results, vintage)
+        if results and _explore_result_matches_query(query, results[0]):
+            if fetch_extras and not results[0].get("description") and not results[0].get("food_pairings"):
+                try:
+                    html_results = await self._search_vivino_html(query, language)
+                    html_results = _prefer_matching_vintage(html_results, vintage)
+                    if html_results:
+                        top = html_results[0]
+                        if top.get("description"):
+                            results[0]["description"] = top["description"]
+                        if top.get("food_pairings"):
+                            results[0]["food_pairings"] = top["food_pairings"]
+                except Exception as err:
+                    _LOGGER.debug(
+                        "Vivino: description/food_pairings backfill failed for '%s': %s", query, err
+                    )
             return results
 
-        # Fall back to HTML scraping (no price data — only explore API has prices)
-        _LOGGER.debug("Vivino explore API returned no results for '%s', falling back to HTML scrape", query)
-        results = await self._search_vivino_html(query)
-        if results:
-            return results
+        # Explore API returned nothing, or its top result doesn't look
+        # related to the query — fall back to HTML search (no price data,
+        # only the explore API has prices, but a real match beats a
+        # confident-looking wrong one).
+        _LOGGER.debug(
+            "Vivino explore API result for '%s' empty or unrelated, falling back to HTML scrape", query
+        )
+        html_results = await self._search_vivino_html(query, language)
+        html_results = _prefer_matching_vintage(html_results, vintage)
+        if html_results:
+            return html_results
 
-        return []
+        # Nothing better available — return the (possibly unrelated) explore
+        # results so the caller's own trustworthy-match check can decide.
+        return results
 
     # ── Vivino Explore API ──────────────────────────────────────────
 
-    async def _search_vivino_explore(self, query: str) -> list[dict[str, Any]]:
+    async def _search_vivino_explore(
+        self, query: str, language: str = "en", currency: str = "USD"
+    ) -> list[dict[str, Any]]:
         """Use Vivino's explore API to search for wines."""
         session = async_get_clientsession(self._hass)
         results: list[dict[str, Any]] = []
+        country_code = CURRENCY_COUNTRY_CODE.get(currency, "US")
 
         try:
             timeout = aiohttp.ClientTimeout(total=15)
@@ -92,16 +434,17 @@ class VivinoClient:
                 ("q", query),
                 ("page", "1"),
                 ("page_size", "5"),
-                ("country_code", "US"),
-                ("currency_code", "USD"),
-                ("language", "en"),
+                ("country_code", country_code),
+                ("currency_code", currency),
+                ("language", language),
             ]
             # Add all wine type IDs as required filter
             for wt_id in ALL_WINE_TYPE_IDS:
                 params.append(("wine_type_ids[]", str(wt_id)))
 
+            headers = {**HEADERS, "Accept-Language": _accept_language(language)}
             async with session.get(
-                VIVINO_API_URL, params=params, headers=HEADERS, timeout=timeout
+                VIVINO_API_URL, params=params, headers=headers, timeout=timeout
             ) as resp:
                 if resp.status != 200:
                     _LOGGER.warning(
@@ -110,7 +453,7 @@ class VivinoClient:
                     return []
 
                 data = await resp.json()
-                matches = data.get("explore_vintage", {}).get("matches", [])
+                matches = (data.get("explore_vintage") or {}).get("matches") or []
                 _LOGGER.debug(
                     "Vivino search for '%s' returned %d matches",
                     query,
@@ -118,16 +461,20 @@ class VivinoClient:
                 )
 
                 for match in matches[:5]:
-                    vintage = match.get("vintage", {})
-                    wine = vintage.get("wine", {})
-                    winery = wine.get("winery", {})
-                    region = wine.get("region", {})
-                    country = region.get("country", {})
+                    # Vivino can return explicit `null` (not just omit the key) for
+                    # any of these nested objects, e.g. for obscure/regional wines —
+                    # `.get(key, {})` only guards a missing key, not an explicit null,
+                    # so every level here is re-defaulted with `or {}`.
+                    vintage = match.get("vintage") or {}
+                    wine = vintage.get("wine") or {}
+                    winery = wine.get("winery") or {}
+                    region = wine.get("region") or {}
+                    country = region.get("country") or {}
                     wine_type = _map_wine_type(wine.get("type_id"))
 
                     # Extract price from explore API response
                     price = None
-                    price_info = match.get("price", {})
+                    price_info = match.get("price") or {}
                     if price_info:
                         amt = price_info.get("amount")
                         if amt and isinstance(amt, (int, float)) and amt >= 6.0:
@@ -135,14 +482,14 @@ class VivinoClient:
 
                     # Extract grape variety
                     grape = ""
-                    grapes = wine.get("grapes", [])
+                    grapes = wine.get("grapes") or []
                     if grapes:
                         grape = ", ".join(
-                            g.get("name", "") for g in grapes if g.get("name")
+                            g.get("name", "") for g in grapes if g and g.get("name")
                         )
 
                     # Extract ratings count
-                    stats = wine.get("statistics", {})
+                    stats = wine.get("statistics") or {}
                     rating = stats.get("ratings_average")
                     if rating and isinstance(rating, (int, float)) and rating > 0:
                         rating = round(float(rating), 1)
@@ -157,7 +504,7 @@ class VivinoClient:
                         alcohol = f"{alc}%"
 
                     # Image URL
-                    image_url = vintage.get("image", {}).get("location", "")
+                    image_url = (vintage.get("image") or {}).get("location", "")
                     if image_url and image_url.startswith("//"):
                         image_url = "https:" + image_url
 
@@ -175,6 +522,7 @@ class VivinoClient:
                             "image_url": image_url,
                             "price": price,
                             "alcohol": alcohol,
+                            "vivino_id": wine.get("id"),
                             "source": "vivino",
                         }
                     )
@@ -186,14 +534,14 @@ class VivinoClient:
 
     # ── Vivino HTML Search (scrape) ──────────────────────────────────
 
-    async def _search_vivino_html(self, query: str) -> list[dict[str, Any]]:
+    async def _search_vivino_html(self, query: str, language: str = "en") -> list[dict[str, Any]]:
         """Search Vivino by scraping the HTML search results page."""
         session = async_get_clientsession(self._hass)
 
         try:
             url = VIVINO_SEARCH_URL.format(query=quote_plus(query))
             timeout = aiohttp.ClientTimeout(total=15)
-            headers = {**HEADERS, "Accept": "text/html"}
+            headers = {**HEADERS, "Accept": "text/html", "Accept-Language": _accept_language(language)}
 
             async with session.get(
                 url, headers=headers, timeout=timeout, allow_redirects=True
@@ -326,7 +674,7 @@ class VivinoClient:
                     if data.get("status") != 1:
                         continue
 
-                    product = data.get("product", {})
+                    product = data.get("product") or {}
                     name = product.get("product_name", "")
                     if not name:
                         continue
@@ -521,6 +869,14 @@ def _parse_vivino_html(html: str) -> list[dict[str, Any]]:
             # Only the Vivino Explore API returns reliable per-wine pricing.
             price = None
 
+            # Extract Vivino's own numeric wine id — vivino.com/w/{id} always
+            # redirects to the wine's real page regardless of slug, so this
+            # alone is enough to link to it without reconstructing the slug.
+            vivino_id = None
+            id_match = re.search(r'"wine":\{"id":(\d+)', segment)
+            if id_match:
+                vivino_id = int(id_match.group(1))
+
             results.append({
                 "name": wine_name,
                 "winery": winery,
@@ -536,6 +892,7 @@ def _parse_vivino_html(html: str) -> list[dict[str, Any]]:
                 "food_pairings": food_pairings,
                 "alcohol": alcohol,
                 "price": price,
+                "vivino_id": vivino_id,
                 "source": "vivino",
             })
 

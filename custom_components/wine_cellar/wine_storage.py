@@ -13,6 +13,7 @@ from .const import (
     CONF_BARCODE_CACHE,
     CONF_BUY_LIST,
     CONF_CABINETS,
+    CONF_SETTINGS,
     CONF_WINE_HISTORY,
     CONF_WINES,
     DEFAULT_CABINETS,
@@ -55,6 +56,17 @@ class WineCellarStorage:
         """Return wine removal history."""
         return self._data.get(CONF_WINE_HISTORY, [])
 
+    @property
+    def settings(self) -> dict[str, Any]:
+        """Return app-wide settings (e.g. metadata language)."""
+        return self._data.get(CONF_SETTINGS, {})
+
+    def update_settings(self, updates: dict[str, Any]) -> dict[str, Any]:
+        """Update app-wide settings."""
+        settings = self._data.setdefault(CONF_SETTINGS, {})
+        settings.update(updates)
+        return settings
+
     async def async_load(self) -> None:
         """Load data from storage."""
         data = await self._store.async_load()
@@ -65,6 +77,7 @@ class WineCellarStorage:
                 CONF_BARCODE_CACHE: {},
                 CONF_BUY_LIST: [],
                 CONF_WINE_HISTORY: [],
+                CONF_SETTINGS: {},
             }
             await self.async_save()
         else:
@@ -126,8 +139,10 @@ class WineCellarStorage:
             "grape_variety": wine_data.get("grape_variety", ""),
             "rating": wine_data.get("rating"),
             "image_url": wine_data.get("image_url", ""),
+            "back_image_url": wine_data.get("back_image_url", ""),
             "price": wine_data.get("price"),
             "retail_price": wine_data.get("retail_price"),
+            "retail_price_currency": wine_data.get("retail_price_currency"),
             "purchase_date": wine_data.get("purchase_date", ""),
             "drink_by": wine_data.get("drink_by", ""),
             "notes": wine_data.get("notes", ""),
@@ -148,6 +163,9 @@ class WineCellarStorage:
             "vivino_id": wine_data.get("vivino_id", ""),
             "source": wine_data.get("source", ""),
             "added_at": datetime.now(timezone.utc).isoformat(),
+            "vivino_updated_at": wine_data.get("vivino_updated_at"),
+            "ai_updated_at": wine_data.get("ai_updated_at"),
+            "vivino_id": wine_data.get("vivino_id"),
         }
         self._data[CONF_WINES].append(wine)
         return wine
@@ -174,11 +192,28 @@ class WineCellarStorage:
                     "added_at": wine.get("added_at", ""),
                     "removed_at": datetime.now(timezone.utc).isoformat(),
                     "reason": reason,
+                    "full_wine": dict(wine),
                 }
                 self._data[CONF_WINE_HISTORY].append(history_entry)
                 wines.pop(i)
                 return True
         return False
+
+    def restore_wine(self, history_id: str) -> dict[str, Any] | None:
+        """Restore a wine from history back into the cellar as unassigned."""
+        history = self._data[CONF_WINE_HISTORY]
+        for i, entry in enumerate(history):
+            if entry["id"] == history_id:
+                wine_data = dict(entry.get("full_wine") or entry)
+                wine_data["cabinet_id"] = ""
+                wine_data["row"] = None
+                wine_data["col"] = None
+                wine_data["zone"] = ""
+                wine_data["depth"] = 0
+                wine = self.add_wine(wine_data)
+                history.pop(i)
+                return wine
+        return None
 
     def update_wine(self, wine_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
         """Update a wine bottle's data."""
@@ -259,15 +294,30 @@ class WineCellarStorage:
                 return True
         return False
 
+    @staticmethod
+    def cabinet_capacity(cabinet: dict[str, Any]) -> int:
+        """Return a single cabinet's total bottle capacity.
+
+        Plain row/col grid slots, plus each bulk/box storage row's own
+        capacity (those rows replace a grid row, so they're not part of
+        the row*col count and must be added separately).
+        """
+        if cabinet.get("type") != "grid":
+            return 0
+        storage_rows = cabinet.get("storage_rows", [])
+        grid_rows = max(0, cabinet.get("rows", 0) - len(storage_rows))
+        capacity = grid_rows * cabinet.get("cols", 0) * cabinet.get("depth", 1)
+        for sr in storage_rows:
+            if sr.get("type") == "box":
+                capacity += sum(sr.get("boxes", []))
+            else:
+                capacity += sr.get("capacity", 0)
+        return capacity
+
     def get_stats(self) -> dict[str, Any]:
         """Get cellar statistics."""
         total_bottles = len(self.wines)
-        total_capacity = 0
-        for c in self.cabinets:
-            if c.get("type") == "grid":
-                storage_row_count = len(c.get("storage_rows", []))
-                grid_rows = c.get("rows", 0) - storage_row_count
-                total_capacity += max(0, grid_rows) * c.get("cols", 0) * c.get("depth", 1)
+        total_capacity = sum(self.cabinet_capacity(c) for c in self.cabinets)
         by_type: dict[str, int] = {}
         by_cabinet: dict[str, int] = {}
         total_value = 0.0
@@ -325,6 +375,7 @@ class WineCellarStorage:
             "image_url": wine_data.get("image_url", ""),
             "price": wine_data.get("price"),
             "retail_price": wine_data.get("retail_price"),
+            "retail_price_currency": wine_data.get("retail_price_currency"),
             "notes": wine_data.get("notes", ""),
             "description": wine_data.get("description", ""),
             "food_pairings": wine_data.get("food_pairings", ""),
@@ -435,6 +486,7 @@ class WineCellarStorage:
             CONF_CABINETS: list(self.cabinets),
             CONF_BUY_LIST: list(self.buy_list),
             CONF_WINE_HISTORY: list(self.wine_history),
+            CONF_SETTINGS: dict(self.settings),
         }
 
     def restore_data(
@@ -443,12 +495,18 @@ class WineCellarStorage:
         cabinets: list[dict[str, Any]],
         buy_list: list[dict[str, Any]],
         wine_history: list[dict[str, Any]] | None = None,
+        settings: dict[str, Any] | None = None,
     ) -> dict[str, int]:
         """Replace all cellar data with backup data. Returns counts."""
         self._data[CONF_WINES] = wines
         self._data[CONF_CABINETS] = cabinets
         self._data[CONF_BUY_LIST] = buy_list
         self._data[CONF_WINE_HISTORY] = wine_history or []
+        # Older backups predate app-wide settings — only overwrite when the
+        # backup actually carries them, so restoring one doesn't wipe the
+        # user's current metadata-language / AI-fallback configuration.
+        if settings is not None:
+            self._data[CONF_SETTINGS] = settings
         return {
             "wines": len(wines),
             "cabinets": len(cabinets),

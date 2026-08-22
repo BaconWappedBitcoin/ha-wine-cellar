@@ -64,12 +64,25 @@
       { id: "bx5", barcode: "", name: "Margaux 2018 (Box #3)", winery: "Château Margaux", region: "Margaux", country: "France", vintage: 2018, type: "red", grape_variety: "Cabernet Sauvignon", rating: 4.6, ratings_count: 980, image_url: "", price: 400, purchase_date: "2024-12-05", drink_by: "2045", notes: "In 12-pack box", description: "", food_pairings: "", alcohol: "", cabinet_id: "cabinet-2", row: null, col: null, depth: 8, zone: "storage-8", disposition: "", added_at: "2024-12-05T10:00:00Z" },
       { id: "h1", barcode: "", name: "Opus One 2020 (Wall)", winery: "Opus One", region: "Napa Valley", country: "USA", vintage: 2020, type: "red", grape_variety: "Bordeaux Blend", rating: 4.5, ratings_count: 2100, image_url: "", price: 400, purchase_date: "2024-11-01", drink_by: "2040", notes: "Wall display", description: "", food_pairings: "", alcohol: "", cabinet_id: "cabinet-3", row: null, col: null, depth: 0, zone: "storage-9", disposition: "", added_at: "2024-11-01T10:00:00Z" },
       { id: "h2", barcode: "", name: "Sassicaia 2020 (Wall)", winery: "Tenuta San Guido", region: "Bolgheri", country: "Italy", vintage: 2020, type: "red", grape_variety: "Cabernet Sauvignon", rating: 4.5, ratings_count: 3200, image_url: "", price: 300, purchase_date: "2024-11-05", drink_by: "2040", notes: "Wall display", description: "", food_pairings: "", alcohol: "", cabinet_id: "cabinet-3", row: null, col: null, depth: 1, zone: "storage-9", disposition: "", added_at: "2024-11-05T10:00:00Z" },
+      // "Capacity Test" cabinet below: a Bulk Bin already at its configured
+      // capacity, plus a Spare Bin with one bottle to drag/move/copy over —
+      // reproduces the "can overfill a full bin" class of bug (see history
+      // entry "Fix drag-and-drop into bulk bins/boxes bypassing capacity
+      // check") without needing to hand-populate a bin to capacity yourself.
+      { id: "cap-1", barcode: "", name: "Capacity Test Wine 1", winery: "Test Winery", region: "", country: "", vintage: 2022, type: "red", grape_variety: "", rating: null, ratings_count: null, image_url: "", price: 20, purchase_date: "", drink_by: "", notes: "", description: "", food_pairings: "", alcohol: "", cabinet_id: "cabinet-4", row: null, col: null, depth: 0, zone: "storage-0", disposition: "D", added_at: "2026-01-01T10:00:00Z" },
+      { id: "cap-2", barcode: "", name: "Capacity Test Wine 2", winery: "Test Winery", region: "", country: "", vintage: 2022, type: "white", grape_variety: "", rating: null, ratings_count: null, image_url: "", price: 20, purchase_date: "", drink_by: "", notes: "", description: "", food_pairings: "", alcohol: "", cabinet_id: "cabinet-4", row: null, col: null, depth: 1, zone: "storage-0", disposition: "H", added_at: "2026-01-01T10:00:00Z" },
+      { id: "cap-3", barcode: "", name: "Capacity Test Wine 3", winery: "Test Winery", region: "", country: "", vintage: 2022, type: "rosé", grape_variety: "", rating: null, ratings_count: null, image_url: "", price: 20, purchase_date: "", drink_by: "", notes: "", description: "", food_pairings: "", alcohol: "", cabinet_id: "cabinet-4", row: null, col: null, depth: 2, zone: "storage-0", disposition: "D", added_at: "2026-01-01T10:00:00Z" },
+      { id: "cap-4", barcode: "", name: "Capacity Test Wine 4 (drag me)", winery: "Test Winery", region: "", country: "", vintage: 2022, type: "sparkling", grape_variety: "", rating: null, ratings_count: null, image_url: "", price: 20, purchase_date: "", drink_by: "", notes: "", description: "", food_pairings: "", alcohol: "", cabinet_id: "cabinet-4", row: null, col: null, depth: 0, zone: "storage-1", disposition: "D", added_at: "2026-01-01T10:00:00Z" },
     ];
 
     const mockCabinets = [
       { id: "cabinet-1", name: "Section 1", type: "grid", rows: 10, cols: 9, depth: 1, has_bottom_zone: false, bottom_zone_name: "", storage_rows: [{ row: 9, name: "Bulk Bin", type: "bulk", capacity: 20 }], order: 0 },
       { id: "cabinet-2", name: "Section 2", type: "grid", rows: 9, cols: 10, depth: 2, has_bottom_zone: false, bottom_zone_name: "", storage_rows: [{ row: 8, name: "Bordeaux Case", type: "box", capacity: 18, boxes: [6, 12] }], order: 1 },
       { id: "cabinet-3", name: "Section 3", type: "grid", rows: 10, cols: 9, depth: 1, has_bottom_zone: false, bottom_zone_name: "", storage_rows: [{ row: 9, name: "Wall Rack", type: "bulk", capacity: 6 }], order: 2 },
+      { id: "cabinet-4", name: "Capacity Test", type: "zone", rows: 2, cols: 1, depth: 1, has_bottom_zone: false, bottom_zone_name: "", storage_rows: [
+        { row: 0, name: "Full Bin", type: "bulk", capacity: 3 },
+        { row: 1, name: "Spare Bin", type: "bulk", capacity: 5 },
+      ], order: 3 },
     ];
 
     const mockBuyList = [
@@ -87,8 +100,8 @@
 
     const mockStats = {
       total_bottles: mockWines.length,
-      total_capacity: 81 + 162 + 90, // s1: 9*9*1, s2: 9*9*2, s3: 10*9*1
-      available_slots: (81 + 162 + 90) - mockWines.length,
+      total_capacity: 81 + 162 + 90 + 8, // s1: 9*9*1, s2: 9*9*2, s3: 10*9*1, s4: 3+5
+      available_slots: (81 + 162 + 90 + 8) - mockWines.length,
       total_value: mockWines.reduce((sum, w) => sum + (w.retail_price || w.price || 0), 0),
       total_cost: mockWines.reduce((sum, w) => sum + (w.price || 0), 0),
       by_type: { red: 7, white: 4, "rosé": 1, sparkling: 1, dessert: 2 },
@@ -147,6 +160,25 @@
           case "wine_cellar/clear_wine_history":
             mockWineHistory.length = 0;
             return { success: true };
+          case "wine_cellar/restore_wine":
+            const hIdx = mockWineHistory.findIndex(h => h.id === msg.history_id);
+            if (hIdx >= 0) {
+              const h = mockWineHistory[hIdx];
+              const restored = {
+                barcode: "", name: h.name, winery: h.winery, region: h.region || "", country: h.country || "",
+                vintage: h.vintage, type: h.type, grape_variety: h.grape_variety || "", rating: h.rating,
+                ratings_count: null, image_url: h.image_url || "", back_image_url: "", price: h.price,
+                retail_price: null, retail_price_currency: null, purchase_date: "", drink_by: "", notes: "",
+                description: "", food_pairings: "", alcohol: "", cabinet_id: "", row: null, col: null, depth: 0,
+                zone: "", user_rating: null, tasting_notes: null, disposition: "", drink_window: "",
+                ai_ratings: null, vivino_updated_at: null, ai_updated_at: null, vivino_id: null,
+                id: "restored-" + Date.now(), added_at: new Date().toISOString(),
+              };
+              mockWines.push(restored);
+              mockWineHistory.splice(hIdx, 1);
+              return { wine: restored };
+            }
+            return { wine: null };
           case "wine_cellar/update_wine":
             const wine = mockWines.find(w => w.id === msg.wine_id);
             if (wine && msg.updates) Object.assign(wine, msg.updates);
