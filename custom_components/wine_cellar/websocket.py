@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import (
     CONF_AI_FALLBACK_ALWAYS,
+    CONF_DISMISSED_ARRANGEMENTS,
     CONF_METADATA_CURRENCY,
     CONF_METADATA_LANGUAGE,
     CONF_SERVER_BACKUP_KEEP,
@@ -651,6 +652,11 @@ def ws_get_capabilities(
             ),
             "server_backup_keep": _get_backup_keep(hass),
             "server_backup_keep_choices": SERVER_BACKUP_KEEP_CHOICES,
+            "dismissed_arrangements": list(
+                hass.data[DOMAIN]["storage"].settings.get(
+                    CONF_DISMISSED_ARRANGEMENTS, []
+                )
+            ),
         },
     )
 
@@ -687,6 +693,18 @@ async def ws_update_settings(
                 msg["id"], {"error": f"Invalid backup retention: {keep}"}
             )
             return
+    dismissed = updates.get(CONF_DISMISSED_ARRANGEMENTS)
+    if dismissed is not None:
+        if not isinstance(dismissed, list) or not all(
+            isinstance(item, str) for item in dismissed
+        ):
+            connection.send_result(
+                msg["id"], {"error": "Dismissed arrangements must be a list of ids"}
+            )
+            return
+        # Deduplicate and cap: this list only ever grows, and a finding id the
+        # cellar can no longer produce would otherwise sit there forever.
+        updates[CONF_DISMISSED_ARRANGEMENTS] = list(dict.fromkeys(dismissed))[-500:]
     settings = storage.update_settings(updates)
     await storage.async_save()
     connection.send_result(msg["id"], {"settings": settings})
