@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -141,18 +142,31 @@ class VivinoClient:
         self._hass = hass
 
     async def lookup_barcode(self, barcode: str, language: str = "en") -> dict[str, Any] | None:
-        """Look up a wine by barcode using multiple sources."""
-        # 1. Try UPC Item DB first (good barcode database)
-        result = await self._lookup_upc_itemdb(barcode)
-        if result:
-            return result
+        """Look up a wine by barcode using multiple sources.
 
-        # 2. Try Open Food Facts
-        result = await self._search_open_food_facts(barcode)
-        if result:
-            return result
+        The two barcode databases are asked at the same time and the answer is
+        then picked by preference, not by whichever replied first — UPC Item DB
+        still wins over Open Food Facts. They used to be tried one after the
+        other, so a barcode neither of them knew paid both waits end to end
+        before anything else could happen. That is the common case for wine:
+        most bottles are not in a grocery barcode database, and the caller
+        falls back to photographing the label, so the "no match" verdict is
+        worth reaching quickly.
 
-        # 3. Try Vivino HTML search as last resort
+        Vivino's HTML search stays out of that pair deliberately. It is the
+        slow one and it rarely recognises a barcode at all, so firing it every
+        time would add a heavy request to every successful scan to save a
+        rounding error on the rare one it answers.
+        """
+        upc_result, off_result = await asyncio.gather(
+            self._lookup_upc_itemdb(barcode),
+            self._search_open_food_facts(barcode),
+            return_exceptions=True,
+        )
+        for result in (upc_result, off_result):
+            if result and not isinstance(result, BaseException):
+                return result
+
         html_results = await self._search_vivino_html(barcode, language)
         if html_results:
             return html_results[0]
@@ -296,14 +310,27 @@ class VivinoClient:
             composition.items(), key=lambda kv: -(kv[1] or 0)
         )
         show_percent = len(entries) > 1
-        parts: list[str] = []
+        wanted: list[tuple[int, Any]] = []
         for gid_str, pct in entries[:5]:
             try:
-                gid = int(gid_str)
+                wanted.append((int(gid_str), pct))
             except (TypeError, ValueError):
                 continue
-            name = await self._resolve_grape_name(gid)
-            if not name:
+        if not wanted:
+            return []
+
+        # One request per grape, asked together rather than one after the
+        # other: a five-grape blend used to serialise five round trips to
+        # build one string. Results stay in blend order regardless of which
+        # replies first.
+        names = await asyncio.gather(
+            *(self._resolve_grape_name(gid) for gid, _ in wanted),
+            return_exceptions=True,
+        )
+
+        parts: list[str] = []
+        for (_, pct), name in zip(wanted, names):
+            if not name or isinstance(name, BaseException):
                 continue
             parts.append(f"{pct:g}% {name}" if show_percent and pct else name)
         return parts
@@ -360,14 +387,20 @@ class VivinoClient:
     ) -> list[dict[str, Any]]:
         """Search for wines by name/text query.
 
-        Tries the explore API first (structured JSON, reliable prices) then
-        HTML scrape fallback. The explore API never returns `description` or
-        `food_pairings` — those only come from the HTML page. For a
-        well-indexed wine the explore API almost always succeeds, so without
-        this backfill those two fields would never get set at all (only
-        obscure wines that fail the explore API would ever reach the HTML
-        path). `fetch_extras=False` skips this extra request (used by batch
-        refresh, to avoid ~doubling its request volume across many wines).
+        Uses the explore API (structured JSON, reliable prices) with the HTML
+        scrape as both backfill and fallback. The explore API never returns
+        `description` or `food_pairings` — those only come from the HTML page.
+        For a well-indexed wine the explore API almost always succeeds, so
+        without this backfill those two fields would never get set at all
+        (only obscure wines that fail the explore API would ever reach the
+        HTML path).
+
+        Interactively the two are fetched **concurrently**: neither depends on
+        the other, and the common path needed both regardless, so running them
+        in sequence just added the waits together. `fetch_extras=False` keeps
+        the old sequential shape, asking for the HTML page only if the explore
+        API disappoints — batch refresh crosses the whole cellar and should
+        not double its request volume for a field it is not collecting.
 
         The explore API has been observed to silently ignore `q` for some
         queries and return a generic "trending wines" list instead of an
@@ -382,23 +415,40 @@ class VivinoClient:
         (which includes the year) influences ranking but doesn't guarantee
         the top hit is the right vintage among several Vivino returns.
         """
-        results = await self._search_vivino_explore(query, language, currency)
+        html_results: list[dict[str, Any]] | None = None
+        if fetch_extras:
+            # The two requests do not depend on each other, and the common
+            # path needed both anyway — one for structured data and prices,
+            # the other for description and food pairings. Running them one
+            # after the other simply added the two waits together.
+            explore_raw, html_raw = await asyncio.gather(
+                self._search_vivino_explore(query, language, currency),
+                self._search_vivino_html(query, language),
+                return_exceptions=True,
+            )
+            if isinstance(explore_raw, BaseException):
+                _LOGGER.warning("Vivino explore API failed for '%s': %s", query, explore_raw)
+                explore_raw = []
+            if isinstance(html_raw, BaseException):
+                _LOGGER.debug("Vivino HTML search failed for '%s': %s", query, html_raw)
+                html_raw = []
+            results, html_results = explore_raw, html_raw
+        else:
+            # Batch refresh walks the whole cellar, so the HTML page is only
+            # fetched when the explore API actually comes up short — the point
+            # of fetch_extras=False is to not double the request volume.
+            results = await self._search_vivino_explore(query, language, currency)
+
         results = _prefer_matching_vintage(results, vintage)
         if results and _explore_result_matches_query(query, results[0]):
-            if fetch_extras and not results[0].get("description") and not results[0].get("food_pairings"):
-                try:
-                    html_results = await self._search_vivino_html(query, language)
-                    html_results = _prefer_matching_vintage(html_results, vintage)
-                    if html_results:
-                        top = html_results[0]
-                        if top.get("description"):
-                            results[0]["description"] = top["description"]
-                        if top.get("food_pairings"):
-                            results[0]["food_pairings"] = top["food_pairings"]
-                except Exception as err:
-                    _LOGGER.debug(
-                        "Vivino: description/food_pairings backfill failed for '%s': %s", query, err
-                    )
+            if html_results and not results[0].get("description") and not results[0].get("food_pairings"):
+                ranked = _prefer_matching_vintage(html_results, vintage)
+                if ranked:
+                    top = ranked[0]
+                    if top.get("description"):
+                        results[0]["description"] = top["description"]
+                    if top.get("food_pairings"):
+                        results[0]["food_pairings"] = top["food_pairings"]
             return results
 
         # Explore API returned nothing, or its top result doesn't look
@@ -408,7 +458,8 @@ class VivinoClient:
         _LOGGER.debug(
             "Vivino explore API result for '%s' empty or unrelated, falling back to HTML scrape", query
         )
-        html_results = await self._search_vivino_html(query, language)
+        if html_results is None:
+            html_results = await self._search_vivino_html(query, language)
         html_results = _prefer_matching_vintage(html_results, vintage)
         if html_results:
             return html_results
