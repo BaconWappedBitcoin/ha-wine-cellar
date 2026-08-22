@@ -2957,6 +2957,48 @@ StarRating = __decorate([
     t("star-rating")
 ], StarRating);
 
+// Shared camera diagnostics.
+//
+// Both camera components used to decide what went wrong by substring-matching
+// err.message ("NotAllowed", "Permission"). The name is in err.name, and
+// Safari's message text ("The request is not allowed by the user agent or the
+// platform in the current context.") matches neither, so on iOS every failure
+// fell through to a generic "could not access camera" that told the user
+// nothing about the actual cause.
+// Why the live camera cannot even be attempted, or "" when it can be.
+//
+// Over plain http:// the page is not a secure context and the browser does not
+// expose navigator.mediaDevices at all — calling getUserMedia throws a
+// TypeError that reads like a mysterious failure. There is no code-side fix
+// for that, so the honest move is to say it up front and point at the device's
+// own camera, which needs no secure context.
+function cameraBlockedReason() {
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+        return ("The live camera needs a secure connection. Home Assistant is being served over " +
+            "http://, and browsers only allow camera access over https:// (or on localhost).");
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+        return "This browser does not offer live camera access.";
+    }
+    return "";
+}
+// A getUserMedia failure, in words that suggest what to do about it.
+function describeCameraError(err) {
+    switch (err?.name) {
+        case "NotAllowedError":
+        case "SecurityError":
+            return "Camera access was denied. Allow it for this site in your browser settings.";
+        case "NotFoundError":
+        case "OverconstrainedError":
+            return "No camera found on this device.";
+        case "NotReadableError":
+        case "AbortError":
+            return "The camera is busy or unavailable — another app may be using it.";
+        default:
+            return `Could not access the camera${err?.name ? ` (${err.name})` : ""}.`;
+    }
+}
+
 let LabelCamera = class LabelCamera extends i {
     constructor() {
         super(...arguments);
@@ -2984,6 +3026,14 @@ let LabelCamera = class LabelCamera extends i {
     }
     async _startCamera() {
         this._error = "";
+        // Ask why before asking for the camera: over http:// there is nothing to
+        // ask, and a TypeError from a missing navigator.mediaDevices would read as
+        // a generic failure.
+        const blocked = cameraBlockedReason();
+        if (blocked) {
+            this._error = blocked;
+            return;
+        }
         try {
             this._stream = await navigator.mediaDevices.getUserMedia({
                 video: {
@@ -3001,13 +3051,7 @@ let LabelCamera = class LabelCamera extends i {
             }
         }
         catch (err) {
-            const msg = err?.message || String(err);
-            if (msg.includes("NotAllowed") || msg.includes("Permission")) {
-                this._error = "Camera access denied. Use the upload button below instead.";
-            }
-            else {
-                this._error = "Could not access camera. Use the upload button below instead.";
-            }
+            this._error = describeCameraError(err);
         }
     }
     _stopCamera() {
@@ -3097,7 +3141,12 @@ let LabelCamera = class LabelCamera extends i {
         }
         return b `
       ${this._error
-            ? b `<div class="error-message">${this._error}</div>`
+            ? b `
+            <div class="error-message">${this._error}</div>
+            <div class="hint">
+              The button below opens your device's own camera, which works either way.
+            </div>
+          `
             : b `
             <div class="camera-container">
               <video autoplay playsinline muted></video>
@@ -3110,7 +3159,7 @@ let LabelCamera = class LabelCamera extends i {
 
       <div class="fallback-area">
         <label class="file-input-label">
-          📁 Upload from gallery
+          ${this._error ? "📷 Take a photo" : "📁 Upload from gallery"}
           <input type="file" accept="image/*" capture="environment" @change=${this._onFileSelected} />
         </label>
       </div>
@@ -4823,6 +4872,16 @@ let BarcodeScanner = class BarcodeScanner extends i {
             }));
             return;
         }
+        const blocked = cameraBlockedReason();
+        if (blocked) {
+            this._error = `${blocked} Enter the barcode manually below.`;
+            this.dispatchEvent(new CustomEvent("scanner-error", {
+                detail: { error: this._error },
+                bubbles: true,
+                composed: true,
+            }));
+            return;
+        }
         try {
             this._stream = await navigator.mediaDevices.getUserMedia({
                 video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -4841,16 +4900,7 @@ let BarcodeScanner = class BarcodeScanner extends i {
             this._scanFrame();
         }
         catch (err) {
-            const msg = err?.message || String(err);
-            if (msg.includes("NotAllowed") || msg.includes("Permission")) {
-                this._error = "Camera access denied. Please allow camera access in your browser settings.";
-            }
-            else if (msg.includes("NotFound") || msg.includes("no camera")) {
-                this._error = "No camera found on this device.";
-            }
-            else {
-                this._error = `Camera error: ${msg}`;
-            }
+            this._error = `${describeCameraError(err)} Enter the barcode manually below.`;
             this.dispatchEvent(new CustomEvent("scanner-error", {
                 detail: { error: this._error },
                 bubbles: true,
