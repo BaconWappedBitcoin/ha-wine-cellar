@@ -15,6 +15,11 @@ import "./components/wine-list-dialog";
 import "./components/inventory-dialog";
 import "./components/vivino-ai-settings-dialog";
 
+// How long an incoming change waits before the card re-fetches, and the floor
+// on how often it may do so at all.
+const REFRESH_DEBOUNCE_MS = 400;
+const REFRESH_MIN_INTERVAL_MS = 3000;
+
 interface WineCellarCardConfig {
   type: string;
   title?: string;
@@ -62,7 +67,10 @@ export class WineCellarCard extends LitElement {
     findings: Finding[];
   } | null = null;
   private _unsubscribe: (() => void) | null = null;
+  private _subscribing = false;
+  private _connectionGeneration = 0;
   private _refreshTimer = 0;
+  private _lastRefresh = 0;
   private _toastTimer = 0;
 
   @state() private _showArrangement = false;
@@ -447,6 +455,8 @@ export class WineCellarCard extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    // Invalidates any subscription still being set up.
+    this._connectionGeneration++;
     this._unsubscribe?.();
     this._unsubscribe = null;
     if (this._refreshTimer) {
@@ -465,30 +475,55 @@ export class WineCellarCard extends LitElement {
   // until the user happened to do something that reloaded the card. That is
   // why an added bottle could look like Vivino had never been consulted.
   private async _subscribeToUpdates() {
-    if (!this.hass?.connection || this._unsubscribe) {
+    if (!this.hass?.connection || this._unsubscribe || this._subscribing) {
       if (!this.hass) setTimeout(() => this._subscribeToUpdates(), 500);
       return;
     }
+    this._subscribing = true;
+    const generation = this._connectionGeneration;
     try {
-      this._unsubscribe = await this.hass.connection.subscribeEvents(
+      const unsubscribe = await this.hass.connection.subscribeEvents(
         () => this._scheduleRefresh(),
         "wine_cellar_updated"
       );
+      // Home Assistant detaches and reattaches a dashboard view when the user
+      // switches tabs, which can happen while this is still in flight. Storing
+      // the handle now would leave a subscription nothing can ever cancel,
+      // reloading a card that is no longer on screen — once per tab switch.
+      //
+      // Keyed on a counter the detach bumps rather than on isConnected, so it
+      // holds however the element was taken down.
+      if (generation !== this._connectionGeneration) {
+        unsubscribe();
+        return;
+      }
+      this._unsubscribe = unsubscribe;
     } catch (err) {
       // Without this the card still works, it just will not notice background
       // work. Not worth an error the user has to dismiss.
       console.warn("Wine Cellar: could not subscribe to updates", err);
+    } finally {
+      this._subscribing = false;
     }
   }
 
-  // Batch operations fire one event per bottle. Coalesce them, or a scan of
-  // the whole cellar would queue one full reload per wine.
+  // Batch operations fire one event per bottle, and they pace themselves with
+  // a sleep of half a second to a second between wines. A plain debounce is
+  // the wrong shape for that: the gaps are longer than any sensible debounce,
+  // so every event would still get its own full reload. What is needed is a
+  // floor on how often the cellar is re-fetched.
+  //
+  // An already-pending refresh absorbs anything that arrives before it fires,
+  // so a tight burst still costs one reload. An isolated change still shows up
+  // within REFRESH_DEBOUNCE_MS.
   private _scheduleRefresh() {
-    if (this._refreshTimer) clearTimeout(this._refreshTimer);
+    if (this._refreshTimer) return;
+    const since = Date.now() - this._lastRefresh;
+    const wait = Math.max(REFRESH_DEBOUNCE_MS, REFRESH_MIN_INTERVAL_MS - since);
     this._refreshTimer = window.setTimeout(() => {
       this._refreshTimer = 0;
       this._loadData();
-    }, 400);
+    }, wait);
   }
 
   private async _loadData() {
@@ -497,6 +532,9 @@ export class WineCellarCard extends LitElement {
       setTimeout(() => this._loadData(), 500);
       return;
     }
+    // Counts against the refresh floor: the card's own actions already reload,
+    // and the event they cause must not reload a second time straight after.
+    this._lastRefresh = Date.now();
 
     const isInitialLoad = this._wines.length === 0 && this._cabinets.length === 0;
     if (isInitialLoad) this._loading = true;

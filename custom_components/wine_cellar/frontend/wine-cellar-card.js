@@ -3382,7 +3382,19 @@ let WineDetailDialog = class WineDetailDialog extends i {
     _updateEditField(field, value) {
         this._editData = { ...this._editData, [field]: value };
     }
+    // Applying a result to whatever is on screen now is only correct if it is
+    // still the same bottle. A Vivino refresh takes a second or two — long
+    // enough to close the dialog and open another wine — and the old result
+    // would then overwrite the new bottle wholesale, id included, silently
+    // showing the previous wine under the new one's name.
+    _applyIfStillShowing(wineId, patch) {
+        if (!this.wine || this.wine.id !== wineId)
+            return false;
+        this.wine = { ...this.wine, ...patch };
+        return true;
+    }
     async _saveFields() {
+        const wineId = this.wine?.id ?? "";
         if (!this.wine || !this.hass)
             return;
         this._saving = true;
@@ -3407,7 +3419,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
                     item_id: this.wine.id,
                     updates,
                 });
-                this.wine = { ...this.wine, ...updates };
+                if (!this._applyIfStillShowing(wineId, updates))
+                    return;
                 this._editingFields = false;
                 this._editData = {};
                 this.dispatchEvent(new CustomEvent("buy-list-updated", { bubbles: true, composed: true }));
@@ -3418,7 +3431,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
                     wine_id: this.wine.id,
                     updates,
                 });
-                this.wine = { ...this.wine, ...updates };
+                if (!this._applyIfStillShowing(wineId, updates))
+                    return;
                 this._editingFields = false;
                 this._editData = {};
                 this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
@@ -3494,6 +3508,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._tastingNotes = { ...this._tastingNotes, [field]: value };
     }
     async _saveRating() {
+        const wineId = this.wine?.id ?? "";
         if (!this.wine || !this.hass)
             return;
         this._saving = true;
@@ -3516,7 +3531,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
                     updates,
                 });
             }
-            this.wine = { ...this.wine, ...updates };
+            if (!this._applyIfStillShowing(wineId, updates))
+                return;
             this._editing = false;
             this.dispatchEvent(new CustomEvent(this.mode === "buylist" ? "buy-list-updated" : "wine-updated", { bubbles: true, composed: true }));
         }
@@ -3526,6 +3542,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._saving = false;
     }
     async _refreshFromVivino() {
+        const wineId = this.wine?.id ?? "";
         if (!this.wine || !this.hass)
             return;
         this._refreshing = true;
@@ -3552,7 +3569,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 alert(resp.error);
             }
             else if (resp.wine) {
-                this.wine = { ...this.wine, ...resp.wine };
+                if (!this._applyIfStillShowing(wineId, resp.wine))
+                    return;
                 this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
                 if (resp.vivino_image_url) {
                     this._pendingVivinoImage = resp.vivino_image_url;
@@ -3582,6 +3600,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._aiFallbackReason = null;
     }
     async _updatePhoto(image_url, field = "image_url") {
+        const wineId = this.wine?.id ?? "";
         if (!this.wine || !this.hass)
             return;
         this._photoBusy = true;
@@ -3593,7 +3612,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
             else {
                 await this.hass.callWS({ type: "wine_cellar/update_wine", wine_id: this.wine.id, updates });
             }
-            this.wine = { ...this.wine, [field]: image_url };
+            if (!this._applyIfStillShowing(wineId, { [field]: image_url }))
+                return;
             this.dispatchEvent(new CustomEvent(this.mode === "buylist" ? "buy-list-updated" : "wine-updated", { bubbles: true, composed: true }));
         }
         catch (err) {
@@ -3643,6 +3663,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
         }
     }
     async _analyzeWithAI() {
+        const wineId = this.wine?.id ?? "";
         if (!this.wine || !this.hass)
             return;
         this._analyzing = true;
@@ -3655,7 +3676,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 alert(resp.error);
             }
             else if (resp.wine) {
-                this.wine = { ...this.wine, ...resp.wine };
+                if (!this._applyIfStillShowing(wineId, resp.wine))
+                    return;
                 this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
             }
         }
@@ -8382,8 +8404,8 @@ let WineListDialog = class WineListDialog extends i {
                   ${wine.bottle_size && wine.bottle_size !== "750ml"
                 ? b `<div class="wl-detail-row"><span class="wl-detail-label">Size:</span>${wine.bottle_size}</div>`
                 : A}
-                  ${wine.vivino_ratings_count
-                ? b `<div class="wl-detail-row"><span class="wl-detail-label">Vivino:</span>${wine.vivino_rating?.toFixed(1)} (${wine.vivino_ratings_count.toLocaleString()} ratings)</div>`
+                  ${wine.vivino_rating
+                ? b `<div class="wl-detail-row"><span class="wl-detail-label">Vivino:</span>${wine.vivino_rating.toFixed(1)}${wine.vivino_ratings_count ? ` (${wine.vivino_ratings_count.toLocaleString()} ratings)` : ""}</div>`
                 : A}
                 </div>
               `
@@ -11663,6 +11685,10 @@ VivinoAiSettingsDialog = __decorate([
     t("vivino-ai-settings-dialog")
 ], VivinoAiSettingsDialog);
 
+// How long an incoming change waits before the card re-fetches, and the floor
+// on how often it may do so at all.
+const REFRESH_DEBOUNCE_MS = 400;
+const REFRESH_MIN_INTERVAL_MS = 3000;
 let WineCellarCard = class WineCellarCard extends i {
     constructor() {
         super(...arguments);
@@ -11698,7 +11724,10 @@ let WineCellarCard = class WineCellarCard extends i {
         this._showInventory = false;
         this._findingsCache = null;
         this._unsubscribe = null;
+        this._subscribing = false;
+        this._connectionGeneration = 0;
         this._refreshTimer = 0;
+        this._lastRefresh = 0;
         this._toastTimer = 0;
         this._showArrangement = false;
         this._dismissedArrangements = [];
@@ -11751,6 +11780,8 @@ let WineCellarCard = class WineCellarCard extends i {
     }
     disconnectedCallback() {
         super.disconnectedCallback();
+        // Invalidates any subscription still being set up.
+        this._connectionGeneration++;
         this._unsubscribe?.();
         this._unsubscribe = null;
         if (this._refreshTimer) {
@@ -11768,29 +11799,55 @@ let WineCellarCard = class WineCellarCard extends i {
     // until the user happened to do something that reloaded the card. That is
     // why an added bottle could look like Vivino had never been consulted.
     async _subscribeToUpdates() {
-        if (!this.hass?.connection || this._unsubscribe) {
+        if (!this.hass?.connection || this._unsubscribe || this._subscribing) {
             if (!this.hass)
                 setTimeout(() => this._subscribeToUpdates(), 500);
             return;
         }
+        this._subscribing = true;
+        const generation = this._connectionGeneration;
         try {
-            this._unsubscribe = await this.hass.connection.subscribeEvents(() => this._scheduleRefresh(), "wine_cellar_updated");
+            const unsubscribe = await this.hass.connection.subscribeEvents(() => this._scheduleRefresh(), "wine_cellar_updated");
+            // Home Assistant detaches and reattaches a dashboard view when the user
+            // switches tabs, which can happen while this is still in flight. Storing
+            // the handle now would leave a subscription nothing can ever cancel,
+            // reloading a card that is no longer on screen — once per tab switch.
+            //
+            // Keyed on a counter the detach bumps rather than on isConnected, so it
+            // holds however the element was taken down.
+            if (generation !== this._connectionGeneration) {
+                unsubscribe();
+                return;
+            }
+            this._unsubscribe = unsubscribe;
         }
         catch (err) {
             // Without this the card still works, it just will not notice background
             // work. Not worth an error the user has to dismiss.
             console.warn("Wine Cellar: could not subscribe to updates", err);
         }
+        finally {
+            this._subscribing = false;
+        }
     }
-    // Batch operations fire one event per bottle. Coalesce them, or a scan of
-    // the whole cellar would queue one full reload per wine.
+    // Batch operations fire one event per bottle, and they pace themselves with
+    // a sleep of half a second to a second between wines. A plain debounce is
+    // the wrong shape for that: the gaps are longer than any sensible debounce,
+    // so every event would still get its own full reload. What is needed is a
+    // floor on how often the cellar is re-fetched.
+    //
+    // An already-pending refresh absorbs anything that arrives before it fires,
+    // so a tight burst still costs one reload. An isolated change still shows up
+    // within REFRESH_DEBOUNCE_MS.
     _scheduleRefresh() {
         if (this._refreshTimer)
-            clearTimeout(this._refreshTimer);
+            return;
+        const since = Date.now() - this._lastRefresh;
+        const wait = Math.max(REFRESH_DEBOUNCE_MS, REFRESH_MIN_INTERVAL_MS - since);
         this._refreshTimer = window.setTimeout(() => {
             this._refreshTimer = 0;
             this._loadData();
-        }, 400);
+        }, wait);
     }
     async _loadData() {
         if (!this.hass) {
@@ -11798,6 +11855,9 @@ let WineCellarCard = class WineCellarCard extends i {
             setTimeout(() => this._loadData(), 500);
             return;
         }
+        // Counts against the refresh floor: the card's own actions already reload,
+        // and the event they cause must not reload a second time straight after.
+        this._lastRefresh = Date.now();
         const isInitialLoad = this._wines.length === 0 && this._cabinets.length === 0;
         if (isInitialLoad)
             this._loading = true;
