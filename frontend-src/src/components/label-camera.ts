@@ -1,6 +1,7 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { sharedStyles } from "../styles";
+import { cameraBlockedReason, describeCameraError } from "../utils/camera";
 
 @customElement("label-camera")
 export class LabelCamera extends LitElement {
@@ -158,6 +159,14 @@ export class LabelCamera extends LitElement {
 
   private async _startCamera() {
     this._error = "";
+    // Ask why before asking for the camera: over http:// there is nothing to
+    // ask, and a TypeError from a missing navigator.mediaDevices would read as
+    // a generic failure.
+    const blocked = cameraBlockedReason();
+    if (blocked) {
+      this._error = blocked;
+      return;
+    }
     try {
       this._stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -174,12 +183,7 @@ export class LabelCamera extends LitElement {
         video.srcObject = this._stream;
       }
     } catch (err: any) {
-      const msg = err?.message || String(err);
-      if (msg.includes("NotAllowed") || msg.includes("Permission")) {
-        this._error = "Camera access denied. Use the upload button below instead.";
-      } else {
-        this._error = "Could not access camera. Use the upload button below instead.";
-      }
+      this._error = describeCameraError(err);
     }
   }
 
@@ -285,7 +289,12 @@ export class LabelCamera extends LitElement {
 
     return html`
       ${this._error
-        ? html`<div class="error-message">${this._error}</div>`
+        ? html`
+            <div class="error-message">${this._error}</div>
+            <div class="hint">
+              The button below opens your device's own camera, which works either way.
+            </div>
+          `
         : html`
             <div class="camera-container">
               <video autoplay playsinline muted></video>
@@ -298,7 +307,7 @@ export class LabelCamera extends LitElement {
 
       <div class="fallback-area">
         <label class="file-input-label">
-          📁 Upload from gallery
+          ${this._error ? "📷 Take a photo" : "📁 Upload from gallery"}
           <input type="file" accept="image/*" capture="environment" @change=${this._onFileSelected} />
         </label>
       </div>
