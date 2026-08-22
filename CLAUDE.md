@@ -13,9 +13,11 @@ Home Assistant custom integration + Lovelace card for managing a wine cellar: ra
 
 ## Current state (as of 2026-08-22)
 
-**Latest round: PRs #22–#26 and #29 merged to fork `main`, released as `v2.13.0` (`FRONTEND_VERSION = 20260822p`).** In order: #22 suggested destinations in the add dialog, #23 iOS camera diagnostics, #24 the arrangement analysis, #25 the mobile search field, #26 Lovelace resource auto-registration, #29 Vivino enrichment on the label path plus parallel Vivino requests. (#27 and #28 were the v2.12.0 version bump and a docs refresh.)
+**Latest round: PRs #32 (rack shrinking no longer strands bottles) and #33 (photos served from disk instead of inlined in every payload) merged, released as `v2.14.0` (`FRONTEND_VERSION = 20260822q`). Not yet confirmed on the user's Synology.**
 
-**Confirmed working on the user's Synology (2026-08-22), the whole round.** Nothing from it is pending verification, so it can be built on directly.
+Before that: PRs #22–#26 and #29, released as `v2.13.0`, confirmed working. In order: #22 suggested destinations in the add dialog, #23 iOS camera diagnostics, #24 the arrangement analysis, #25 the mobile search field, #26 Lovelace resource auto-registration, #29 Vivino enrichment on the label path plus parallel Vivino requests. (#27 and #28 were the v2.12.0 version bump and a docs refresh.)
+
+**#33 changes how photos are stored** — they move out of the wine records into `<config>/wine_cellar_photos/` on first start, and the wine keeps a served URL. Backups still carry them inline by design, so an old backup restores fine and a new one stays self-contained. `upstream#22` (the Lovelace fix, PR to the original repo) is open and awaiting the maintainer.
 
 `upstream/main` has none of this — it stops at the state of upstream#21, and fork `main` and `upstream/main` were in sync before that. Nothing goes upstream without asking first, and that includes #26 even though it fixes upstream's own oldest open issue.
 
