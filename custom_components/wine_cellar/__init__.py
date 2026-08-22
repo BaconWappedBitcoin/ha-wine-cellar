@@ -26,6 +26,7 @@ from .const import (
     DOMAIN,
     FRONTEND_VERSION,
 )
+from . import photos
 from .vivino import VivinoClient
 from .websocket import async_register_websocket_commands
 from .wine_storage import WineCellarStorage
@@ -66,6 +67,12 @@ def _register_static_path(hass: HomeAssistant) -> None:
     versioned_url = f"/wine_cellar/wine-cellar-card-{FRONTEND_VERSION}.js"
     legacy_url = "/wine_cellar/wine-cellar-card.js"
 
+    # Bottle photos are served from disk rather than carried inside every wine
+    # record. Cache headers are on here, unlike the card bundle: a photo file
+    # is immutable, since replacing a photo writes a new name.
+    photo_path = str(photos.photo_dir(hass))
+    Path(photo_path).mkdir(parents=True, exist_ok=True)
+
     try:
         # Modern HA (2024.7+)
         from homeassistant.components.http import StaticPathConfig
@@ -74,6 +81,7 @@ def _register_static_path(hass: HomeAssistant) -> None:
                 [
                     StaticPathConfig(versioned_url, frontend_path, False),
                     StaticPathConfig(legacy_url, frontend_path, False),
+                    StaticPathConfig(photos.PHOTO_URL_PREFIX, photo_path, True),
                 ]
             )
         )
@@ -82,6 +90,7 @@ def _register_static_path(hass: HomeAssistant) -> None:
             # Legacy HA
             hass.http.register_static_path(versioned_url, frontend_path, cache_headers=False)
             hass.http.register_static_path(legacy_url, frontend_path, cache_headers=False)
+            hass.http.register_static_path(photos.PHOTO_URL_PREFIX, photo_path, cache_headers=True)
         except Exception:
             _LOGGER.warning("Could not register frontend static path")
 
@@ -220,6 +229,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Initialize storage
     storage = WineCellarStorage(hass)
     await storage.async_load()
+
+    # Photos used to be stored inline in each wine record, which meant every
+    # page load carried them. Move any that are still inline out to disk once,
+    # then drop files nothing refers to any more.
+    moved = await photos.externalise_all(hass, storage.wines)
+    moved += await photos.externalise_all(hass, storage.wine_history)
+    if moved:
+        await storage.async_save()
+        _LOGGER.info("Moved photos for %d bottle(s) out of the wine records", moved)
+    await photos.prune(hass, storage.wines, storage.wine_history)
 
     # Initialize Vivino client
     vivino = VivinoClient(hass)
