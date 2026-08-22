@@ -467,7 +467,8 @@ const sharedStyles = i$3 `
   }
 
   .depth-slot.highlight {
-    animation: highlightPulse 1.2s ease-in-out 2;
+    box-shadow: 0 0 0 2px rgba(196, 139, 145, 0.9);
+    animation: highlightPulse 1.2s ease-in-out 3;
   }
 
   @keyframes highlightPulse {
@@ -1499,7 +1500,9 @@ CabinetGrid.styles = [
       .locate-highlight {
         position: relative;
         z-index: 3;
-        animation: locatePulse 1.2s ease-in-out 2;
+        outline: 2px solid rgba(255, 193, 7, 0.9);
+        outline-offset: 1px;
+        animation: locatePulse 1.2s ease-in-out 3;
         border-radius: inherit;
       }
 
@@ -5465,18 +5468,18 @@ let WineSearchBar = class WineSearchBar extends i {
     constructor() {
         super(...arguments);
         this.value = "";
-        this._filter = "all";
+        this.filter = "all";
     }
     _onInput(e) {
         const value = e.target.value;
         this.dispatchEvent(new CustomEvent("search-change", {
-            detail: { query: value, filter: this._filter },
+            detail: { query: value, filter: this.filter },
             bubbles: true,
             composed: true,
         }));
     }
     _onFilterChange(filter) {
-        this._filter = filter;
+        this.filter = filter;
         const input = this.shadowRoot?.querySelector("input");
         this.dispatchEvent(new CustomEvent("search-change", {
             detail: { query: input?.value || "", filter },
@@ -5507,7 +5510,7 @@ let WineSearchBar = class WineSearchBar extends i {
         <div class="filter-chips">
           ${filters.map((f) => b `
               <button
-                class="chip ${this._filter === f.id ? "active" : ""}"
+                class="chip ${this.filter === f.id ? "active" : ""}"
                 @click=${() => this._onFilterChange(f.id)}
               >
                 ${f.label}
@@ -5596,8 +5599,8 @@ __decorate([
     n({ type: String })
 ], WineSearchBar.prototype, "value", void 0);
 __decorate([
-    r()
-], WineSearchBar.prototype, "_filter", void 0);
+    n({ type: String })
+], WineSearchBar.prototype, "filter", void 0);
 WineSearchBar = __decorate([
     t("wine-search-bar")
 ], WineSearchBar);
@@ -10793,14 +10796,21 @@ let WineCellarCard = class WineCellarCard extends i {
     _getZoneSlotLabel(_type, index) {
         return `Slot ${index + 1}`;
     }
-    // Opens the right side panel for a wine's location and briefly highlights its slot.
+    // Opens the right side panel for a wine's location and highlights its slot,
+    // both in the panel and on the rack drawing.
     _locateWine(wine) {
         const loc = getWineLocation(wine, this._cabinets);
         if (!loc.cabinet) {
             this._showToast("This wine is unassigned");
             return;
         }
-        this._activeTab = "all";
+        // An active search replaces the rack drawing with a flat result list, so
+        // locating while searching would point at a rack that isn't on screen.
+        // Locating means "show me where it is" — clear the search and open the
+        // bottle's own rack.
+        this._searchQuery = "";
+        this._searchFilter = "all";
+        this._activeTab = loc.cabinet.id;
         // Mark the bottle on the rack drawing regardless of whether a side panel
         // opens — for a plain bottom-zone bottle the drawing is the only place it
         // can be pointed at.
@@ -10814,13 +10824,30 @@ let WineCellarCard = class WineCellarCard extends i {
         else {
             this._showToast(`In ${loc.text}`);
         }
-        this.updateComplete.then(() => {
+        this.updateComplete.then(async () => {
+            // The panel slot and the rack cell live in different scroll containers,
+            // so both can be brought into view without fighting each other.
             this.shadowRoot?.getElementById("highlight-slot")?.scrollIntoView({ behavior: "smooth", block: "center" });
+            // Each cabinet-grid runs its own update cycle, so the marked cell does
+            // not exist yet when this element's update resolves — wait for the
+            // children before looking for it.
+            const grids = [...(this.shadowRoot?.querySelectorAll("cabinet-grid") || [])];
+            await Promise.all(grids.map((g) => g.updateComplete));
+            for (const grid of grids) {
+                const marked = grid.shadowRoot?.querySelector(".locate-highlight");
+                if (marked) {
+                    // Instant, not smooth: a smooth scroll is silently dropped in some
+                    // environments (reduced-motion, embedded webviews), and landing on
+                    // the bottle matters more than the animation.
+                    marked.scrollIntoView({ block: "center" });
+                    break;
+                }
+            }
         });
         setTimeout(() => {
             if (this._highlightWineId === wine.id)
                 this._highlightWineId = null;
-        }, 2500);
+        }, 4000);
     }
     // --- Rack panel (grid-slot cabinets: list + reorder) ---
     _onRackClick(e) {
@@ -11589,7 +11616,11 @@ let WineCellarCard = class WineCellarCard extends i {
         </div>
 
         <!-- Search bar -->
-        <wine-search-bar @search-change=${this._onSearch}></wine-search-bar>
+        <wine-search-bar
+          .value=${this._searchQuery}
+          .filter=${this._searchFilter}
+          @search-change=${this._onSearch}
+        ></wine-search-bar>
 
         <!-- Cabinet grids -->
         ${showGrid

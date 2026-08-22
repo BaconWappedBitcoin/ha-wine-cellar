@@ -395,7 +395,8 @@ export const sharedStyles = css`
   }
 
   .depth-slot.highlight {
-    animation: highlightPulse 1.2s ease-in-out 2;
+    box-shadow: 0 0 0 2px rgba(196, 139, 145, 0.9);
+    animation: highlightPulse 1.2s ease-in-out 3;
   }
 
   @keyframes highlightPulse {

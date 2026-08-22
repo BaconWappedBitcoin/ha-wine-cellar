@@ -161,7 +161,9 @@ export class CabinetGrid extends LitElement {
       .locate-highlight {
         position: relative;
         z-index: 3;
-        animation: locatePulse 1.2s ease-in-out 2;
+        outline: 2px solid rgba(255, 193, 7, 0.9);
+        outline-offset: 1px;
+        animation: locatePulse 1.2s ease-in-out 3;
         border-radius: inherit;
       }
 
