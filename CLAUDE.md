@@ -72,3 +72,25 @@ One branch per feature/fix, tested by the user on Synology, then PR + merge on t
 ## Persistent memory
 
 There's also a Claude auto-memory system (outside this repo) with the upstream-confirmation rule and deploy workflow — this file is the repo-visible, git-tracked counterpart so the context survives even in a fresh environment/session that doesn't have that memory loaded.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+
+**Not installed everywhere.** graphify lives on the main Mac only; `~/.claude/` is per-machine and Synology Drive skips dot-folders, so nothing above travels with the repo except this file. On a machine where `graphify` is missing — or where `graphify-out/` is absent — the rules above point at a tool that is not there. Set it up first, then rebuild the graph:
+
+```
+pipx install graphifyy      # note the double y; plain "graphify" is not on PyPI
+graphify claude install     # writes this section + two PreToolUse hooks
+graphify update .           # ~6s, no LLM calls
+```
+
+**What it is actually good for** (measured on this repo, not assumed): `graphify god-nodes` is accurate — it named `WineCellarCard`, `Wine`, `InventoryDialog` and `WineCellarStorage` as the hubs, matching what hand exploration found. `graphify query` is much weaker: asked how photos are stored it put `photos.py` first, then listed twenty unrelated nodes and truncated at "355 more nodes cut". Treat it as a **structural index, not an answering engine** — use it to orient ("where does this mechanism live"), and read the files directly to diagnose or fix, where precision matters more than orientation.
+
+Note the gemini large-file hook and graphify's hooks coexist deliberately: Claude Code runs every matching `PreToolUse` hook and any one of them can deny. The gemini hook is registered globally (absolute path, covers every project); graphify's are registered per-project. Do not merge them into one file — that is what caused the duplicate-firing this setup was cleaned up from.
