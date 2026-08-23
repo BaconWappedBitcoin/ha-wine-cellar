@@ -10,3 +10,12 @@ frontend-src/node_modules/
 # Personal/local Claude Code instructions — read automatically alongside
 # CLAUDE.md, but never committed (may reference machine-specific tooling).
 CLAUDE.local.md
+
+# graphify's generated knowledge graph — 4 MB, rebuilt from source in ~6s by
+# `graphify update .`, so it is derived data rather than something to carry in
+# the repo. The rules for using it live in CLAUDE.md.
+graphify-out/
+
+# Backup left behind by `graphify claude install` when it merged its hooks into
+# the project's .claude/settings.json.
+.claude/settings.json.graphify-bak
