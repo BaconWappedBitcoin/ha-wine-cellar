@@ -11,9 +11,11 @@ Home Assistant custom integration + Lovelace card for managing a wine cellar: ra
 - **`gh` targets upstream by default here — always pass `--repo dobunzli/ha-wine-cellar` explicitly.** With both remotes configured and no default set, `gh repo view` resolves to `BaconWappedBitcoin/ha-wine-cellar`, so a plain `gh pr create` / `gh pr merge` / `gh release create` acts on the *maintainer's* repo. Confirmed on 2026-08-19: a fork PR attempt failed with "No commits between main and …" because gh was looking at upstream; it was harmless only because the branch didn't exist there. Never rely on the default.
 - If more fork work needs to go upstream in the future, ask the user fresh each time whether they want a single comprehensive PR (simple, no dependency-chain risk) or split by feature (better for review, but only stack multiple PRs on unmerged upstream branches if the user explicitly accepts that the maintainer must then merge them in order — confirmed this constraint the hard way this round).
 
-## Current state (as of 2026-08-22)
+## Current state (as of 2026-08-23)
 
-**Latest round: PRs #32 (rack shrinking no longer strands bottles), #33 (photos served from disk instead of inlined in every payload), #35 (two code-review passes) and #37 (the areas #35 skipped) merged, released as `v2.14.2` (`FRONTEND_VERSION = 20260823c`). Not yet confirmed on the user's Synology.**
+**Latest round: PRs #32 (rack shrinking no longer strands bottles), #33 (photos served from disk instead of inlined in every payload), #35 (two code-review passes) and #37 (the areas #35 skipped) merged, released as `v2.14.2` (`FRONTEND_VERSION = 20260823c`). Confirmed working on the user's Synology (2026-08-23).**
+
+**A "price won't save" report turned out to be #35's event subscription missing from the version they were running.** The value was saved every time; the card simply never learned to re-read after a change until v2.14.2. Before chasing a save bug here, check which version is actually deployed — the same missing mechanism also produced the earlier "Vivino isn't always called" report.
 
 **Reviewing is three rounds deep now, and every round found bugs in the previous round's fixes** — treat one pass as a start, never as a verdict. #35 was two passes; #37 then audited what #35 had skipped and found real bugs in each of those areas, the worst being Vivino's HTML scrape storing `Ch\u00e2teau` instead of `Château`. Covered so far: the whole backend, the card, the add/detail/list/inventory/rack dialogs, the Vivino scrape, the CSV parser, `config_flow.py`, grid drag-and-drop. Audited and deliberately left alone because they are sound: the CSV state machine, `config_flow.py`'s key handling, the grid's drag-state cleanup.
 
