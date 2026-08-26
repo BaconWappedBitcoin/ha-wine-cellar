@@ -117,14 +117,25 @@ def _register_frontend_resource(hass: HomeAssistant) -> None:
     async def _async_add_resource(*_args) -> None:
         """Add or update Lovelace resource."""
         try:
-            resources = hass.data.get("lovelace_resources")
+            # HA >= 2024 keeps the collection at hass.data["lovelace"].resources;
+            # the old top-level "lovelace_resources" key is long gone. Looking
+            # only for the old key made this function bail out silently on
+            # every start, so a FRONTEND_VERSION bump left the stored resource
+            # pointing at a URL that is no longer served and the card 404:ed.
+            resources = getattr(hass.data.get("lovelace"), "resources", None)
             if resources is None:
-                _LOGGER.debug(
-                    "lovelace_resources not in hass.data, "
-                    "card must be added manually via Settings > Dashboards > Resources: %s",
+                resources = hass.data.get("lovelace_resources")
+            if resources is None:
+                _LOGGER.warning(
+                    "Lovelace resources unavailable; add the card manually via "
+                    "Settings > Dashboards > Resources: %s",
                     url,
                 )
                 return
+            if hasattr(resources, "async_load") and not getattr(
+                resources, "loaded", True
+            ):
+                await resources.async_load()
 
             # Check existing resources
             existing = None
