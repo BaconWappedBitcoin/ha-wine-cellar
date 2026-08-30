@@ -18,11 +18,13 @@ from .const import (
     CONF_METADATA_CURRENCY,
     CONF_METADATA_LANGUAGE,
     CONF_SERVER_BACKUP_KEEP,
+    CONF_VIVINO_MODE,
     CONF_WINE_HISTORY,
     CONF_WINES,
     DEFAULT_METADATA_CURRENCY,
     DEFAULT_METADATA_LANGUAGE,
     DEFAULT_SERVER_BACKUP_KEEP,
+    DEFAULT_VIVINO_MODE,
     DOMAIN,
     SERVER_BACKUP_KEEP_CHOICES,
     SUPPORTED_METADATA_CURRENCIES,
@@ -59,6 +61,14 @@ def _get_metadata_currency(hass: HomeAssistant) -> str:
     """Return the user's chosen currency for Vivino/AI price data."""
     storage = hass.data[DOMAIN]["storage"]
     return storage.settings.get(CONF_METADATA_CURRENCY, DEFAULT_METADATA_CURRENCY)
+
+
+def _get_vivino_mode(hass: HomeAssistant) -> str:
+    """Return the configured Vivino mode (import/sync) from the config entry."""
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if entries:
+        return entries[0].options.get(CONF_VIVINO_MODE, DEFAULT_VIVINO_MODE)
+    return DEFAULT_VIVINO_MODE
 
 
 def _select_wines(storage: Any, wine_ids: list[str] | None) -> list[dict[str, Any]]:
@@ -707,6 +717,7 @@ def ws_get_capabilities(
         {
             "has_gemini": "gemini" in domain_data,
             "has_vivino_account": "vivino_account" in domain_data,
+            "vivino_mode": _get_vivino_mode(hass),
             "metadata_language": _get_metadata_language(hass),
             "supported_languages": SUPPORTED_METADATA_LANGUAGES,
             "metadata_currency": _get_metadata_currency(hass),
