@@ -16,6 +16,9 @@ CLAUDE.local.md
 # the repo. The rules for using it live in CLAUDE.md.
 graphify-out/
 
-# Backup left behind by `graphify claude install` when it merged its hooks into
-# the project's .claude/settings.json.
+# Machine-specific Claude Code config. Hooks here carry absolute paths to
+# tooling that only exists on one machine, so committing them hands every
+# other clone a hook pointing at a binary they do not have.
+.claude/settings.json
+.claude/settings.local.json
 .claude/settings.json.graphify-bak
