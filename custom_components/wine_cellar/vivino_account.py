@@ -939,7 +939,15 @@ async def _reconcile_cellar(
         _LOGGER.debug("Vivino: fyllde i luckor på %d befintliga viner", enriched_count)
 
     # ── Apply Vivino → Cork Dork removals (unless suspicious) ─────────
+    #
+    # Obvious removals are applied directly; when a placed bottle must go
+    # and there are more candidates than removals, the remainder is queued
+    # so the user picks the actual bottle in the card instead of us guessing
+    # which physical bottle they drank. The queue is rebuilt from scratch on
+    # every reconcile, so entries vanish as soon as the user resolves them
+    # (or the discrepancy disappears some other way).
     removed = 0
+    choice_queue: dict[str, dict[str, Any]] = {}
     if plan.remove and removes_suspicious:
         result["errors"].append(
             f"Skipped removing {plan.remove_count} bottle(s): Vivino returned "
@@ -947,7 +955,25 @@ async def _reconcile_cellar(
         )
     else:
         for vid, n in plan.remove:
-            removed += storage.remove_vivino_bottles(vid, n)
+            got, need = storage.resolve_vivino_removal(vid, n)
+            removed += got
+            if need:
+                meta = vivino_state.get(vid, {}).get("wine") or {}
+                local = next(
+                    (w for w in storage.wines
+                     if str(w.get("vivino_id") or "") == str(vid)), {},
+                )
+                choice_queue[vid] = {
+                    "count": need,
+                    "name": meta.get("name") or local.get("name", ""),
+                    "winery": meta.get("winery") or local.get("winery", ""),
+                    "vintage": meta.get("vintage", local.get("vintage")),
+                    "detected_at": datetime.now(timezone.utc).isoformat(),
+                }
+        storage.set_vivino_pending_removals(choice_queue)
+    result["cellar_removal_choices"] = sum(
+        e["count"] for e in choice_queue.values()
+    )
 
     # ── Apply Cork Dork → Vivino push-back (paced + capped) ──────────
     pushed = 0
@@ -982,6 +1008,7 @@ async def _reconcile_cellar(
     corkdork_after = build_corkdork_state(storage.wines)
     unresolved: set[str] = {vid for (vid, _b, _v, _c) in plan.conflicts}
     unresolved |= {vid for (vid, _f, _t) in plan.push if vid not in succeeded}
+    unresolved |= set(choice_queue)
     if removes_suspicious:
         unresolved |= {vid for (vid, _n) in plan.remove}
 
@@ -1067,6 +1094,7 @@ async def async_sync_from_vivino(
         "cellar_pushed": 0,
         "cellar_push_failed": 0,
         "cellar_pending_push": 0,
+        "cellar_removal_choices": 0,
         "cellar_conflicts": 0,
         "conflicts_detail": [],
         "cellar_skipped_no_bottles": 0,

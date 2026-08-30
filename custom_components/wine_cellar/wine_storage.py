@@ -563,7 +563,7 @@ class WineCellarStorage:
             if w.get("vivino_id") == vivino_id
             and str(w.get("source", "")).startswith("vivino")
         ]
-        # Unassigned (no cabinet) first, then by most recently added
+        # Unassigned (no cabinet) first, then oldest added first
         matching.sort(
             key=lambda w: (
                 0 if not w.get("cabinet_id") else 1,
@@ -576,6 +576,44 @@ class WineCellarStorage:
             if self.remove_wine(wine["id"], reason=reason):
                 removed += 1
         return removed
+
+    def resolve_vivino_removal(self, vivino_id: str, count: int) -> tuple[int, int]:
+        """Apply a Vivino-side removal, but only where the choice is obvious.
+
+        Removes automatically when no real choice exists: every bottle of the
+        wine is gone, unassigned bottles cover the removal, or the remainder
+        equals all placed bottles. When a placed bottle must go and there are
+        more candidates than removals, nothing further is removed — the
+        remainder is returned so the caller can queue it for the user to pick
+        the actual bottle in the card. Returns (removed, needing_choice).
+        """
+        if count <= 0:
+            return (0, 0)
+        matching = [
+            w for w in self._data.get(CONF_WINES, [])
+            if w.get("vivino_id") == vivino_id
+            and str(w.get("source", "")).startswith("vivino")
+        ]
+        if count >= len(matching):
+            return (self.remove_vivino_bottles(vivino_id, count), 0)
+
+        matching.sort(key=lambda w: w.get("added_at", ""))
+        unassigned = [w for w in matching if not w.get("cabinet_id")]
+        placed = [w for w in matching if w.get("cabinet_id")]
+
+        removed = 0
+        for wine in unassigned[:count]:
+            if self.remove_wine(wine["id"], reason="removed_on_vivino"):
+                removed += 1
+        remaining = count - removed
+        if remaining <= 0:
+            return (removed, 0)
+        if remaining >= len(placed):
+            for wine in placed:
+                if self.remove_wine(wine["id"], reason="removed_on_vivino"):
+                    removed += 1
+            return (removed, 0)
+        return (removed, remaining)
 
     def get_vivino_baseline(self) -> dict[str, Any]:
         """Return the last-synced Vivino cellar baseline (vivino_id -> entry)."""
@@ -594,6 +632,19 @@ class WineCellarStorage:
     def set_vivino_pending_push(self, pending: list[dict[str, Any]]) -> None:
         """Store queued Cork Dork -> Vivino changes (Phase 2 write-back)."""
         self._data["vivino_pending_push"] = pending
+
+    def get_vivino_pending_removals(self) -> dict[str, Any]:
+        """Return Vivino-side removals awaiting the user's bottle choice.
+
+        Keyed by vivino_id; each entry carries the outstanding count plus
+        display fields for the card's pick-a-bottle flow.
+        """
+        pending = self._data.get("vivino_pending_removals")
+        return pending if isinstance(pending, dict) else {}
+
+    def set_vivino_pending_removals(self, pending: dict[str, Any]) -> None:
+        """Store Vivino-side removals awaiting the user's bottle choice."""
+        self._data["vivino_pending_removals"] = pending
 
     # ── Backup / Restore ─────────────────────────────────────────────
 

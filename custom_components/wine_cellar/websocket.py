@@ -324,6 +324,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_cabinets)
     websocket_api.async_register_command(hass, ws_add_wine)
     websocket_api.async_register_command(hass, ws_remove_wine)
+    websocket_api.async_register_command(hass, ws_get_pending_removals)
+    websocket_api.async_register_command(hass, ws_resolve_vivino_removal)
     websocket_api.async_register_command(hass, ws_update_wine)
     websocket_api.async_register_command(hass, ws_move_wine)
     websocket_api.async_register_command(hass, ws_lookup_barcode)
@@ -457,6 +459,63 @@ async def ws_remove_wine(
         await storage.async_save()
         hass.bus.async_fire(f"{DOMAIN}_updated")
     connection.send_result(msg["id"], {"success": success})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "wine_cellar/get_pending_removals"}
+)
+@callback
+def ws_get_pending_removals(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return Vivino-side removals awaiting the user's bottle choice."""
+    storage = hass.data[DOMAIN]["storage"]
+    connection.send_result(
+        msg["id"], {"pending_removals": storage.get_vivino_pending_removals()}
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "wine_cellar/resolve_vivino_removal",
+        vol.Required("wine_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_resolve_vivino_removal(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Remove the bottle the user picked for a pending Vivino removal."""
+    storage = hass.data[DOMAIN]["storage"]
+    wine = next(
+        (w for w in storage.wines if w.get("id") == msg["wine_id"]), None
+    )
+    if not wine:
+        connection.send_result(msg["id"], {"error": "Wine not found."})
+        return
+    vid = str(wine.get("vivino_id") or "")
+    pending = storage.get_vivino_pending_removals()
+    entry = pending.get(vid)
+    if not entry:
+        connection.send_result(
+            msg["id"], {"error": "No pending Vivino removal for this wine."}
+        )
+        return
+    success = storage.remove_wine(msg["wine_id"], reason="removed_on_vivino")
+    if success:
+        entry["count"] = int(entry.get("count", 1)) - 1
+        if entry["count"] <= 0:
+            pending.pop(vid, None)
+        storage.set_vivino_pending_removals(pending)
+        await storage.async_save()
+        hass.bus.async_fire(f"{DOMAIN}_updated")
+    connection.send_result(
+        msg["id"], {"success": success, "pending_removals": pending}
+    )
 
 
 @websocket_api.websocket_command(

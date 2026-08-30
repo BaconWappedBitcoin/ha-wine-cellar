@@ -36,6 +36,9 @@ export interface Wine {
   user_rating: number | null;
   tasting_notes: TastingNotes | null;
   added_at: string;
+  // Where the bottle came from ("vivino_cellar", "manual", ...). Bottles
+  // whose source starts with "vivino" take part in Vivino reconciliation.
+  source?: string;
   disposition: string;
   drink_window: string;
   ai_ratings: Record<string, number> | null;
