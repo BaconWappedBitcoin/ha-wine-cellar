@@ -11779,6 +11779,9 @@ let WineCellarCard = class WineCellarCard extends i {
         this._vivinoConflicts = [];
         this._conflictFocusVid = null;
         this._conflictConfirmVid = null;
+        // vivino_id currently being pushed to Vivino (the write plus its
+        // verification can take several seconds)
+        this._conflictResolving = null;
         this._metadataLanguage = "en";
         this._supportedLanguages = ["en", "fr", "de"];
         this._metadataCurrency = "USD";
@@ -13125,9 +13128,10 @@ let WineCellarCard = class WineCellarCard extends i {
     }
     async _confirmConflictResolution() {
         const vid = this._conflictConfirmVid;
-        if (!vid)
+        if (!vid || this._conflictResolving)
             return;
         this._conflictConfirmVid = null;
+        this._conflictResolving = vid;
         const target = this._removalCandidates(vid).length;
         try {
             const res = await this.hass.callWS({
@@ -13145,6 +13149,9 @@ let WineCellarCard = class WineCellarCard extends i {
         }
         catch {
             this._showToast("Failed to update Vivino.");
+        }
+        finally {
+            this._conflictResolving = null;
         }
     }
     _bottlePosition(wine) {
@@ -13569,11 +13576,14 @@ let WineCellarCard = class WineCellarCard extends i {
                     </div>
                     <button
                       class="btn btn-primary conflict-confirm"
+                      ?disabled=${this._conflictResolving !== null}
                       @click=${(e) => {
                 e.stopPropagation();
                 this._conflictConfirmVid = vid;
             }}
-                    >Cork Dork is right — set Vivino to ${cdNow}</button>
+                    >${this._conflictResolving === vid
+                ? "Syncing to Vivino..."
+                : `Cork Dork is right — set Vivino to ${cdNow}`}</button>
                   ` : A}
                 `;
         })}
@@ -14495,6 +14505,11 @@ WineCellarCard.styles = [
         margin: 4px 0 6px;
       }
 
+      .conflict-confirm:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+
       .header-row {
         display: flex;
         align-items: center;
@@ -14905,6 +14920,9 @@ __decorate([
 __decorate([
     r()
 ], WineCellarCard.prototype, "_conflictConfirmVid", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_conflictResolving", void 0);
 __decorate([
     r()
 ], WineCellarCard.prototype, "_metadataLanguage", void 0);
