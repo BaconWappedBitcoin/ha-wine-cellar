@@ -350,6 +350,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_server_backup_save)
     websocket_api.async_register_command(hass, ws_server_backup_list)
     websocket_api.async_register_command(hass, ws_server_backup_restore)
+    websocket_api.async_register_command(hass, ws_sync_vivino)
+    websocket_api.async_register_command(hass, ws_vivino_status)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "wine_cellar/get_wines"})
@@ -699,10 +701,12 @@ def ws_get_capabilities(
     msg: dict[str, Any],
 ) -> None:
     """Return integration capabilities."""
+    domain_data = hass.data.get(DOMAIN, {})
     connection.send_result(
         msg["id"],
         {
-            "has_gemini": "gemini" in hass.data.get(DOMAIN, {}),
+            "has_gemini": "gemini" in domain_data,
+            "has_vivino_account": "vivino_account" in domain_data,
             "metadata_language": _get_metadata_language(hass),
             "supported_languages": SUPPORTED_METADATA_LANGUAGES,
             "metadata_currency": _get_metadata_currency(hass),
@@ -1714,6 +1718,86 @@ async def ws_import_wines(
             "imported": counts["added"],
             "updated": counts["updated"],
             "location_skipped": counts["location_skipped"],
+        },
+    )
+
+
+# ── Vivino Account Sync ──────────────────────────────────────────────
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "wine_cellar/sync_vivino",
+        vol.Optional("target", default="all"): vol.In(
+            ["all", "cellar", "wishlist", "my_wines"]
+        ),
+    }
+)
+@websocket_api.async_response
+async def ws_sync_vivino(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Sync the user's Vivino cellar/wishlist into local storage."""
+    client = hass.data[DOMAIN].get("vivino_account")
+    if not client:
+        connection.send_result(
+            msg["id"],
+            {
+                "error": "No Vivino account configured. Add your Vivino email "
+                "and password via Settings > Integrations > Cork Dork > Configure.",
+            },
+        )
+        return
+
+    from .vivino_account import VivinoAuthError, async_sync_from_vivino
+
+    storage = hass.data[DOMAIN]["storage"]
+    target = msg.get("target", "all")
+    try:
+        result = await async_sync_from_vivino(
+            hass,
+            storage,
+            client,
+            sync_cellar=target in ("all", "cellar"),
+            sync_wishlist=target in ("all", "wishlist"),
+            sync_my_wines=target in ("all", "my_wines"),
+        )
+    except VivinoAuthError as err:
+        connection.send_result(msg["id"], {"error": f"Vivino login failed: {err}"})
+        return
+    except Exception as err:
+        _LOGGER.warning("Vivino sync failed: %s", err)
+        connection.send_result(msg["id"], {"error": str(err)})
+        return
+
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "wine_cellar/vivino_status"})
+@callback
+def ws_vivino_status(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return Vivino account connection status and last sync result."""
+    domain_data = hass.data.get(DOMAIN, {})
+    client = domain_data.get("vivino_account")
+    storage = domain_data.get("storage")
+    last_sync = None
+    if storage:
+        last_sync = storage.get_vivino_sync_status()
+    if not last_sync:
+        last_sync = domain_data.get("vivino_sync_status")
+    connection.send_result(
+        msg["id"],
+        {
+            "configured": client is not None,
+            "user_id": client.user_id if client else None,
+            "alias": client.alias if client else "",
+            "last_sync": last_sync,
         },
     )
 

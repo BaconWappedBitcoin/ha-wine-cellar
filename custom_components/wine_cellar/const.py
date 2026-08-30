@@ -98,7 +98,15 @@ CONF_SERVER_BACKUP_KEEP = "server_backup_keep"
 DEFAULT_SERVER_BACKUP_KEEP = 10
 SERVER_BACKUP_KEEP_CHOICES = [0, 5, 10, 20, 50]
 
+# Vivino account sync (from upstream): the session cookie + cellar URL identify
+# the account, and the optional timer re-syncs on this interval.
+CONF_VIVINO_SESSION_COOKIE = "vivino_session_cookie"
+CONF_VIVINO_CELLAR_URL = "vivino_cellar_url"
+CONF_VIVINO_AUTO_SYNC = "vivino_auto_sync"
+
+VIVINO_AUTO_SYNC_INTERVAL_HOURS = 12
+
 ATTR_TOTAL_BOTTLES = "total_bottles"
 ATTR_TOTAL_CAPACITY = "total_capacity"
 
-FRONTEND_VERSION = "20260823c"
+FRONTEND_VERSION = "20260830a"

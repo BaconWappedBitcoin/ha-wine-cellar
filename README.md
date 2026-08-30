@@ -66,6 +66,9 @@ A custom Home Assistant integration for managing your wine collection. Track bot
 - **Auto-Enrich on Add** — When you add a wine, Vivino data (rating, price, description, food pairings) is automatically fetched in the background
 
 ### Vivino Integration
+- **Cellar Sync** — Connect your Vivino cellar by pasting your cellar URL and session cookie once (see **[docs/vivino-import.md](docs/vivino-import.md)**). One-tap 🔄 Vivino Sync then imports every bottle you own (with ratings, images, region, grape data, and your personal star ratings/notes) as unassigned wines. Bottle counts are respected and already-imported bottles are never duplicated.
+- **Auto Sync** — Optionally sync the cellar automatically twice a day. When the session cookie expires, a notification prompts you to paste a fresh one.
+- **Sync Service & Sensor** — `wine_cellar.sync_vivino` service for automations plus a `Cork Dork Vivino Cellar` sensor reporting the last sync
 - **Vivino Batch Scan** — Refresh all wines from Vivino in one click: ratings, review counts, market pricing, descriptions, food pairings, alcohol content, and grape variety. Falls back to Gemini AI pricing when Vivino has no price.
 - **Individual Vivino Refresh** — Update any single wine's Vivino data from the detail dialog
 - **Wine Search** — Search Vivino by name to find and add wines without a barcode
@@ -126,6 +129,23 @@ To enable label recognition, AI analysis, wine list scanning, and batch AI scann
    - **Scan List** button to photograph wine lists and receipts for instant analysis
    - **Gemini price fallback** when Vivino has no pricing data
 
+### Connecting Your Vivino Cellar
+
+Vivino has no public read API for your own cellar — the site uses a Rails
+session cookie and serves the cellar from an Inertia.js endpoint on
+`www.vivino.com` (not the `api.vivino.com` mobile backend). Cork Dork reads it
+by replaying a session cookie you paste from your browser.
+
+- **[docs/vivino-import.md](docs/vivino-import.md)** has full instructions for
+  both methods:
+  - **Integration sync (recommended):** paste your cellar URL and session cookie
+    in **Cork Dork → Configure**, then use **🔄 Vivino Sync** (or enable twice-daily
+    auto-sync). When the cookie expires, a notification prompts you to refresh it.
+  - **One-time CSV export:** run a browser-console snippet and load the file via
+    **📦 Inventory → Import CSV**.
+- After importing, **🍇 Vivino Batch Scan** enriches wines with ratings, pricing,
+  descriptions, and images from Vivino's public data.
+
 ## Default Cabinet Layout
 
 The integration ships with 3 cabinet sections, each with 10 rows and 9 columns (90 slots per section, 270 total). The bottom row of each section defaults to a bulk bin storage zone. Rack dimensions (up to 20×20), names, depth (1-6 bottles deep), and per-row storage types (Slots, Bulk Bin, Wine Box) can all be customized through the **Manage Racks** button in the tab bar.
@@ -147,6 +167,7 @@ The integration ships with 3 cabinet sections, each with 10 rows and 9 columns (
 | `wine_cellar.remove_wine` | Remove a wine bottle (optional reason: drank, gifted, sold, broken, spoiled, other) |
 | `wine_cellar.move_wine` | Move a wine to a different cabinet/position |
 | `wine_cellar.scan_barcode` | Look up a barcode and fire a result event |
+| `wine_cellar.sync_vivino` | Import your Vivino cellar and wishlist (target: all, cellar, or wishlist) |
 
 ## Sensors
 
@@ -155,6 +176,7 @@ The integration ships with 3 cabinet sections, each with 10 rows and 9 columns (
 | `sensor.wine_cellar_total_bottles` | Total number of bottles in your cellar |
 | `sensor.wine_cellar_capacity` | Percentage of cellar capacity used |
 | `sensor.wine_cellar_cabinet_*_count` | Bottle count per cabinet section |
+| `sensor.cork_dork_vivino_cellar` | Bottles in your Vivino cellar at last sync (with sync details as attributes) |
 
 ## License
 
