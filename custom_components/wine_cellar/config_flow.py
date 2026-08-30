@@ -21,6 +21,9 @@ from .const import (
     CONF_AI_PROVIDER,
     CONF_GEMINI_API_KEY,
     CONF_GEMINI_MODEL,
+    CONF_VIVINO_AUTO_SYNC,
+    CONF_VIVINO_CELLAR_URL,
+    CONF_VIVINO_SESSION_COOKIE,
     DEFAULT_AI_PROVIDER,
     DEFAULT_GEMINI_MODEL,
     DOMAIN,
@@ -71,6 +74,8 @@ class WineCellarOptionsFlow(OptionsFlow):
         if user_input is not None:
             errors = await self._async_validate_ai_provider(user_input)
             if not errors:
+                errors = await self._async_validate_vivino(user_input)
+            if not errors:
                 return self.async_create_entry(title="", data=user_input)
 
         # On validation errors re-show the form with the entered values so
@@ -110,9 +115,63 @@ class WineCellarOptionsFlow(OptionsFlow):
                         CONF_AI_MODEL,
                         default=current.get(CONF_AI_MODEL, ""),
                     ): str,
+                    vol.Optional(
+                        CONF_VIVINO_CELLAR_URL,
+                        default=current.get(CONF_VIVINO_CELLAR_URL, ""),
+                    ): str,
+                    vol.Optional(
+                        CONF_VIVINO_SESSION_COOKIE,
+                        default=current.get(CONF_VIVINO_SESSION_COOKIE, ""),
+                    ): str,
+                    vol.Optional(
+                        CONF_VIVINO_AUTO_SYNC,
+                        default=current.get(CONF_VIVINO_AUTO_SYNC, False),
+                    ): bool,
                 }
             ),
         )
+
+    async def _async_validate_vivino(
+        self, user_input: dict[str, Any]
+    ) -> dict[str, str]:
+        """Test the Vivino session cookie against the cellar. Returns errors."""
+        cookie = (user_input.get(CONF_VIVINO_SESSION_COOKIE) or "").strip()
+        cellar_url = (user_input.get(CONF_VIVINO_CELLAR_URL) or "").strip()
+
+        if not cookie and not cellar_url:
+            return {}  # Vivino connection intentionally not configured
+        if not cookie or not cellar_url:
+            return {"base": "vivino_incomplete"}
+
+        # Only re-verify when the cookie or URL actually changed
+        options = self.config_entry.options
+        if (
+            cookie == options.get(CONF_VIVINO_SESSION_COOKIE)
+            and cellar_url == options.get(CONF_VIVINO_CELLAR_URL)
+        ):
+            return {}
+
+        from .vivino_account import (
+            VivinoAccountClient,
+            VivinoAuthError,
+            VivinoConnectionError,
+        )
+
+        client = VivinoAccountClient(self.hass, cookie, cellar_url)
+        try:
+            result = await client.async_verify()
+        except VivinoAuthError as err:
+            _LOGGER.warning("Vivino cookie check failed: %s", err)
+            return {"base": "vivino_invalid_auth"}
+        except VivinoConnectionError as err:
+            _LOGGER.warning("Vivino connection test failed: %s", err)
+            return {"base": "vivino_cannot_connect"}
+        except Exception:  # noqa: BLE001 - surface as a form error, not a crash
+            _LOGGER.exception("Unexpected error verifying Vivino cookie")
+            return {"base": "vivino_cannot_connect"}
+        _LOGGER.debug("Vivino cookie verified; first page wines: %s",
+                      result.get("first_page_wines"))
+        return {}
 
     async def _async_validate_ai_provider(
         self, user_input: dict[str, Any]
