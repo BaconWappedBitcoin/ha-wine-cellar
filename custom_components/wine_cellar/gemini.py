@@ -718,16 +718,14 @@ class GeminiVisionClient(BaseAIClient):
             timeout = aiohttp.ClientTimeout(total=timeout_s)
             async with session.post(
                 self._api_url,
-                params={"key": self._api_key},
+                headers={"x-goog-api-key": self._api_key},
                 json=body,
                 timeout=timeout,
             ) as resp:
                 resp_text = await resp.text()
 
                 if resp.status in (401, 403):
-                    _LOGGER.error(
-                        "Gemini API key is invalid (status %s): %s", resp.status, resp_text[:200]
-                    )
+                    _LOGGER.error("Gemini API authentication failed (status %s)", resp.status)
                     return {"error": f"Gemini API key is invalid (HTTP {resp.status})"}
 
                 if resp.status == 429:
