@@ -15,6 +15,7 @@
     "step": {
       "init": {
         "title": "Cork Dork Options",
+        "description": "To sync your Vivino cellar, paste your cellar page URL and your Vivino session cookie (see the docs: docs/vivino-import.md). The cookie is verified against your cellar when you save.",
         "data": {
           "default_wine_type": "Default wine type for new entries",
           "ai_provider": "AI provider",
@@ -22,20 +23,27 @@
           "gemini_model": "Gemini model name",
           "ai_base_url": "AI base URL (used when provider is OpenAI-compatible)",
           "ai_api_key": "AI API key (Bearer token)",
-          "ai_model": "AI model name"
+          "ai_model": "AI model name",
+          "vivino_cellar_url": "Vivino cellar page URL",
+          "vivino_session_cookie": "Vivino session cookie (from your logged-in browser)",
+          "vivino_auto_sync": "Automatically sync the Vivino cellar twice a day"
         },
         "data_description": {
           "gemini_model": "Format: gemini-2.5-flash",
           "ai_base_url": "Format: https://host or https://host/your-path — with or without a trailing /v1/chat/completions, either works",
           "ai_api_key": "Sent as header: Authorization: Bearer {key}",
-          "ai_model": "Format: the exact model name your provider expects, e.g. gemini-2.5-flash"
+          "ai_model": "Format: the exact model name your provider expects, e.g. gemini-2.5-flash",
+          "vivino_cellar_url": "Open your cellar in a browser and copy the address from the address bar. It ends with /cellars/ and your cellar number."
         }
       }
     },
     "error": {
       "ai_provider_incomplete": "Base URL, API key, and model are all required for an OpenAI-compatible provider.",
       "ai_provider_invalid_auth": "The AI API key was rejected by the endpoint.",
-      "ai_provider_cannot_connect": "Could not connect to the AI base URL. Check the address and try again."
+      "ai_provider_cannot_connect": "Could not connect to the AI base URL. Check the address and try again.",
+      "vivino_invalid_auth": "Vivino rejected the session cookie — it may be expired or wrong. Paste a fresh one from your logged-in browser.",
+      "vivino_cannot_connect": "Could not reach Vivino — check your network connection and try again.",
+      "vivino_incomplete": "Enter both the cellar URL and the session cookie, or leave both empty to disable the connection."
     }
   }
 }

@@ -109,3 +109,27 @@ scan_barcode:
       required: true
       selector:
         text:
+
+sync_vivino:
+  name: Sync Vivino
+  description: >-
+    Import your Vivino cellar and wishlist into Cork Dork. New cellar bottles
+    are added as unassigned wines and wishlist wines go to the buy list.
+    Requires Vivino credentials in the integration options.
+  fields:
+    target:
+      name: Target
+      description: >-
+        What to sync from your Vivino account. "cellar" is the Vivino Premium
+        Wine Cellar; "my_wines" imports your rated/scanned wines that have a
+        bottle count greater than zero (rated wines without bottles are
+        skipped); "wishlist" goes to the buy list. "all" syncs everything
+        available.
+      default: all
+      selector:
+        select:
+          options:
+            - all
+            - cellar
+            - wishlist
+            - my_wines

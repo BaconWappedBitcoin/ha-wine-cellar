@@ -8902,11 +8902,13 @@ let WineCellarCard = class WineCellarCard extends i {
         this._movingWine = null;
         this._analyzing = false;
         this._batchVivino = false;
+        this._vivinoSyncing = false;
         this._showBatchVivinoConfirm = false;
         this._showBatchAiConfirm = false;
         this._batchAiFallback = false;
         this._toast = "";
         this._hasGemini = false;
+        this._hasVivinoAccount = false;
         this._metadataLanguage = "en";
         this._supportedLanguages = ["en", "fr", "de"];
         this._metadataCurrency = "USD";
@@ -8983,6 +8985,7 @@ let WineCellarCard = class WineCellarCard extends i {
             this._cabinets = (cabinetsResult.cabinets || []).sort((a, b) => a.order - b.order);
             this._stats = statsResult;
             this._hasGemini = capResult?.has_gemini || false;
+            this._hasVivinoAccount = capResult?.has_vivino_account || false;
             this._metadataLanguage = capResult?.metadata_language || "en";
             this._supportedLanguages = capResult?.supported_languages || ["en", "fr", "de"];
             this._metadataCurrency = capResult?.metadata_currency || "USD";
@@ -9942,6 +9945,35 @@ let WineCellarCard = class WineCellarCard extends i {
         }
         this._batchVivino = false;
     }
+    // --- Vivino Account Sync ---
+    async _syncVivino() {
+        this._vivinoSyncing = true;
+        this._showToast("Syncing your Vivino cellar & wishlist...");
+        try {
+            const result = await this.hass.callWS({
+                type: "wine_cellar/sync_vivino",
+            });
+            if (result.error) {
+                this._showToast(`Vivino sync failed: ${result.error}`);
+            }
+            else {
+                const bottles = (result.cellar_imported || 0) + (result.my_wines_imported || 0);
+                const parts = [
+                    `Vivino sync complete! ${bottles} bottle${bottles === 1 ? "" : "s"} imported`,
+                ];
+                if (result.wishlist_imported > 0)
+                    parts.push(`+ ${result.wishlist_imported} to buy list`);
+                if (result.errors?.length)
+                    parts.push(`(${result.errors.length} errors)`);
+                this._showToast(parts.join(" "));
+                await this._loadData();
+            }
+        }
+        catch (err) {
+            this._showToast("Vivino sync failed.");
+        }
+        this._vivinoSyncing = false;
+    }
     // --- Buy List ---
     _showBuyListDetail(item) {
         this._selectedWine = item;
@@ -10062,6 +10094,17 @@ let WineCellarCard = class WineCellarCard extends i {
             >
               ${this._batchVivino ? "Vivino Scanning..." : "🍇 Vivino Batch Scan"}
             </button>
+            ${this._hasVivinoAccount ? b `
+              <button
+                class="btn btn-primary"
+                style="font-size: 0.8em; padding: 5px 10px; background: #b71c1c;"
+                @click=${this._syncVivino}
+                title="Import your Vivino cellar and wishlist into Cork Dork"
+                ?disabled=${this._vivinoSyncing || this._batchVivino || this._analyzing}
+              >
+                ${this._vivinoSyncing ? "Vivino Syncing..." : "🔄 Vivino Sync"}
+              </button>
+            ` : A}
             ${this._hasGemini ? b `
               <button
                 class="btn btn-primary"
@@ -11306,6 +11349,9 @@ __decorate([
 ], WineCellarCard.prototype, "_batchVivino", void 0);
 __decorate([
     r()
+], WineCellarCard.prototype, "_vivinoSyncing", void 0);
+__decorate([
+    r()
 ], WineCellarCard.prototype, "_showBatchVivinoConfirm", void 0);
 __decorate([
     r()
@@ -11319,6 +11365,9 @@ __decorate([
 __decorate([
     r()
 ], WineCellarCard.prototype, "_hasGemini", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_hasVivinoAccount", void 0);
 __decorate([
     r()
 ], WineCellarCard.prototype, "_metadataLanguage", void 0);

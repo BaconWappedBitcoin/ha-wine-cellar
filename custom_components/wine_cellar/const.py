@@ -85,7 +85,13 @@ SUPPORTED_METADATA_CURRENCIES = ["USD", "EUR", "GBP", "CHF"]
 # applying automatically. "always" skips asking and just uses AI every time.
 CONF_AI_FALLBACK_ALWAYS = "ai_fallback_always"
 
+CONF_VIVINO_SESSION_COOKIE = "vivino_session_cookie"
+CONF_VIVINO_CELLAR_URL = "vivino_cellar_url"
+CONF_VIVINO_AUTO_SYNC = "vivino_auto_sync"
+
+VIVINO_AUTO_SYNC_INTERVAL_HOURS = 12
+
 ATTR_TOTAL_BOTTLES = "total_bottles"
 ATTR_TOTAL_CAPACITY = "total_capacity"
 
-FRONTEND_VERSION = "20260818d"
+FRONTEND_VERSION = "20260822a"
