@@ -1,7 +1,13 @@
 name: Validate
 
 on:
+  # Branch pushes are covered by pull_request. Firing on every push too
+  # meant each PR branch ran the suite twice, and the second copy was still
+  # in flight when the branch got deleted on merge - hacs/action then asked
+  # GitHub for a ref that no longer existed and failed the run with
+  # "Repository ... not loaded properly in HACS".
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
