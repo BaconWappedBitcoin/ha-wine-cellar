@@ -26,6 +26,7 @@ from .const import (
     DEFAULT_SERVER_BACKUP_KEEP,
     DEFAULT_VIVINO_MODE,
     DOMAIN,
+    VIVINO_MODE_SYNC,
     SERVER_BACKUP_KEEP_CHOICES,
     SUPPORTED_METADATA_CURRENCIES,
     SUPPORTED_METADATA_LANGUAGES,
@@ -555,22 +556,37 @@ async def ws_resolve_vivino_conflict(
     if not client:
         connection.send_result(msg["id"], {"error": "No Vivino account configured."})
         return
+    if _get_vivino_mode(hass) != VIVINO_MODE_SYNC:
+        connection.send_result(
+            msg["id"],
+            {"error": "Import mode never writes to Vivino — switch the Vivino "
+                      "mode to Synchronize to push this count."},
+        )
+        return
 
     vid = str(msg["vivino_id"])
     cd_count = build_corkdork_state(storage.wines).get(vid, 0)
     try:
         vivino_count = await client._count_for_vintage(int(vid))
         delta = cd_count - vivino_count
-        if delta != 0:
+        ok = delta == 0
+        if not ok:
             res = await client.async_change_bottles(
                 int(vid), delta, comment="Cork Dork conflict resolution"
             )
-            if not res.get("ok"):
-                connection.send_result(
-                    msg["id"],
-                    {"error": f"Vivino did not accept the change ({vivino_count} -> {cd_count})."},
-                )
-                return
+            ok = bool(res.get("ok"))
+            if not ok:
+                # Vivino often serves a stale count right after accepting its
+                # own write, which makes an applied change look failed. Give
+                # it a moment and verify against a fresh read before ruling.
+                await asyncio.sleep(3)
+                ok = await client._count_for_vintage(int(vid)) == cd_count
+        if not ok:
+            connection.send_result(
+                msg["id"],
+                {"error": f"Vivino did not accept the change ({vivino_count} -> {cd_count})."},
+            )
+            return
     except Exception as err:  # noqa: BLE001 - surfaced to the card
         connection.send_result(msg["id"], {"error": f"Vivino update failed: {err}"})
         return
