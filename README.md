@@ -30,19 +30,27 @@ A custom Home Assistant integration for managing your wine collection. Track bot
 - **Zone Side Panel** — Click any storage zone container to open a slide-out panel (same UX as the depth panel) showing all wines in that zone with add/remove capability.
 - **Per-Row Type Selector** — Each rack row can be independently set to Slots (grid), Bulk Bin, or Wine Box via the rack settings dialog.
 
+### Cellar Arrangement
+- **Tidy-Up Analysis** — A counter in the header ("2 tidy-ups") opens a report of what has drifted out of order. It finds three things: bottles of one wine scattered across several places, a container dominated by one wine type with one or two odd ones out, and a bottle due to be drunk soon that is stuck behind bottles you are holding.
+- **Act or Dismiss** — Each finding proposes concrete moves. "I moved it" records the move so the cellar matches reality; dismissing a finding retires it for good, so a suggestion you have judged and rejected never comes back on re-analysis.
+- **Suggested Destination** — When you add a bottle, Cork Dork proposes where it should go, based on where its relatives already live: the same wine first, then the same winery, then the same region and type. If the natural home is full, it looks for space in the same cabinet, preferring a container that already holds matching bottles.
+- **Multi-Bottle Add** — Add several identical bottles in one step from the confirmation screen, with placement planned across the free slots.
+
 ### Inventory Browser & Wine History
 - **Full Inventory Dialog** — Browse, search, sort, and export your entire cellar collection from the 📦 Inventory button
 - **Wine History** — Track removed bottles with reason (Drank, Gifted, Sold, Broken, Spoiled, Other). Switch between Inventory and History tabs to see your consumption log sorted by date.
 - **Multi-Field Search** — Search across name, winery, region, country, grape variety, vintage, barcode, notes, and description
-- **Sort Options** — Sort by name, winery, vintage, type, rating, price, date added, or cabinet location (ascending/descending)
+- **Sort Options** — Sort by name, winery, vintage, type, rating, your own rating, price, drink-by date, urgency, purchase date, date added, or cabinet location (ascending/descending)
 - **Type Filter Chips** — Quick-filter by wine type (All / Red / White / Rosé / Sparkling / Dessert)
+- **Detailed Filters** — Narrow by country, grape, cabinet, food pairing, minimum rating, maximum price, and vintage range
+- **Presets** — One-tap views for the questions actually worth asking: Drink this year, Past peak, Not rated, Missing data, Added recently
 - **Summary Stats** — Total bottles, estimated collection value, and type breakdown with colored indicators
 - **Disposition Search** — Search by "Drink", "Hold", or "Past Peak" to filter by disposition; also searches drink window field
 - **CSV Export** — Download your filtered/sorted inventory as a date-stamped CSV file with 26 data columns
-- **Server Backup** — Save timestamped backups to the HA server (config/wine_cellar_backups/) with one click
+- **Server Backup** — Save timestamped backups to the HA server (config/wine_cellar_backups/) with one click. Old backups are pruned automatically; how many to keep is configurable (0 keeps every one forever).
 - **Server Restore** — Browse and restore from any previous server backup with a date/size picker
 - **Download/Upload** — Download the full cellar as JSON or upload a JSON backup to restore
-- **CSV Import** — Import wines from a CSV file
+- **CSV Import** — Import wines from a CSV file, either adding every row as a new bottle or updating existing wines matched by id
 - **Click to Detail** — Tap any wine in the inventory to open the full detail dialog with edit, move, and action capabilities
 
 ### Unassigned Wines
@@ -88,6 +96,10 @@ A custom Home Assistant integration for managing your wine collection. Track bot
 - **AI Critic Estimates** — Gemini provides estimated scores from Wine Spectator, Robert Parker, James Dunnuck, and Antonio Galloni
 - **Vivino Community Ratings** — Real ratings and review counts from Vivino's user base
 
+### Language & Currency
+- **Metadata Language** — Ask the AI for descriptions, food pairings and tasting notes in English, French or German
+- **Multiple Currencies** — Record and display prices in USD, EUR, GBP or CHF, with cellar value and gain/loss following the currency you chose
+
 ### Home Assistant Integration
 - **HA Sensors** — Entities for total bottles, capacity percentage, and per-cabinet counts for use in automations and dashboards
 - **Services** — Automate adding, removing, and moving wines via HA services
@@ -131,6 +143,13 @@ To enable label recognition, AI analysis, wine list scanning, and batch AI scann
    - **AI Batch Scan** button in the card header (analyze all wines at once)
    - **Scan List** button to photograph wine lists and receipts for instant analysis
    - **Gemini price fallback** when Vivino has no pricing data
+
+### Language & Currency
+
+Both are set on the card itself, under **⚙️ Vivino/AI Settings**, not in the
+integration options. Pick the language the AI should write descriptions,
+food pairings and tasting notes in (English, French or German), and the
+currency prices are recorded and totalled in (USD, EUR, GBP or CHF).
 
 ### Connecting Your Vivino Cellar
 
@@ -180,6 +199,40 @@ The integration ships with 3 cabinet sections, each with 10 rows and 9 columns (
 | `sensor.wine_cellar_capacity` | Percentage of cellar capacity used |
 | `sensor.wine_cellar_cabinet_*_count` | Bottle count per cabinet section |
 | `sensor.cork_dork_vivino_cellar` | Bottles in your Vivino cellar at last sync (with sync details as attributes) |
+
+## Where Your Data Lives
+
+| Path | Contents |
+|---|---|
+| `.storage/wine_cellar` | Wines, cabinets, buy list, history — the cellar itself |
+| `config/wine_cellar_photos/` | Bottle photos, one file per photo |
+| `config/wine_cellar_backups/` | Timestamped server backups |
+
+Bottle photos are kept as files and referenced by URL rather than embedded in
+each wine record. This matters more than it sounds: as inline data they were
+re-sent over the websocket on every load and after every edit, which a cellar
+entered by photo feels immediately. Existing photos are moved out to disk
+automatically on first start after upgrading — there is nothing to do.
+
+Backups are the deliberate exception: they carry their photos inside them, so
+a backup file stands on its own and restores onto a fresh install without
+depending on files it never contained.
+
+## Known Limitations
+
+- **Barcode scanning does not work on iOS.** Safari does not implement the
+  `BarcodeDetector` API at all, on any connection. This is not a permissions
+  problem and cannot be fixed from here; use label recognition or manual entry
+  on an iPhone or iPad.
+- **The live camera needs HTTPS.** Browsers only expose camera access in a
+  secure context, so reaching Home Assistant over plain `http://` leaves the
+  live camera unavailable. Cork Dork detects this and offers the photo picker
+  instead, which opens the native camera and works fine — you just take the
+  picture in the camera app rather than in the card.
+- **Vivino has no price data in its public endpoints.** Ratings, regions,
+  grapes and images are all available; price is not, anywhere that can be read
+  reliably. Where a price is shown without one, it is an AI estimate and is
+  labelled as such.
 
 ## License
 
