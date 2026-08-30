@@ -1976,6 +1976,9 @@ export class WineCellarCard extends LitElement {
         const parts = [
           `Vivino ${word} complete! ${bottles} bottle${bottles === 1 ? "" : "s"} imported`,
         ];
+        if (result.cellar_removed > 0) {
+          parts.push(`· ${result.cellar_removed} bottle${result.cellar_removed === 1 ? "" : "s"} removed`);
+        }
         if (result.wishlist_imported > 0) parts.push(`+ ${result.wishlist_imported} to buy list`);
         if (result.cellar_pushed > 0) parts.push(`(${result.cellar_pushed} pushed to Vivino)`);
         if (result.cellar_removal_choices > 0) {
