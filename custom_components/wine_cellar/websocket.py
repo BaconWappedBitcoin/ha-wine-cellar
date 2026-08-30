@@ -326,6 +326,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_remove_wine)
     websocket_api.async_register_command(hass, ws_get_pending_removals)
     websocket_api.async_register_command(hass, ws_resolve_vivino_removal)
+    websocket_api.async_register_command(hass, ws_resolve_vivino_conflict)
     websocket_api.async_register_command(hass, ws_update_wine)
     websocket_api.async_register_command(hass, ws_move_wine)
     websocket_api.async_register_command(hass, ws_lookup_barcode)
@@ -470,10 +471,20 @@ def ws_get_pending_removals(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Return Vivino-side removals awaiting the user's bottle choice."""
+    """Return Vivino-side removals awaiting the user's bottle choice.
+
+    Also carries the sync conflicts (both sides changed a wine differently),
+    so the card can offer manual resolution instead of burying them in the
+    sync sensor's attributes.
+    """
     storage = hass.data[DOMAIN]["storage"]
+    status = storage.get_vivino_sync_status() or {}
     connection.send_result(
-        msg["id"], {"pending_removals": storage.get_vivino_pending_removals()}
+        msg["id"],
+        {
+            "pending_removals": storage.get_vivino_pending_removals(),
+            "conflicts": status.get("conflicts_detail") or [],
+        },
     )
 
 
@@ -515,6 +526,90 @@ async def ws_resolve_vivino_removal(
         hass.bus.async_fire(f"{DOMAIN}_updated")
     connection.send_result(
         msg["id"], {"success": success, "pending_removals": pending}
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "wine_cellar/resolve_vivino_conflict",
+        vol.Required("vivino_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_resolve_vivino_conflict(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Resolve a sync conflict by declaring Cork Dork's count the truth.
+
+    The user has reviewed (and possibly corrected) their local bottles, so
+    Vivino is adjusted to match Cork Dork's current count and the baseline
+    is advanced, closing the conflict.
+    """
+    from .vivino_reconcile import build_corkdork_state
+
+    domain_data = hass.data[DOMAIN]
+    storage = domain_data["storage"]
+    client = domain_data.get("vivino_account")
+    if not client:
+        connection.send_result(msg["id"], {"error": "No Vivino account configured."})
+        return
+
+    vid = str(msg["vivino_id"])
+    cd_count = build_corkdork_state(storage.wines).get(vid, 0)
+    try:
+        vivino_count = await client._count_for_vintage(int(vid))
+        delta = cd_count - vivino_count
+        if delta != 0:
+            res = await client.async_change_bottles(
+                int(vid), delta, comment="Cork Dork conflict resolution"
+            )
+            if not res.get("ok"):
+                connection.send_result(
+                    msg["id"],
+                    {"error": f"Vivino did not accept the change ({vivino_count} -> {cd_count})."},
+                )
+                return
+    except Exception as err:  # noqa: BLE001 - surfaced to the card
+        connection.send_result(msg["id"], {"error": f"Vivino update failed: {err}"})
+        return
+
+    # Advance the baseline so the next sync sees an agreed state
+    baseline = storage.get_vivino_baseline()
+    entry = dict(baseline.get(vid) or {})
+    local = next(
+        (w for w in storage.wines if str(w.get("vivino_id") or "") == vid), {}
+    )
+    entry.update({
+        "count": cd_count,
+        "name": entry.get("name") or local.get("name", ""),
+        "winery": entry.get("winery") or local.get("winery", ""),
+        "vintage": entry.get("vintage", local.get("vintage")),
+    })
+    if cd_count > 0:
+        baseline[vid] = entry
+    else:
+        baseline.pop(vid, None)
+    storage.set_vivino_baseline(baseline)
+
+    # Clear the conflict from the stored sync snapshot so the card updates
+    status = storage.get_vivino_sync_status() or {}
+    details = [
+        c for c in (status.get("conflicts_detail") or [])
+        if str(c.get("vintage_id")) != vid
+    ]
+    status["conflicts_detail"] = details
+    status["cellar_conflicts"] = len(details)
+    storage.set_vivino_sync_status(status)
+    hass.data[DOMAIN]["vivino_sync_status"] = status
+
+    await storage.async_save()
+    hass.bus.async_fire(f"{DOMAIN}_updated")
+    connection.send_result(
+        msg["id"],
+        {"success": True, "vivino_count": cd_count, "delta": delta,
+         "conflicts": details},
     )
 
 
