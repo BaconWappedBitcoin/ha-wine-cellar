@@ -161,8 +161,11 @@ by replaying a session cookie you paste from your browser.
 - **[docs/vivino-import.md](docs/vivino-import.md)** has full instructions for
   both methods:
   - **Integration sync (recommended):** paste your cellar URL and session cookie
-    in **Cork Dork → Configure**, then use **🔄 Vivino Sync** (or enable twice-daily
-    auto-sync). When the cookie expires, a notification prompts you to refresh it.
+    in **Cork Dork → Configure**, pick the Vivino mode there (Import, the default,
+    never writes to your Vivino account), then use the card's button — **⬇️ Vivino
+    Import** or **🔄 Vivino Sync**, whichever the mode gives you — or enable
+    twice-daily auto-sync. When the cookie expires, a notification prompts you to
+    refresh it.
   - **One-time CSV export:** run a browser-console snippet and load the file via
     **📦 Inventory → Import CSV**.
 - After importing, **🍇 Vivino Batch Scan** enriches wines with ratings, pricing,
