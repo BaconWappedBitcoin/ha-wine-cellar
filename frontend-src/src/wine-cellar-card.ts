@@ -1651,6 +1651,10 @@ export class WineCellarCard extends LitElement {
           ai_updated_at: this._copiedWine.ai_updated_at,
           ai_checked_at: this._copiedWine.ai_checked_at,
           vivino_id: this._copiedWine.vivino_id,
+          // Keep the source: a copy of a Vivino-synced bottle must stay part
+          // of the reconciliation (count pushes, removal candidates), or it
+          // becomes an invisible manual bottle with a vivino_id.
+          source: this._copiedWine.source,
         },
       });
       const pasted = result?.wine?.id;
