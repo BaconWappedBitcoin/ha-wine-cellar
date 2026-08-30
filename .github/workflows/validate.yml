@@ -1,15 +1,22 @@
 name: Validate
 
 on:
+  # Branch pushes are covered by pull_request. Firing on every push too
+  # meant each PR branch ran the suite twice, and the second copy was still
+  # in flight when the branch got deleted on merge - hacs/action then asked
+  # GitHub for a ref that no longer existed and failed the run with
+  # "Repository ... not loaded properly in HACS".
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   validate-hacs:
     runs-on: ubuntu-latest
     name: Validate HACS
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: HACS Validation
         uses: hacs/action@main
         with:
@@ -19,6 +26,6 @@ jobs:
     runs-on: ubuntu-latest
     name: Validate Hassfest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Hassfest Validation
         uses: home-assistant/actions/hassfest@master

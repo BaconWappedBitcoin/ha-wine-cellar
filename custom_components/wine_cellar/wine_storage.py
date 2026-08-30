@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .const import (
+    BARCODE_CACHE_MAX,
     CONF_BARCODE_CACHE,
     CONF_BUY_LIST,
     CONF_CABINETS,
@@ -27,6 +28,7 @@ class WineCellarStorage:
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize storage."""
+        self.loaded_from_disk = False
         self._hass = hass
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self._data: dict[str, Any] = {}
@@ -40,6 +42,11 @@ class WineCellarStorage:
     def cabinets(self) -> list[dict[str, Any]]:
         """Return all cabinets."""
         return self._data.get(CONF_CABINETS, [])
+
+    @property
+    def raw_data(self) -> dict[str, Any]:
+        """The whole persisted blob — used to report its serialized size."""
+        return self._data
 
     @property
     def barcode_cache(self) -> dict[str, Any]:
@@ -68,8 +75,15 @@ class WineCellarStorage:
         return settings
 
     async def async_load(self) -> None:
-        """Load data from storage."""
+        """Load data from storage.
+
+        `loaded_from_disk` distinguishes "there was nothing to load" from
+        "there was something and we read it". Callers that delete things the
+        stored data is the only record of — photo files, say — must not treat
+        a store that failed to parse as a cellar that is genuinely empty.
+        """
         data = await self._store.async_load()
+        self.loaded_from_disk = data is not None
         if data is None:
             self._data = {
                 CONF_WINES: [],
@@ -82,44 +96,66 @@ class WineCellarStorage:
             await self.async_save()
         else:
             self._data = data
-            # Migrate: ensure all cabinets have storage_rows and depth fields
-            for cab in self._data.get(CONF_CABINETS, []):
-                if "storage_rows" not in cab:
-                    cab["storage_rows"] = []
-                if "depth" not in cab:
-                    cab["depth"] = 1
-                # Migrate: remove orientation, swap dims for horizontal
-                if cab.get("orientation") == "horizontal":
-                    cab["rows"], cab["cols"] = cab["cols"], cab["rows"]
-                cab.pop("orientation", None)
-                # Migrate: clear legacy bottom zone flag
-                if cab.get("has_bottom_zone"):
-                    cab["has_bottom_zone"] = False
-                    cab["bottom_zone_name"] = ""
-                # Migrate storage rows to include type and capacity
-                for sr in cab.get("storage_rows", []):
-                    if "type" not in sr:
-                        sr["type"] = "bulk"
-                    if "capacity" not in sr:
-                        sr["capacity"] = 20
-                    # Migrate horizontal → bulk
-                    if sr.get("type") == "horizontal":
-                        sr["type"] = "bulk"
-                    # Migrate box rows: add boxes array
-                    if sr.get("type") == "box" and "boxes" not in sr:
-                        sr["boxes"] = [sr.get("capacity", 12)]
-            # Ensure all wines have retail_price and depth fields
-            for wine in self._data.get(CONF_WINES, []):
-                if "retail_price" not in wine:
-                    wine["retail_price"] = None
-                if "depth" not in wine:
-                    wine["depth"] = 0
-            # Migrate: ensure buy_list exists
-            if CONF_BUY_LIST not in self._data:
-                self._data[CONF_BUY_LIST] = []
-            # Migrate: ensure wine_history exists
-            if CONF_WINE_HISTORY not in self._data:
-                self._data[CONF_WINE_HISTORY] = []
+            self._migrate()
+
+    def _migrate(self) -> None:
+        """Bring loaded or restored data up to the current schema.
+
+        Called on load *and* on restore: a backup file carries whatever shape
+        the version that wrote it used, so restoring an old one without this
+        would leave cabinets and wines missing fields until the next HA
+        restart happened to re-run the load path.
+        """
+        # Migrate: ensure all cabinets have storage_rows and depth fields
+        for cab in self._data.get(CONF_CABINETS, []):
+            if "storage_rows" not in cab:
+                cab["storage_rows"] = []
+            if "depth" not in cab:
+                cab["depth"] = 1
+            # Migrate: remove orientation, swap dims for horizontal
+            if cab.get("orientation") == "horizontal":
+                cab["rows"], cab["cols"] = cab["cols"], cab["rows"]
+            cab.pop("orientation", None)
+            # Migrate: clear legacy bottom zone flag
+            if cab.get("has_bottom_zone"):
+                cab["has_bottom_zone"] = False
+                cab["bottom_zone_name"] = ""
+            # Migrate storage rows to include type and capacity
+            for sr in cab.get("storage_rows", []):
+                if "type" not in sr:
+                    sr["type"] = "bulk"
+                if "capacity" not in sr:
+                    sr["capacity"] = 20
+                # Migrate horizontal → bulk
+                if sr.get("type") == "horizontal":
+                    sr["type"] = "bulk"
+                # Migrate box rows: add boxes array
+                if sr.get("type") == "box" and "boxes" not in sr:
+                    sr["boxes"] = [sr.get("capacity", 12)]
+        # Ensure all wines have retail_price and depth fields
+        for wine in self._data.get(CONF_WINES, []):
+            if "retail_price" not in wine:
+                wine["retail_price"] = None
+            if "depth" not in wine:
+                wine["depth"] = 0
+            # Backfill the check timestamps: a wine that was updated from a
+            # source was certainly consulted, so seed checked_at from
+            # updated_at rather than reporting it as never looked up. Both
+            # keys are materialized so every wine has the same shape.
+            for source in ("vivino", "ai"):
+                updated_key = f"{source}_updated_at"
+                checked_key = f"{source}_checked_at"
+                if updated_key not in wine:
+                    wine[updated_key] = None
+                if checked_key not in wine:
+                    wine[checked_key] = wine[updated_key]
+        # Ensure every top-level collection exists
+        if CONF_BARCODE_CACHE not in self._data:
+            self._data[CONF_BARCODE_CACHE] = {}
+        if CONF_BUY_LIST not in self._data:
+            self._data[CONF_BUY_LIST] = []
+        if CONF_WINE_HISTORY not in self._data:
+            self._data[CONF_WINE_HISTORY] = []
 
     async def async_save(self) -> None:
         """Save data to storage."""
@@ -164,8 +200,9 @@ class WineCellarStorage:
             "source": wine_data.get("source", ""),
             "added_at": datetime.now(timezone.utc).isoformat(),
             "vivino_updated_at": wine_data.get("vivino_updated_at"),
+            "vivino_checked_at": wine_data.get("vivino_checked_at"),
             "ai_updated_at": wine_data.get("ai_updated_at"),
-            "vivino_id": wine_data.get("vivino_id"),
+            "ai_checked_at": wine_data.get("ai_checked_at"),
         }
         self._data[CONF_WINES].append(wine)
         return wine
@@ -211,6 +248,10 @@ class WineCellarStorage:
                 wine_data["zone"] = ""
                 wine_data["depth"] = 0
                 wine = self.add_wine(wine_data)
+                # Preserve when the bottle originally entered the cellar
+                # rather than dating it from the un-removal.
+                if wine_data.get("added_at"):
+                    wine["added_at"] = wine_data["added_at"]
                 history.pop(i)
                 return wine
         return None
@@ -314,6 +355,71 @@ class WineCellarStorage:
                 capacity += sr.get("capacity", 0)
         return capacity
 
+    @staticmethod
+    def _storage_row_capacity(storage_row: dict[str, Any]) -> int:
+        if storage_row.get("type") == "box":
+            return sum(storage_row.get("boxes", []))
+        return storage_row.get("capacity", 0)
+
+    def _placement_is_lost(self, wine: dict[str, Any]) -> str | None:
+        """Say why a bottle's recorded position no longer exists, or None.
+
+        A bottle can be left pointing at a slot its rack no longer has —
+        shrinking a rack past it, or deleting the bin it sat in, never
+        deleted the bottle (nothing here ever does) but also never moved it.
+        It then counts towards the cellar total while being undrawable on
+        the rack, which is the one kind of wrong an inventory must not be.
+        """
+        cabinet_id = wine.get("cabinet_id")
+        if not cabinet_id:
+            return None
+        cabinet = next((c for c in self.cabinets if c["id"] == cabinet_id), None)
+        if cabinet is None:
+            return "its rack no longer exists"
+
+        zone = wine.get("zone") or ""
+        depth = wine.get("depth") or 0
+        if zone:
+            storage_rows = cabinet.get("storage_rows", []) or []
+            sr = next((s for s in storage_rows if f"storage-{s.get('row')}" == zone), None)
+            if sr is None:
+                return "the bin it was in no longer exists"
+            if depth >= self._storage_row_capacity(sr):
+                return f"{sr.get('name') or 'that bin'} was shrunk past its slot"
+            return None
+
+        row, col = wine.get("row"), wine.get("col")
+        if row is None or col is None:
+            return None
+        if row >= cabinet.get("rows", 0) or col >= cabinet.get("cols", 0):
+            return "the rack was shrunk past its slot"
+        if depth >= (cabinet.get("depth", 1) or 1):
+            return "the rack was made shallower than its slot"
+        if any(s.get("row") == row for s in cabinet.get("storage_rows", []) or []):
+            return "its row became a bin"
+        return None
+
+    def reconcile_placements(self) -> list[dict[str, str]]:
+        """Unassign bottles whose recorded slot no longer exists.
+
+        Returns what was moved, so the caller can tell the user rather than
+        quietly rearranging their cellar. Unassigning only — the bottle keeps
+        every other field and reappears under Unassigned, where it can be put
+        back somewhere real.
+        """
+        fixed: list[dict[str, str]] = []
+        for wine in self._data[CONF_WINES]:
+            reason = self._placement_is_lost(wine)
+            if reason is None:
+                continue
+            fixed.append({"name": wine.get("name") or "Unnamed wine", "reason": reason})
+            wine["cabinet_id"] = ""
+            wine["row"] = None
+            wine["col"] = None
+            wine["zone"] = ""
+            wine["depth"] = 0
+        return fixed
+
     def get_stats(self) -> dict[str, Any]:
         """Get cellar statistics."""
         total_bottles = len(self.wines)
@@ -347,11 +453,23 @@ class WineCellarStorage:
         }
 
     def cache_barcode(self, barcode: str, data: dict[str, Any]) -> None:
-        """Cache barcode lookup results."""
-        self._data[CONF_BARCODE_CACHE][barcode] = {
+        """Cache barcode lookup results.
+
+        Capped, because this lives in the same file as the cellar itself and
+        that file is read and rewritten on every change — an unbounded cache
+        of every barcode ever scanned would slowly tax every save. The oldest
+        entries go first; a re-scan costs one lookup.
+        """
+        cache = self._data.setdefault(CONF_BARCODE_CACHE, {})
+        cache[barcode] = {
             **data,
             "cached_at": datetime.now(timezone.utc).isoformat(),
         }
+        if len(cache) > BARCODE_CACHE_MAX:
+            for old_key in sorted(
+                cache, key=lambda k: cache[k].get("cached_at") or ""
+            )[: len(cache) - BARCODE_CACHE_MAX]:
+                cache.pop(old_key, None)
 
     def get_cached_barcode(self, barcode: str) -> dict[str, Any] | None:
         """Get cached barcode data."""
@@ -507,6 +625,7 @@ class WineCellarStorage:
         # user's current metadata-language / AI-fallback configuration.
         if settings is not None:
             self._data[CONF_SETTINGS] = settings
+        self._migrate()
         return {
             "wines": len(wines),
             "cabinets": len(cabinets),
@@ -514,10 +633,224 @@ class WineCellarStorage:
             "wine_history": len(self._data[CONF_WINE_HISTORY]),
         }
 
-    def import_wines(self, wines_data: list[dict[str, Any]]) -> int:
-        """Batch-add wines (each gets a new UUID). Returns count added."""
-        count = 0
+    def reorder_zone(
+        self, cabinet_id: str, zone: str, wine_ids: list[str]
+    ) -> int:
+        """Assign slots 0..n-1 to a bin's bottles, in the order given.
+
+        One pass over the data instead of a move per bottle: the caller used
+        to issue N websocket commands, each rewriting the whole store, which
+        made shifting a full bin unusably slow. Bottles in the bin that the
+        caller did not list keep their relative order and follow the listed
+        ones, so a stale frontend list can never drop a bottle out of its bin.
+        """
+        in_zone = [
+            w for w in self._data[CONF_WINES]
+            if w.get("cabinet_id") == cabinet_id and (w.get("zone") or "") == zone
+        ]
+        by_id = {w["id"]: w for w in in_zone}
+
+        ordered = [by_id[wid] for wid in wine_ids if wid in by_id]
+        listed = {w["id"] for w in ordered}
+        remainder = sorted(
+            (w for w in in_zone if w["id"] not in listed),
+            key=lambda w: w.get("depth") or 0,
+        )
+
+        for index, wine in enumerate([*ordered, *remainder]):
+            wine["depth"] = index
+        return len(ordered) + len(remainder)
+
+    # ── CSV location resolution ──────────────────────────────────────
+
+    def _find_cabinet_by_name(self, name: str) -> dict[str, Any] | None:
+        """Match a cabinet by display name, case- and space-insensitively."""
+        wanted = " ".join(str(name).split()).casefold()
+        if not wanted:
+            return None
+        for cab in self.cabinets:
+            if " ".join(str(cab.get("name", "")).split()).casefold() == wanted:
+                return cab
+        return None
+
+    def _slot_is_free(
+        self,
+        cabinet_id: str,
+        row: int | None,
+        col: int | None,
+        zone: str,
+        depth: int,
+        ignore_wine_id: str,
+    ) -> bool:
+        """True when no *other* bottle already occupies that exact slot."""
+        for wine in self.wines:
+            if wine.get("id") == ignore_wine_id:
+                continue
+            if (
+                wine.get("cabinet_id") == cabinet_id
+                and wine.get("row") == row
+                and wine.get("col") == col
+                and (wine.get("zone") or "") == zone
+                and (wine.get("depth") or 0) == depth
+            ):
+                return False
+        return True
+
+    def resolve_import_location(
+        self, row_data: dict[str, Any], ignore_wine_id: str = ""
+    ) -> dict[str, Any] | None:
+        """Turn a CSV row's Cabinet/Row/Col/Zone columns into a location.
+
+        Returns the location fields to apply, or None when the row names no
+        location at all *or* names one that cannot be honoured (unknown rack,
+        out-of-range slot, slot already taken). Refusing beats guessing: a
+        bulk edit must never silently evict another bottle.
+
+        Row/Col are 1-based in the CSV — that is what the UI shows — and
+        0-based in storage.
+        """
+        cabinet_name = str(row_data.get("cabinet") or "").strip()
+        raw_row = row_data.get("row")
+        raw_col = row_data.get("col")
+        zone = str(row_data.get("zone") or "").strip()
+        depth = row_data.get("depth")
+
+        if not cabinet_name:
+            # A slot without a rack is meaningless; don't half-apply it.
+            return None
+
+        cabinet = self._find_cabinet_by_name(cabinet_name)
+        if cabinet is None:
+            return None
+
+        cabinet_id = cabinet["id"]
+        try:
+            depth_idx = max(0, int(depth)) if depth not in (None, "") else 0
+        except (TypeError, ValueError):
+            depth_idx = 0
+
+        storage_rows = cabinet.get("storage_rows", [])
+        storage_row_indices = {sr.get("row") for sr in storage_rows}
+
+        # Bulk bin / wine box, addressed by zone rather than a grid slot.
+        if zone:
+            if zone == "bottom":
+                if not cabinet.get("has_bottom_zone"):
+                    return None
+            elif zone.startswith("storage-"):
+                try:
+                    zone_row = int(zone.split("-", 1)[1])
+                except (IndexError, ValueError):
+                    return None
+                storage_row = next(
+                    (sr for sr in storage_rows if sr.get("row") == zone_row), None
+                )
+                if storage_row is None:
+                    return None
+                if storage_row.get("type") == "box":
+                    capacity = sum(storage_row.get("boxes", []))
+                else:
+                    capacity = storage_row.get("capacity", 0)
+                if depth_idx >= capacity:
+                    return None
+            else:
+                return None
+
+            if not self._slot_is_free(cabinet_id, None, None, zone, depth_idx, ignore_wine_id):
+                return None
+            return {"cabinet_id": cabinet_id, "row": None, "col": None,
+                    "zone": zone, "depth": depth_idx}
+
+        # Plain grid slot.
+        if raw_row not in (None, "") and raw_col not in (None, ""):
+            try:
+                row_idx = int(raw_row) - 1
+                col_idx = int(raw_col) - 1
+            except (TypeError, ValueError):
+                return None
+            if not (0 <= row_idx < cabinet.get("rows", 0)):
+                return None
+            if not (0 <= col_idx < cabinet.get("cols", 0)):
+                return None
+            if row_idx in storage_row_indices:
+                # That row was converted to a bin/box; it has no grid slots.
+                return None
+            if depth_idx >= cabinet.get("depth", 1):
+                return None
+            if not self._slot_is_free(
+                cabinet_id, row_idx, col_idx, "", depth_idx, ignore_wine_id
+            ):
+                return None
+            return {"cabinet_id": cabinet_id, "row": row_idx, "col": col_idx,
+                    "zone": "", "depth": depth_idx}
+
+        # Cabinet named but no slot: assign to the rack without a position.
+        return {"cabinet_id": cabinet_id, "row": None, "col": None, "zone": "", "depth": 0}
+
+    def import_wines(
+        self, wines_data: list[dict[str, Any]], mode: str = "add"
+    ) -> dict[str, int]:
+        """Batch import wines. Returns {"added": n, "updated": n}.
+
+        mode="add" always creates new bottles (each gets a fresh UUID).
+        mode="update" matches a row to an existing bottle by its `id` column
+        and edits it in place, so a CSV can be exported, bulk-edited in a
+        spreadsheet and re-imported without duplicating the whole cellar.
+        Rows whose id is absent or unknown are still added as new.
+
+        Cabinet/Row/Col/Zone are honoured only when they resolve to a real,
+        free slot; `location_skipped` counts the rows whose placement was
+        refused so the caller can tell the user rather than silently dropping
+        bottles somewhere unexpected.
+        """
+        added = 0
+        updated = 0
+        location_skipped = 0
+        location_keys = ("cabinet", "row", "col", "zone", "depth")
+        existing_ids = (
+            {w["id"] for w in self._data[CONF_WINES] if w.get("id")}
+            if mode == "update"
+            else set()
+        )
+
         for wd in wines_data:
-            self.add_wine(wd)
-            count += 1
-        return count
+            wine_id = str(wd.get("id") or "")
+            is_update = bool(wine_id and wine_id in existing_ids)
+            names_location = any(
+                str(wd.get(k) or "").strip() for k in ("cabinet", "row", "col", "zone")
+            )
+
+            location = self.resolve_import_location(wd, wine_id if is_update else "")
+            if names_location and location is None:
+                location_skipped += 1
+
+            # The raw column values never reach the wine record: only the
+            # resolved location does, so a bogus rack name can't be stored.
+            fields = {k: v for k, v in wd.items() if k not in location_keys and k != "id"}
+
+            if is_update:
+                # Only the columns actually present in the row are applied —
+                # a blank cell leaves the stored value alone rather than
+                # wiping it, which is what a partial spreadsheet edit means.
+                if location:
+                    fields.update(location)
+                self.update_wine(wine_id, fields)
+                updated += 1
+                continue
+
+            if location:
+                fields.update(location)
+            wine = self.add_wine(fields)
+            # add_wine stamps added_at with "now"; keep the original date when
+            # the imported row carries one, or a CSV round-trip quietly resets
+            # every bottle's age to the import date.
+            original_added = wd.get("added_at")
+            if original_added:
+                wine["added_at"] = original_added
+            added += 1
+
+        return {
+            "added": added,
+            "updated": updated,
+            "location_skipped": location_skipped,
+        }

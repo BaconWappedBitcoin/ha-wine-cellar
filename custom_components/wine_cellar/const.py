@@ -56,6 +56,9 @@ DEFAULT_CABINETS = [
 CONF_CABINETS = "cabinets"
 CONF_WINES = "wines"
 CONF_BARCODE_CACHE = "barcode_cache"
+# Enough that a normal cellar never evicts; small enough that the store
+# file cannot grow without bound from scanning alone.
+BARCODE_CACHE_MAX = 500
 CONF_BUY_LIST = "buy_list"
 CONF_WINE_HISTORY = "wine_history"
 CONF_SETTINGS = "settings"
@@ -85,6 +88,18 @@ SUPPORTED_METADATA_CURRENCIES = ["USD", "EUR", "GBP", "CHF"]
 # applying automatically. "always" skips asking and just uses AI every time.
 CONF_AI_FALLBACK_ALWAYS = "ai_fallback_always"
 
+# How many timestamped server backups to keep on disk. Older ones are pruned
+# after each new save; 0 keeps every backup forever.
+# Arrangement findings the user has waved off for good. Kept as a list of
+# stable finding ids so a dismissed suggestion never comes back on re-analysis.
+CONF_DISMISSED_ARRANGEMENTS = "dismissed_arrangements"
+
+CONF_SERVER_BACKUP_KEEP = "server_backup_keep"
+DEFAULT_SERVER_BACKUP_KEEP = 10
+SERVER_BACKUP_KEEP_CHOICES = [0, 5, 10, 20, 50]
+
+# Vivino account sync (from upstream): the session cookie + cellar URL identify
+# the account, and the optional timer re-syncs on this interval.
 CONF_VIVINO_SESSION_COOKIE = "vivino_session_cookie"
 CONF_VIVINO_CELLAR_URL = "vivino_cellar_url"
 CONF_VIVINO_AUTO_SYNC = "vivino_auto_sync"
@@ -94,4 +109,4 @@ VIVINO_AUTO_SYNC_INTERVAL_HOURS = 12
 ATTR_TOTAL_BOTTLES = "total_bottles"
 ATTR_TOTAL_CAPACITY = "total_capacity"
 
-FRONTEND_VERSION = "20260822a"
+FRONTEND_VERSION = "20260830a"

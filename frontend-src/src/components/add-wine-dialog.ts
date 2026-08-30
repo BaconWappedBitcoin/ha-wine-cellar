@@ -4,11 +4,23 @@ import {
   Wine,
   Cabinet,
   BarcodeLookupResult,
+  StorageRow,
   WineType,
   WINE_TYPE_LABELS,
 } from "../models";
 import { sharedStyles } from "../styles";
 import { resizeImageForStorage } from "../utils/image";
+import {
+  Container,
+  containerLabel,
+  containerOf,
+  containerUsage,
+  freeAt,
+  placementIn,
+  planSlots,
+  sameContainer,
+} from "../utils/location";
+import { Suggestion, suggestDestinations } from "../utils/suggest";
 
 import "./barcode-scanner";
 import "./label-camera";
@@ -34,6 +46,8 @@ export class AddWineDialog extends LitElement {
   @state() private _scanMode: ScanMode = "idle";
   @state() private _barcode = "";
   @state() private _loading = false;
+  @state() private _quantity = 1;
+  @state() private _addProgress = 0;
   @state() private _lookupResult: BarcodeLookupResult | null = null;
   @state() private _wineData: Partial<Wine> = {};
   @state() private _error = "";
@@ -43,6 +57,12 @@ export class AddWineDialog extends LitElement {
   @state() private _frontImageRaw = "";
   @state() private _showBackPrompt = false;
   @state() private _searchResults: BarcodeLookupResult[] = [];
+  // Bumped every time the dialog opens. Label recognition waits up to 45
+  // seconds on the AI, which is long enough to cancel, close, and start
+  // adding a different bottle — and the late reply would then overwrite that
+  // bottle's form with the previous one's reading and jump to the details
+  // step. Every async handler here checks the session it started in.
+  private _session = 0;
 
   static styles = [
     sharedStyles,
@@ -212,6 +232,97 @@ export class AddWineDialog extends LitElement {
         margin-top: 12px;
       }
 
+      .suggest-strip {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 14px;
+        padding: 10px;
+        border: 1px solid var(--wc-border);
+        border-radius: 10px;
+        background: rgba(114, 47, 55, 0.04);
+      }
+
+      .suggest-title {
+        font-size: 0.75em;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--wc-text-secondary);
+      }
+
+      .suggest-item {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        width: 100%;
+        text-align: left;
+        font: inherit;
+        color: inherit;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        background: var(--wc-card-bg, transparent);
+        padding: 8px 10px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+
+      .suggest-item:hover:not(.full) {
+        border-color: var(--wc-primary);
+        background: rgba(114, 47, 55, 0.08);
+      }
+
+      .suggest-item.selected {
+        border-color: var(--wc-primary);
+        background: rgba(114, 47, 55, 0.12);
+      }
+
+      .suggest-item.full {
+        cursor: default;
+        opacity: 0.65;
+      }
+
+      .suggest-item.full .suggest-where {
+        text-decoration: line-through;
+      }
+
+      .suggest-where {
+        font-weight: 600;
+        font-size: 0.85em;
+        white-space: nowrap;
+      }
+
+      .suggest-why {
+        flex: 1;
+        font-size: 0.78em;
+        color: var(--wc-text-secondary);
+      }
+
+      .suggest-space {
+        font-size: 0.75em;
+        white-space: nowrap;
+        color: var(--wc-text-secondary);
+      }
+
+      .suggest-space.tight {
+        color: #c62828;
+      }
+
+      .suggest-alt {
+        margin: -2px 0 2px 10px;
+        font-size: 0.75em;
+        color: var(--wc-text-secondary);
+      }
+
+      .suggest-alt button {
+        font: inherit;
+        color: var(--wc-primary);
+        background: none;
+        border: none;
+        padding: 0;
+        cursor: pointer;
+        text-decoration: underline;
+      }
+
       .location-cabinet {
         border: 2px solid var(--wc-border);
         border-radius: 10px;
@@ -270,6 +381,67 @@ export class AddWineDialog extends LitElement {
 
       @keyframes spin {
         to { transform: rotate(360deg); }
+      }
+
+      .qty-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .qty-label {
+        font-size: 0.85em;
+        font-weight: 500;
+        color: var(--wc-text-secondary);
+      }
+
+      .qty-stepper {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .qty-btn {
+        width: 32px;
+        height: 32px;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        font-size: 1.1em;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      .qty-btn:hover:not(:disabled) {
+        border-color: var(--wc-primary);
+        color: var(--wc-primary);
+      }
+
+      .qty-btn:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+
+      .qty-input {
+        width: 56px;
+        padding: 6px 4px;
+        text-align: center;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        font-size: 1em;
+        font-weight: 600;
+      }
+
+      .qty-hint {
+        margin-top: 6px;
+        font-size: 0.78em;
+        color: var(--wc-text-secondary);
+        line-height: 1.4;
       }
 
       .confirm-summary {
@@ -412,6 +584,9 @@ export class AddWineDialog extends LitElement {
         this._lookupResult = null;
         this._error = "";
         this._loading = false;
+        this._quantity = 1;
+        this._addProgress = 0;
+        this._session++;
         this._labelLoading = false;
         this._searchResults = [];
         this._captureStage = "front";
@@ -463,6 +638,7 @@ export class AddWineDialog extends LitElement {
 
   private async _lookupBarcode() {
     if (!this._barcode.trim()) return;
+    const session = this._session;
     this._loading = true;
     this._error = "";
 
@@ -472,6 +648,7 @@ export class AddWineDialog extends LitElement {
         barcode: this._barcode.trim(),
       });
 
+      if (session !== this._session) return;
       if (result.result) {
         this._lookupResult = result.result;
         this._wineData = {
@@ -491,6 +668,7 @@ export class AddWineDialog extends LitElement {
           food_pairings: result.result.food_pairings || "",
           alcohol: result.result.alcohol || "",
           vivino_updated_at: result.result.source === "vivino" ? new Date().toISOString() : this._wineData.vivino_updated_at,
+          vivino_checked_at: result.result.source === "vivino" ? new Date().toISOString() : this._wineData.vivino_checked_at,
         };
         this._step = "details";
       } else {
@@ -498,6 +676,7 @@ export class AddWineDialog extends LitElement {
         this._onBarcodeLookupFailed("No match for this barcode.");
       }
     } catch (err) {
+      if (session !== this._session) return;
       this._wineData = { ...this._wineData, barcode: this._barcode.trim() };
       this._onBarcodeLookupFailed("Barcode lookup failed.");
     }
@@ -522,6 +701,7 @@ export class AddWineDialog extends LitElement {
   }
 
   private async _searchWine() {
+    const session = this._session;
     const input = this.shadowRoot?.querySelector(
       ".search-input"
     ) as HTMLInputElement;
@@ -537,6 +717,7 @@ export class AddWineDialog extends LitElement {
         query: input.value.trim(),
       });
 
+      if (session !== this._session) return;
       if (result.results && result.results.length > 0) {
         this._searchResults = result.results;
       } else {
@@ -567,6 +748,7 @@ export class AddWineDialog extends LitElement {
       food_pairings: item.food_pairings || "",
       alcohol: item.alcohol || "",
       vivino_updated_at: new Date().toISOString(),
+      vivino_checked_at: new Date().toISOString(),
     };
     this._searchResults = [];
     this._step = "details";
@@ -588,6 +770,7 @@ export class AddWineDialog extends LitElement {
   }
 
   private async _finishLabelScan(backImageRaw?: string) {
+    const session = this._session;
     this._showBackPrompt = false;
     this._labelLoading = true;
     this._error = "";
@@ -599,6 +782,9 @@ export class AddWineDialog extends LitElement {
         ...(backImageRaw ? { back_image: backImageRaw } : {}),
       });
 
+      // The slowest wait in the app. If the dialog was reopened meanwhile,
+      // this reading belongs to a bottle the user has moved on from.
+      if (session !== this._session) return;
       if (result.result) {
         // Resize captured photos to thumbnails for storage
         const thumbUrl = await resizeImageForStorage(this._frontImageRaw);
@@ -624,6 +810,7 @@ export class AddWineDialog extends LitElement {
           image_url: thumbUrl,
           back_image_url: backThumbUrl,
           ai_updated_at: new Date().toISOString(),
+          ai_checked_at: new Date().toISOString(),
         };
         this._scanMode = "idle";
         this._step = "details";
@@ -636,6 +823,7 @@ export class AddWineDialog extends LitElement {
         console.error("Wine Cellar: label recognition failed:", errorDetail);
       }
     } catch (err: any) {
+      if (session !== this._session) return;
       const msg = err?.message || String(err);
       console.error("Wine Cellar: label recognition error:", msg);
       this._error = `Label recognition error: ${msg}`;
@@ -652,14 +840,65 @@ export class AddWineDialog extends LitElement {
     this._wineData = { ...this._wineData, [field]: value };
   }
 
-  private _selectZone(zoneId: string) {
-    // Land after the last occupied depth in that zone instead of always
-    // depth 0 — otherwise a second bottle added to the same zone collides
-    // with whatever's already at depth 0.
-    const depth = this.wines
-      .filter((w) => w.cabinet_id === this._wineData.cabinet_id && w.zone === zoneId)
-      .reduce((max, w) => Math.max(max, w.depth || 0), -1) + 1;
-    this._wineData = { ...this._wineData, zone: zoneId, row: null, col: null, depth };
+  private _zoneUsage(sr: StorageRow) {
+    const cabinet = this.cabinets.find((c) => c.id === this._wineData.cabinet_id);
+    const container: Container = {
+      cabinetId: this._wineData.cabinet_id || "",
+      kind: "zone",
+      zone: `storage-${sr.row}`,
+      row: null,
+      col: null,
+    };
+    return containerUsage(container, cabinet, this.wines);
+  }
+
+  private _selectZone(sr: StorageRow) {
+    // Adding a bottle used to append past the end of a full bin, silently
+    // growing it beyond its configured capacity. Refuse instead, the way
+    // drag-and-drop and paste already do.
+    const { used, capacity, nextDepth, full } = this._zoneUsage(sr);
+    const label = sr.name || (sr.type === "box" ? "This box" : "This bin");
+    if (full) {
+      this._error = `${label} is full (${used}/${capacity}). Free a slot, or raise its capacity in Manage Racks.`;
+      return;
+    }
+    this._error = "";
+    this._wineData = {
+      ...this._wineData,
+      zone: `storage-${sr.row}`,
+      row: null,
+      col: null,
+      depth: nextDepth,
+    };
+  }
+
+  // Send the bottle to a container the suggestion strip proposed, landing on
+  // its first free depth.
+  private _applyContainer(c: Container) {
+    const cabinet = this.cabinets.find((cab) => cab.id === c.cabinetId);
+    const patch = placementIn(c, cabinet, this.wines);
+    if (!patch) {
+      this._error = `${containerLabel(c, this.cabinets)} is full. Free a slot, or raise its capacity in Manage Racks.`;
+      return;
+    }
+    this._error = "";
+    this._wineData = { ...this._wineData, ...patch };
+  }
+
+  private _planSlots(count: number): { row: number | null; col: number | null; zone: string; depth: number }[] {
+    return planSlots(this._wineData, this.cabinets, this.wines, count);
+  }
+
+  // Free space at the chosen destination; null when there is no limit.
+  private _availableSlots(): number | null {
+    const free = freeAt(this._wineData, this.cabinets, this.wines);
+    return Number.isFinite(free) ? free : null;
+  }
+
+  private _setQuantity(value: number) {
+    const available = this._availableSlots();
+    const max = available === null ? 99 : Math.max(1, Math.min(99, available));
+    this._quantity = Math.max(1, Math.min(max, Math.round(value) || 1));
   }
 
   private async _addWine() {
@@ -674,10 +913,36 @@ export class AddWineDialog extends LitElement {
           new CustomEvent("buy-list-updated", { bubbles: true, composed: true })
         );
       } else {
-        await this.hass.callWS({
-          type: "wine_cellar/add_wine",
-          wine: this._wineData,
-        });
+        const slots = this._planSlots(this._quantity);
+        if (!slots.length) {
+          this._error = "No free slot left at that destination.";
+          this._loading = false;
+          return;
+        }
+        // Each bottle is added at its own slot, so identical bottles never
+        // stack on top of each other.
+        const addedIds: string[] = [];
+        for (let i = 0; i < slots.length; i++) {
+          this._addProgress = i + 1;
+          const result = await this.hass.callWS({
+            type: "wine_cellar/add_wine",
+            wine: { ...this._wineData, ...slots[i] },
+          });
+          if (result?.wine?.id) addedIds.push(result.wine.id);
+        }
+
+        // A bin is a pile: what you just put in sits on top, so the new
+        // bottles take the first slots and the rest shift down. One call
+        // renumbers the bin; listing only the new ids is enough, the backend
+        // appends the others in their existing order.
+        if (this._wineData.zone && addedIds.length) {
+          await this.hass.callWS({
+            type: "wine_cellar/reorder_zone",
+            cabinet_id: this._wineData.cabinet_id,
+            zone: this._wineData.zone,
+            wine_ids: addedIds,
+          });
+        }
         this.dispatchEvent(
           new CustomEvent("wine-added", { bubbles: true, composed: true })
         );
@@ -686,6 +951,7 @@ export class AddWineDialog extends LitElement {
     } catch (err) {
       this._error = this.buyListMode ? "Failed to add to buy list." : "Failed to add wine.";
     }
+    this._addProgress = 0;
     this._loading = false;
   }
 
@@ -1097,6 +1363,55 @@ export class AddWineDialog extends LitElement {
     `;
   }
 
+  // Destinations deduced from where this bottle's relatives already sit. The
+  // cellar has no declared zone rules, so its own layout is the only signal:
+  // every suggestion says which bottles are already there and why they match.
+  private _renderSuggestions() {
+    const suggestions = suggestDestinations(this._wineData, this.wines, this.cabinets, 3);
+    if (!suggestions.length) return nothing;
+    const current = containerOf(this._wineData as Wine);
+
+    const spaceText = (s: Suggestion) => {
+      if (s.usage.full) return `Full · ${s.usage.used}/${s.usage.capacity}`;
+      if (!Number.isFinite(s.usage.free)) return "Room";
+      return s.usage.free === 1 ? "1 free" : `${s.usage.free} free`;
+    };
+
+    return html`
+      <div class="suggest-strip">
+        <div class="suggest-title">Suggested — where its relatives are</div>
+        ${suggestions.map((s) => {
+          const selected = !!current && sameContainer(current, s.container);
+          return html`
+            <button
+              class="suggest-item ${s.usage.full ? "full" : ""} ${selected ? "selected" : ""}"
+              ?disabled=${s.usage.full}
+              @click=${() => this._applyContainer(s.container)}
+            >
+              <span class="suggest-where">${s.label}</span>
+              <span class="suggest-why">${s.reason}</span>
+              <span class="suggest-space ${s.usage.full || s.usage.free <= 1 ? "tight" : ""}">
+                ${spaceText(s)}
+              </span>
+            </button>
+            ${s.alternative
+              ? html`
+                  <div class="suggest-alt">
+                    No room left there — split the series into
+                    <button @click=${() => this._applyContainer(s.alternative!.container)}>
+                      ${s.alternative.label}
+                    </button>
+                    (${s.alternative.free === 1 ? "1 free" : `${s.alternative.free} free`}), or free a
+                    slot first.
+                  </div>
+                `
+              : nothing}
+          `;
+        })}
+      </div>
+    `;
+  }
+
   private _renderLocationStep() {
     const selectedCabinet = this.cabinets.find((c) => c.id === this._wineData.cabinet_id);
     const zones = selectedCabinet?.storage_rows || [];
@@ -1108,6 +1423,8 @@ export class AddWineDialog extends LitElement {
         <div style="font-size: 0.85em; color: var(--wc-text-secondary); margin-bottom: 12px">
           Select a cabinet and position for this bottle
         </div>
+
+        ${this._renderSuggestions()}
 
         <div class="location-grid">
           ${this.cabinets.map(
@@ -1134,13 +1451,21 @@ export class AddWineDialog extends LitElement {
                 style="font-size:0.8em;padding:6px 10px"
                 @click=${() => this._updateField("zone", "")}
               >None — use grid Row/Col</button>
-              ${zones.map((sr) => html`
-                <button
-                  class="btn ${this._wineData.zone === `storage-${sr.row}` ? "btn-primary" : "btn-outline"}"
-                  style="font-size:0.8em;padding:6px 10px"
-                  @click=${() => this._selectZone(`storage-${sr.row}`)}
-                >${sr.name || (sr.type === "box" ? "Box" : "Bulk Bin")}</button>
-              `)}
+              ${zones.map((sr) => {
+                const usage = this._zoneUsage(sr);
+                const selected = this._wineData.zone === `storage-${sr.row}`;
+                return html`
+                  <button
+                    class="btn ${selected ? "btn-primary" : "btn-outline"}"
+                    style="font-size:0.8em;padding:6px 10px${usage.full ? ";opacity:0.5" : ""}"
+                    title=${usage.full ? "Full — free a slot or raise its capacity" : ""}
+                    @click=${() => this._selectZone(sr)}
+                  >
+                    ${sr.name || (sr.type === "box" ? "Box" : "Bulk Bin")}
+                    <span style="opacity:0.75">${usage.used}/${usage.capacity}</span>
+                  </button>
+                `;
+              })}
             </div>
           </div>
         ` : nothing}
@@ -1194,8 +1519,82 @@ export class AddWineDialog extends LitElement {
       this._error = "Pick a zone, or enter both Row and Column, so the bottle has a findable spot.";
       return;
     }
+
+    const cabinet = this.cabinets.find((c) => c.id === d.cabinet_id);
+    if (cabinet && !d.zone && d.row != null && d.col != null) {
+      if (d.row < 0 || d.row >= cabinet.rows || d.col < 0 || d.col >= cabinet.cols) {
+        this._error = `That slot is outside ${cabinet.name} (${cabinet.rows} rows × ${cabinet.cols} columns).`;
+        return;
+      }
+      const isStorageRow = (cabinet.storage_rows || []).some((sr) => sr.row === d.row);
+      if (isStorageRow) {
+        this._error = "That row is a bin or box, not grid slots — pick it from the zone list above.";
+        return;
+      }
+      // Stack behind whatever is already in the slot, up to the rack's depth,
+      // instead of landing on top of another bottle at depth 0.
+      const occupied = new Set(
+        this.wines
+          .filter((w) => w.cabinet_id === d.cabinet_id && w.row === d.row && w.col === d.col)
+          .map((w) => w.depth || 0)
+      );
+      const rackDepth = cabinet.depth || 1;
+      let depth = 0;
+      while (occupied.has(depth)) depth++;
+      if (depth >= rackDepth) {
+        this._error = `Row ${d.row + 1}, column ${d.col + 1} is full (${occupied.size}/${rackDepth} deep).`;
+        return;
+      }
+      this._wineData = { ...this._wineData, depth };
+    }
+
     this._error = "";
     this._goToStep("confirm");
+  }
+
+  private _renderQuantityPicker() {
+    const available = this._availableSlots();
+    const max = available === null ? 99 : Math.max(1, Math.min(99, available));
+    const destination = this._wineData.cabinet_id
+      ? this._planSlots(this._quantity)
+      : null;
+
+    return html`
+      <div class="qty-row">
+        <span class="qty-label">Bottles</span>
+        <div class="qty-stepper">
+          <button
+            class="qty-btn"
+            ?disabled=${this._quantity <= 1}
+            @click=${() => this._setQuantity(this._quantity - 1)}
+          >−</button>
+          <input
+            class="qty-input"
+            type="number"
+            min="1"
+            max=${max}
+            .value=${String(this._quantity)}
+            @change=${(e: Event) =>
+              this._setQuantity(Number((e.target as HTMLInputElement).value))}
+          />
+          <button
+            class="qty-btn"
+            ?disabled=${this._quantity >= max}
+            @click=${() => this._setQuantity(this._quantity + 1)}
+          >+</button>
+        </div>
+      </div>
+      <div class="qty-hint">
+        ${available === null
+          ? "Identical bottles, added unassigned."
+          : available === 0
+            ? "That destination is full."
+            : html`${available} slot${available > 1 ? "s" : ""} free here.
+              ${destination && destination.length > 1
+                ? `The ${destination.length} bottles take consecutive free slots.`
+                : ""}`}
+      </div>
+    `;
   }
 
   private _renderConfirmStep() {
@@ -1265,6 +1664,8 @@ export class AddWineDialog extends LitElement {
             : nothing}
         </div>
 
+        ${this.buyListMode ? nothing : this._renderQuantityPicker()}
+
         ${this._error
           ? html`<div class="error-msg">${this._error}</div>`
           : nothing}
@@ -1276,8 +1677,14 @@ export class AddWineDialog extends LitElement {
         </button>
         <button class="btn btn-primary" @click=${this._addWine}>
           ${this._loading
-            ? html`<span class="loading-spinner"></span>`
-            : this.buyListMode ? "Add to Buy List" : "Add Wine"}
+            ? html`<span class="loading-spinner"></span>${this._addProgress && this._quantity > 1
+                ? html` ${this._addProgress}/${this._quantity}`
+                : nothing}`
+            : this.buyListMode
+              ? "Add to Buy List"
+              : this._quantity > 1
+                ? `Add ${this._quantity} Bottles`
+                : "Add Wine"}
         </button>
       </div>
     `;

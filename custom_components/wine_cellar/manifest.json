@@ -1,12 +1,19 @@
 {
   "domain": "wine_cellar",
   "name": "Cork Dork",
-  "codeowners": ["@BaconWappedBitcoin"],
+  "codeowners": [
+    "@BaconWappedBitcoin"
+  ],
   "config_flow": true,
-  "dependencies": ["http", "lovelace", "websocket_api"],
+  "dependencies": [
+    "http",
+    "lovelace",
+    "persistent_notification",
+    "websocket_api"
+  ],
   "documentation": "https://github.com/BaconWappedBitcoin/ha-wine-cellar",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/BaconWappedBitcoin/ha-wine-cellar/issues",
   "requirements": [],
-  "version": "2.13.0"
+  "version": "2.15.0"
 }

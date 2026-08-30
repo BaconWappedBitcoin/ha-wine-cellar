@@ -1,6 +1,7 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { sharedStyles } from "../styles";
+import { cameraBlockedReason, describeCameraError } from "../utils/camera";
 
 declare global {
   interface Window {
@@ -134,6 +135,19 @@ export class BarcodeScanner extends LitElement {
       return;
     }
 
+    const blocked = cameraBlockedReason();
+    if (blocked) {
+      this._error = `${blocked} Enter the barcode manually below.`;
+      this.dispatchEvent(
+        new CustomEvent("scanner-error", {
+          detail: { error: this._error },
+          bubbles: true,
+          composed: true,
+        })
+      );
+      return;
+    }
+
     try {
       this._stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -154,14 +168,7 @@ export class BarcodeScanner extends LitElement {
       this._scanning = true;
       this._scanFrame();
     } catch (err: any) {
-      const msg = err?.message || String(err);
-      if (msg.includes("NotAllowed") || msg.includes("Permission")) {
-        this._error = "Camera access denied. Please allow camera access in your browser settings.";
-      } else if (msg.includes("NotFound") || msg.includes("no camera")) {
-        this._error = "No camera found on this device.";
-      } else {
-        this._error = `Camera error: ${msg}`;
-      }
+      this._error = `${describeCameraError(err)} Enter the barcode manually below.`;
       this.dispatchEvent(
         new CustomEvent("scanner-error", {
           detail: { error: this._error },

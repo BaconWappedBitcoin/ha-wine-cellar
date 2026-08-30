@@ -39,8 +39,14 @@ export interface Wine {
   disposition: string;
   drink_window: string;
   ai_ratings: Record<string, number> | null;
+  // `*_updated_at` is when the data last actually changed; `*_checked_at` is
+  // when the source was last consulted. A checked_at newer than updated_at
+  // means the last lookup found nothing new — which is worth knowing, and
+  // was impossible to tell when one field carried both meanings.
   vivino_updated_at: string | null;
+  vivino_checked_at: string | null;
   ai_updated_at: string | null;
+  ai_checked_at: string | null;
   vivino_id: number | null;
 }
 
@@ -96,6 +102,14 @@ export interface BarcodeLookupResult {
   image_url: string;
   price: number | null;
   source: string;
+  // Returned by the backend and read by the add dialog, but never declared —
+  // which is what the four standing TS2339 warnings were. The compiler was
+  // not checking that code path at all.
+  ratings_count?: number | null;
+  description?: string;
+  food_pairings?: string;
+  alcohol?: string;
+  vivino_id?: number | null;
 }
 
 export interface WineListItem {

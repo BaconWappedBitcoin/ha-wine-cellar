@@ -11,6 +11,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.components import persistent_notification
 from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
@@ -37,6 +38,7 @@ from .const import (
     FRONTEND_VERSION,
     VIVINO_AUTO_SYNC_INTERVAL_HOURS,
 )
+from . import photos
 from .vivino import VivinoClient
 from .vivino_account import VivinoAccountClient, async_sync_from_vivino
 from .websocket import async_register_websocket_commands
@@ -78,6 +80,12 @@ def _register_static_path(hass: HomeAssistant) -> None:
     versioned_url = f"/wine_cellar/wine-cellar-card-{FRONTEND_VERSION}.js"
     legacy_url = "/wine_cellar/wine-cellar-card.js"
 
+    # Bottle photos are served from disk rather than carried inside every wine
+    # record. Cache headers are on here, unlike the card bundle: a photo file
+    # is immutable, since replacing a photo writes a new name.
+    photo_path = str(photos.photo_dir(hass))
+    Path(photo_path).mkdir(parents=True, exist_ok=True)
+
     try:
         # Modern HA (2024.7+)
         from homeassistant.components.http import StaticPathConfig
@@ -86,6 +94,7 @@ def _register_static_path(hass: HomeAssistant) -> None:
                 [
                     StaticPathConfig(versioned_url, frontend_path, False),
                     StaticPathConfig(legacy_url, frontend_path, False),
+                    StaticPathConfig(photos.PHOTO_URL_PREFIX, photo_path, True),
                 ]
             )
         )
@@ -94,47 +103,87 @@ def _register_static_path(hass: HomeAssistant) -> None:
             # Legacy HA
             hass.http.register_static_path(versioned_url, frontend_path, cache_headers=False)
             hass.http.register_static_path(legacy_url, frontend_path, cache_headers=False)
+            hass.http.register_static_path(photos.PHOTO_URL_PREFIX, photo_path, cache_headers=True)
         except Exception:
             _LOGGER.warning("Could not register frontend static path")
+
+
+def _lovelace_resources(hass: HomeAssistant) -> Any | None:
+    """The Lovelace resource collection, wherever this HA version keeps it.
+
+    This used to read hass.data["lovelace_resources"], a key Home Assistant
+    has never defined. The lookup therefore always came back empty and
+    auto-registration silently did nothing, which is what leaves people with
+    "Custom element not found: wine-cellar-card" until they add the resource
+    by hand.
+
+    Two shapes exist in the wild: newer HA stores a LovelaceData dataclass
+    under the LOVELACE_DATA key with a .resources attribute, older HA stored
+    a plain dict under "lovelace" with a "resources" entry.
+    """
+    data = None
+    try:
+        from homeassistant.components.lovelace.const import LOVELACE_DATA
+
+        data = hass.data.get(LOVELACE_DATA)
+    except ImportError:
+        pass
+    if data is None:
+        data = hass.data.get("lovelace")
+    if data is None:
+        return None
+    if isinstance(data, dict):
+        return data.get("resources")
+    return getattr(data, "resources", None)
 
 
 def _register_frontend_resource(hass: HomeAssistant) -> None:
     """Register the card JS as a Lovelace resource with cache-busted URL.
 
-    Waits for HA to fully start so that lovelace_resources is available.
+    Waits for HA to fully start so the resource collection exists.
     """
     url = f"/wine_cellar/wine-cellar-card-{FRONTEND_VERSION}.js"
 
-    # Use the lovelace resources collection if available
-    try:
-        from homeassistant.components.lovelace.resources import (
-            ResourceStorageCollection,
+    def _tell_user(reason: str, how: str) -> None:
+        """Surface a failure the user would otherwise only meet as a broken card."""
+        _LOGGER.warning("Cork Dork could not register its card automatically: %s", reason)
+        persistent_notification.async_create(
+            hass,
+            f"{reason}\n\n{how}",
+            title="Cork Dork: add the card resource manually",
+            notification_id=f"{DOMAIN}_frontend_resource",
         )
-    except ImportError:
-        _LOGGER.debug("Lovelace resources API not available, skipping auto-register")
-        return
 
     async def _async_add_resource(*_args) -> None:
         """Add or update Lovelace resource."""
         try:
-            # HA >= 2024 keeps the collection at hass.data["lovelace"].resources;
-            # the old top-level "lovelace_resources" key is long gone. Looking
-            # only for the old key made this function bail out silently on
-            # every start, so a FRONTEND_VERSION bump left the stored resource
-            # pointing at a URL that is no longer served and the card 404:ed.
-            resources = getattr(hass.data.get("lovelace"), "resources", None)
+            resources = _lovelace_resources(hass)
             if resources is None:
-                resources = hass.data.get("lovelace_resources")
-            if resources is None:
-                _LOGGER.warning(
-                    "Lovelace resources unavailable; add the card manually via "
-                    "Settings > Dashboards > Resources: %s",
-                    url,
+                _tell_user(
+                    "Home Assistant did not expose its Lovelace resource list.",
+                    f"Add it under Settings > Dashboards > ⋮ > Resources, as a "
+                    f"JavaScript module with the URL: {url}",
                 )
                 return
-            if hasattr(resources, "async_load") and not getattr(
-                resources, "loaded", True
-            ):
+            # YAML-mode Lovelace keeps its resources in configuration.yaml and
+            # offers no way to add one at runtime — the collection has no
+            # create method at all. Say so rather than throwing.
+            if not hasattr(resources, "async_create_item"):
+                _tell_user(
+                    "Your dashboards are in YAML mode, so resources cannot be "
+                    "added automatically.",
+                    "Add this to your Lovelace configuration:\n\n"
+                    f"resources:\n  - url: {url}\n    type: module",
+                )
+                return
+
+            # async_items() does not load the store by itself; without this the
+            # collection looks empty and we would add a duplicate resource on
+            # every restart.
+            ensure_loaded = getattr(resources, "_async_ensure_loaded", None)
+            if ensure_loaded is not None:
+                await ensure_loaded()
+            elif not getattr(resources, "loaded", True):
                 await resources.async_load()
 
             # Check existing resources
@@ -153,17 +202,20 @@ def _register_frontend_resource(hass: HomeAssistant) -> None:
                     _LOGGER.debug("Updated wine cellar frontend resource to %s", url)
             else:
                 await resources.async_create_item({"res_type": "module", "url": url})
-                _LOGGER.debug("Registered wine cellar frontend resource: %s", url)
-        except Exception as err:
-            _LOGGER.warning(
-                "Could not auto-register frontend resource (%s). "
-                "Add it manually via Settings > Dashboards > Resources: %s",
-                err,
-                url,
+                _LOGGER.info("Registered wine cellar frontend resource: %s", url)
+
+            persistent_notification.async_dismiss(
+                hass, f"{DOMAIN}_frontend_resource"
+            )
+        except Exception as err:  # noqa: BLE001 - never break setup over the card
+            _tell_user(
+                f"Registering the card resource failed ({err}).",
+                f"Add it under Settings > Dashboards > ⋮ > Resources, as a "
+                f"JavaScript module with the URL: {url}",
             )
 
     # If HA is already running (e.g. integration reload), register immediately.
-    # Otherwise wait for full startup so lovelace_resources is available.
+    # Otherwise wait for full startup so the resource collection exists.
     if hass.is_running:
         hass.async_create_task(_async_add_resource())
     else:
@@ -222,6 +274,52 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Initialize storage
     storage = WineCellarStorage(hass)
     await storage.async_load()
+
+    # Two one-off repairs on the way in, both from older versions, both
+    # touching the stored records — so they share a single save.
+    dirty = False
+
+    # Bottles left pointing at a slot their rack no longer has count towards
+    # the cellar total while being undrawable on the rack. Put them back
+    # under Unassigned, and say which, rather than rearranging in silence.
+    displaced = storage.reconcile_placements()
+    if displaced:
+        dirty = True
+        lines = "\n".join(f"- {item['name']} — {item['reason']}" for item in displaced[:20])
+        more = f"\n…and {len(displaced) - 20} more." if len(displaced) > 20 else ""
+        _LOGGER.warning("Moved %d bottle(s) to Unassigned: their slot no longer exists", len(displaced))
+        persistent_notification.async_create(
+            hass,
+            f"{len(displaced)} bottle(s) were in racks that have since been resized or "
+            f"had bins removed, so their recorded slot no longer exists. Nothing was "
+            f"deleted — they are now under **Unassigned**, ready to be put back:\n\n"
+            f"{lines}{more}",
+            title="Cork Dork: bottles moved to Unassigned",
+            notification_id=f"{DOMAIN}_displaced_bottles",
+        )
+
+    # Photos used to be stored inline in each wine record, which meant every
+    # page load carried them. Move any that are still inline out to disk once,
+    # then drop files nothing refers to any more.
+    moved = await photos.externalise_all(hass, storage.wines)
+    moved += await photos.externalise_all(hass, storage.wine_history)
+    if moved:
+        dirty = True
+        _LOGGER.info("Moved photos for %d bottle(s) out of the wine records", moved)
+
+    if dirty:
+        await storage.async_save()
+
+    # Pruning deletes every photo file nothing refers to. If the store did not
+    # actually load — missing on a first run, or unreadable — the cellar looks
+    # empty, and pruning against it would delete every photo the user has. The
+    # photos are now separate files that could otherwise have survived a
+    # damaged store, so this stays behind the one check that tells the two
+    # apart.
+    if storage.loaded_from_disk:
+        await photos.prune(hass, storage.wines, storage.wine_history)
+    else:
+        _LOGGER.debug("Skipping photo prune: nothing was loaded from storage")
 
     # Initialize Vivino client
     vivino = VivinoClient(hass)

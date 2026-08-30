@@ -415,6 +415,83 @@ const sharedStyles = i$3 `
     gap: 2px;
   }
 
+  .depth-panel-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .depth-panel-sort {
+    background: none;
+    border: 1px solid var(--wc-border, #ddd);
+    border-radius: 12px;
+    color: var(--wc-text-secondary, #888);
+    cursor: pointer;
+    font-size: 0.72em;
+    padding: 4px 9px;
+    white-space: nowrap;
+  }
+
+  .depth-panel-sort:hover:not(:disabled) {
+    border-color: var(--wc-primary, #722f37);
+    color: var(--wc-primary, #722f37);
+  }
+
+  .depth-panel-sort:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .depth-panel-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0 12px 8px;
+    padding: 10px 12px;
+    border: 1px solid #c98a00;
+    border-radius: 8px;
+    background: rgba(201, 138, 0, 0.08);
+    font-size: 0.76em;
+    color: var(--wc-text-secondary, #888);
+    line-height: 1.4;
+  }
+
+  .depth-panel-confirm strong {
+    color: var(--wc-text, #333);
+  }
+
+  .depth-panel-confirm-btns {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  .depth-panel-confirm-btns button {
+    background: none;
+    border: 1px solid var(--wc-border, #ddd);
+    border-radius: 8px;
+    color: var(--wc-text-secondary, #888);
+    cursor: pointer;
+    font-size: 1em;
+    padding: 5px 12px;
+  }
+
+  .depth-panel-confirm-btns button.primary {
+    background: var(--wc-primary, #722f37);
+    border-color: var(--wc-primary, #722f37);
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .depth-panel-rack {
+    font-size: 0.78em;
+    font-weight: 500;
+    color: var(--wc-text-secondary, #888);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
   .depth-panel-subtitle {
     font-size: 0.8em;
     font-weight: 400;
@@ -459,7 +536,8 @@ const sharedStyles = i$3 `
   }
 
   .depth-slot.highlight {
-    animation: highlightPulse 1.2s ease-in-out 2;
+    box-shadow: 0 0 0 2px rgba(196, 139, 145, 0.9);
+    animation: highlightPulse 1.2s ease-in-out 3;
   }
 
   @keyframes highlightPulse {
@@ -719,10 +797,996 @@ function getWineLocation(wine, cabinets) {
     return { text: cabinet.name, cabinet, zone: "", storageRow: null };
 }
 
+// Shared search / filter / sort helpers.
+//
+// The card and the inventory dialog used to carry two separate, silently
+// diverging search implementations (6 fields vs 11). Everything text-search
+// related now lives here so a field only ever has to be added once.
+// Accent-insensitive lowercase: "Côtes" and "cotes", "Rosé" and "rose" must
+// match. Home Assistant users type without accents far more often than with.
+function normalizeText(value) {
+    if (value === null || value === undefined)
+        return "";
+    return String(value)
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+}
+// Free-text search terms that map onto a disposition code rather than onto
+// any stored text.
+const DISPOSITION_TERMS = {
+    drink: "D",
+    "drink now": "D",
+    hold: "H",
+    past: "P",
+    peak: "P",
+    "past peak": "P",
+    "past-peak": "P",
+};
+// Rebuilding the haystack for every wine on every keystroke is wasteful once
+// a cellar gets large; wine objects are replaced wholesale on each reload, so
+// a WeakMap keyed on the object stays correct without any invalidation.
+const haystackCache = new WeakMap();
+function buildHaystack(wine, extra) {
+    const tn = wine.tasting_notes;
+    const parts = [
+        wine.name,
+        wine.winery,
+        wine.region,
+        wine.country,
+        wine.grape_variety,
+        wine.type,
+        wine.vintage,
+        wine.notes,
+        wine.description,
+        wine.food_pairings,
+        wine.alcohol,
+        wine.barcode,
+        wine.drink_by,
+        wine.drink_window,
+        wine.purchase_date,
+        tn?.aroma,
+        tn?.taste,
+        tn?.finish,
+        tn?.overall,
+        extra,
+    ];
+    return parts.map(normalizeText).filter(Boolean).join("\n");
+}
+function haystackFor(wine, extra) {
+    const cached = haystackCache.get(wine);
+    if (cached && cached.extra === extra)
+        return cached.text;
+    const text = buildHaystack(wine, extra);
+    haystackCache.set(wine, { extra, text });
+    return text;
+}
+// The cabinet name is searchable too ("kitchen" finds everything stored
+// there), which means it has to be resolved before matching.
+function cabinetNameFor(wine, cabinets) {
+    if (!wine.cabinet_id)
+        return "";
+    return cabinets.find((c) => c.id === wine.cabinet_id)?.name || "";
+}
+// Every whitespace-separated token must match somewhere, so "bordeaux 2015"
+// finally works — the old single-blob `includes` could never match a query
+// spanning two different fields.
+function matchesQuery(wine, query, cabinets = []) {
+    const normalized = normalizeText(query).trim();
+    if (!normalized)
+        return true;
+    const fullCode = DISPOSITION_TERMS[normalized];
+    if (fullCode && wine.disposition === fullCode)
+        return true;
+    const haystack = haystackFor(wine, normalizeText(cabinetNameFor(wine, cabinets)));
+    const tokens = normalized.split(/\s+/).filter(Boolean);
+    return tokens.every((token) => {
+        if (haystack.includes(token))
+            return true;
+        const code = DISPOSITION_TERMS[token];
+        return !!code && wine.disposition === code;
+    });
+}
+// ── Drink-by ───────────────────────────────────────────────────────────
+// `drink_by` is a free-text year ("2028", "drink by 2030") and `drink_window`
+// a range ("2025-2028"); both come from the AI, so parse defensively and fall
+// back to the end of the window when no explicit year was stored.
+function drinkByYear(wine) {
+    const explicit = String(wine.drink_by || "").match(/\d{4}/);
+    if (explicit)
+        return parseInt(explicit[0], 10);
+    const windowYears = String(wine.drink_window || "").match(/\d{4}/g);
+    if (windowYears && windowYears.length) {
+        return parseInt(windowYears[windowYears.length - 1], 10);
+    }
+    return null;
+}
+// Wines with no drink-by data sort to the bottom in *both* directions —
+// otherwise an ascending sort buries the urgent bottles under every wine
+// that was never analyzed.
+function compareNullable(a, b, dir, cmp) {
+    if (a === null && b === null)
+        return 0;
+    if (a === null)
+        return 1;
+    if (b === null)
+        return -1;
+    return dir * cmp(a, b);
+}
+// ── Facets ─────────────────────────────────────────────────────────────
+// Comma-separated fields (grape varieties, food pairings) are exploded into
+// individual values so the filter menus only ever offer what the cellar
+// actually contains.
+function splitMulti(value) {
+    return (value || "")
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean);
+}
+function collectFacet(wines, pick) {
+    const seen = new Map();
+    for (const wine of wines) {
+        for (const value of pick(wine)) {
+            const key = normalizeText(value);
+            if (key && !seen.has(key))
+                seen.set(key, value);
+        }
+    }
+    return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
+// A bin's real capacity: for a box row the sum of its boxes, otherwise the
+// row's own capacity.
+function zoneCapacity(sr) {
+    return sr.type === "box"
+        ? (sr.boxes || []).reduce((sum, b) => sum + b, 0) || sr.capacity || 0
+        : sr.capacity || 0;
+}
+function storageRowFor(cabinet, zone) {
+    if (!cabinet || !zone || zone === "bottom")
+        return undefined;
+    return (cabinet.storage_rows || []).find((sr) => `storage-${sr.row}` === zone);
+}
+function containerKey(c) {
+    return `${c.cabinetId}|${c.zone}|${c.row ?? ""}|${c.col ?? ""}`;
+}
+function sameContainer(a, b) {
+    return containerKey(a) === containerKey(b);
+}
+// The container a bottle currently sits in, or null when it is unassigned.
+function containerOf(wine) {
+    if (!wine.cabinet_id)
+        return null;
+    if (wine.zone === "bottom") {
+        return { cabinetId: wine.cabinet_id, kind: "bottom", zone: "bottom", row: null, col: null };
+    }
+    if (wine.zone) {
+        return { cabinetId: wine.cabinet_id, kind: "zone", zone: wine.zone, row: null, col: null };
+    }
+    if (wine.row !== null && wine.col !== null) {
+        return { cabinetId: wine.cabinet_id, kind: "slot", zone: "", row: wine.row, col: wine.col };
+    }
+    return null;
+}
+function winesInContainer(c, wines) {
+    return wines.filter((w) => {
+        const wc = containerOf(w);
+        return wc !== null && sameContainer(wc, c);
+    });
+}
+function containerCapacity(c, cabinet) {
+    if (!cabinet)
+        return 0;
+    if (c.kind === "bottom")
+        return 0; // unlimited
+    if (c.kind === "zone") {
+        const sr = storageRowFor(cabinet, c.zone);
+        return sr ? zoneCapacity(sr) : 0;
+    }
+    return cabinet.depth || 1;
+}
+function containerUsage(c, cabinet, wines) {
+    const capacity = containerCapacity(c, cabinet);
+    const occupied = new Set(winesInContainer(c, wines).map((w) => w.depth || 0));
+    // First free slot rather than "one past the last": a bottle removed from the
+    // middle leaves a gap that should be reused, not skipped over.
+    let nextDepth = 0;
+    while (occupied.has(nextDepth))
+        nextDepth++;
+    const unlimited = capacity <= 0;
+    return {
+        used: occupied.size,
+        capacity,
+        nextDepth,
+        free: unlimited ? Infinity : Math.max(0, capacity - occupied.size),
+        full: !unlimited && (occupied.size >= capacity || nextDepth >= capacity),
+    };
+}
+// Human-readable name for the container itself — no slot number, since a
+// container holds several bottles.
+function containerLabel(c, cabinets) {
+    const cabinet = cabinets.find((cab) => cab.id === c.cabinetId);
+    if (!cabinet)
+        return "Unassigned";
+    if (c.kind === "bottom")
+        return `${cabinet.name} · ${cabinet.bottom_zone_name || "Storage"}`;
+    if (c.kind === "zone") {
+        const sr = storageRowFor(cabinet, c.zone);
+        return `${cabinet.name} · ${sr?.name || (sr?.type === "box" ? "Box" : "Bulk Bin")}`;
+    }
+    const idx = getRackSlots(cabinet).findIndex((s) => s.row === c.row && s.col === c.col);
+    const slot = idx >= 0 ? `Slot ${idx + 1}` : `R${(c.row ?? 0) + 1}C${(c.col ?? 0) + 1}`;
+    return `${cabinet.name} · ${slot}`;
+}
+// Every container in a cabinet, in the order the grid draws them: bins and
+// boxes first, then the bottom zone, then the grid slots in reading order.
+function containersOf(cabinet) {
+    const out = [];
+    for (const sr of cabinet.storage_rows || []) {
+        out.push({ cabinetId: cabinet.id, kind: "zone", zone: `storage-${sr.row}`, row: null, col: null });
+    }
+    if (cabinet.has_bottom_zone) {
+        out.push({ cabinetId: cabinet.id, kind: "bottom", zone: "bottom", row: null, col: null });
+    }
+    for (const s of getRackSlots(cabinet)) {
+        out.push({ cabinetId: cabinet.id, kind: "slot", zone: "", row: s.row, col: s.col });
+    }
+    return out;
+}
+// The wine-shaped patch that puts a bottle into `c`, at its first free depth.
+// Returns null when the container has no room left.
+function placementIn(c, cabinet, wines) {
+    const usage = containerUsage(c, cabinet, wines);
+    if (usage.full)
+        return null;
+    return {
+        cabinet_id: c.cabinetId,
+        zone: c.zone,
+        row: c.row,
+        col: c.col,
+        depth: usage.nextDepth,
+    };
+}
+// Where each of `count` identical bottles would land, given a chosen
+// destination. Returns fewer entries than asked when the destination runs out
+// of room, so the caller can clamp rather than silently dropping bottles.
+function planSlots(target, cabinets, wines, count) {
+    const cabinet = cabinets.find((c) => c.id === target.cabinet_id);
+    const unplaced = { row: null, col: null, zone: "", depth: 0 };
+    // No rack chosen: the bottles go in unassigned, where nothing can clash.
+    if (!cabinet)
+        return Array.from({ length: count }, () => ({ ...unplaced }));
+    const out = [];
+    const placed = [];
+    const known = () => [...wines, ...placed];
+    const fill = (c) => {
+        while (out.length < count) {
+            const usage = containerUsage(c, cabinet, known());
+            if (usage.full)
+                break;
+            out.push({ row: c.row, col: c.col, zone: c.zone, depth: usage.nextDepth });
+            // Feed each placement back in so the next bottle sees the slot as taken.
+            placed.push({
+                cabinet_id: c.cabinetId,
+                zone: c.zone,
+                row: c.row,
+                col: c.col,
+                depth: usage.nextDepth,
+            });
+        }
+    };
+    if (target.zone) {
+        const c = {
+            cabinetId: cabinet.id,
+            kind: target.zone === "bottom" ? "bottom" : "zone",
+            zone: target.zone,
+            row: null,
+            col: null,
+        };
+        // An unlimited container would never stop filling; cap it at the request.
+        if (c.kind === "zone" && !storageRowFor(cabinet, target.zone))
+            return out;
+        fill(c);
+        return out;
+    }
+    // Grid: fill the chosen slot's depths first, then carry on through the
+    // rack's remaining slots in reading order — a six-pack should not stop at
+    // the first slot just because it only holds one bottle.
+    const slots = getRackSlots(cabinet);
+    const startIdx = Math.max(0, slots.findIndex((x) => x.row === target.row && x.col === target.col));
+    const ordered = [...slots.slice(startIdx), ...slots.slice(0, startIdx)];
+    for (const slot of ordered) {
+        fill({ cabinetId: cabinet.id, kind: "slot", zone: "", row: slot.row, col: slot.col });
+        if (out.length >= count)
+            break;
+    }
+    return out;
+}
+// Free space at a chosen destination; Infinity when there is no limit.
+function freeAt(target, cabinets, wines) {
+    const cabinet = cabinets.find((c) => c.id === target.cabinet_id);
+    if (!cabinet)
+        return Infinity;
+    if (target.zone) {
+        const c = {
+            cabinetId: cabinet.id,
+            kind: target.zone === "bottom" ? "bottom" : "zone",
+            zone: target.zone,
+            row: null,
+            col: null,
+        };
+        if (c.kind === "zone" && !storageRowFor(cabinet, target.zone))
+            return 0;
+        return containerUsage(c, cabinet, wines).free;
+    }
+    // No zone: everything still free across the cabinet's grid slots.
+    const total = getRackSlots(cabinet).length * (cabinet.depth || 1);
+    const used = wines.filter((w) => w.cabinet_id === cabinet.id && w.row !== null && w.col !== null).length;
+    return Math.max(0, total - used);
+}
+
+const TIER_ORDER = ["same-wine", "same-winery", "same-family"];
+const key = (value) => normalizeText(value).trim();
+// Names are free text and a good half of them carry the vintage ("Sassicaia
+// 2019") or a bottling note ("Margaux 2018 (Case #2)"). Comparing them raw
+// would make "same wine, any vintage" almost never fire, which is the one
+// tier the user actually cares about.
+function cuveeKey(value) {
+    return key(value)
+        .replace(/\((?:[^()]*)\)/g, " ")
+        .replace(/\b(?:19|20)\d{2}\b/g, " ")
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+}
+function tierOf(draft, wine) {
+    const dName = cuveeKey(draft.name);
+    const dWinery = key(draft.winery);
+    const wName = cuveeKey(wine.name);
+    const wWinery = key(wine.winery);
+    // Same wine, any vintage: the cuvée is what identifies it, not the year.
+    // With no winery recorded on either side the name has to carry it alone.
+    if (dName && dName === wName && (!dWinery || !wWinery || dWinery === wWinery))
+        return "same-wine";
+    if (dWinery && dWinery === wWinery)
+        return "same-winery";
+    const dRegion = key(draft.region);
+    if (dRegion && dRegion === key(wine.region) && draft.type && draft.type === wine.type) {
+        return "same-family";
+    }
+    return null;
+}
+function vintageList(wines) {
+    const years = Array.from(new Set(wines.map((w) => w.vintage).filter((v) => typeof v === "number"))).sort((a, b) => a - b);
+    return years.join(", ");
+}
+function reasonFor(tier, draft, matches) {
+    const n = matches.length;
+    const bottles = n === 1 ? "1 bottle" : `${n} bottles`;
+    if (tier === "same-wine") {
+        const years = vintageList(matches);
+        const sameYear = matches.every((w) => w.vintage === draft.vintage);
+        if (sameYear)
+            return `${bottles} of this exact wine already here`;
+        return years ? `${bottles} of this wine here (${years})` : `${bottles} of this wine already here`;
+    }
+    if (tier === "same-winery") {
+        const winery = matches[0]?.winery || draft.winery || "this winery";
+        return `${bottles} from ${winery} here`;
+    }
+    const first = matches[0];
+    const region = first?.region || draft.region || "";
+    const type = first ? WINE_TYPE_LABELS[first.type] || "" : "";
+    return `${bottles} of ${[region, type].filter(Boolean).join(" ")} here`.replace(/\s+/g, " ");
+}
+// The best place to send the bottle instead, when the natural destination is
+// full: somewhere in the same cabinet with room, preferring a container that
+// already holds relatives, then simply the nearest one with space.
+function alternativeFor(full, cabinet, wines, matchIds) {
+    const all = containersOf(cabinet);
+    const fullIdx = all.findIndex((c) => sameContainer(c, full));
+    const scored = all
+        .map((c, idx) => ({ c, idx, usage: containerUsage(c, cabinet, wines) }))
+        .filter((x) => !sameContainer(x.c, full) && !x.usage.full)
+        .map((x) => ({
+        ...x,
+        relatives: wines.filter((w) => {
+            const wc = containerOf(w);
+            return wc !== null && sameContainer(wc, x.c) && matchIds.has(w.id);
+        }).length,
+    }));
+    if (!scored.length)
+        return null;
+    scored.sort((a, b) => b.relatives - a.relatives ||
+        Math.abs(a.idx - fullIdx) - Math.abs(b.idx - fullIdx) ||
+        b.usage.free - a.usage.free);
+    const best = scored[0];
+    return {
+        container: best.c,
+        label: containerLabel(best.c, [cabinet]),
+        free: best.usage.free,
+    };
+}
+// Ranked destinations for a bottle about to be added. Empty when the cellar
+// holds nothing related — better to say nothing than to invent a reason.
+function suggestDestinations(draft, wines, cabinets, limit = 3) {
+    const byContainer = new Map();
+    for (const wine of wines) {
+        const container = containerOf(wine);
+        if (!container)
+            continue;
+        // Never point at a bin the rack layout no longer knows about: bottles can
+        // outlive a deleted storage row, but sending a new one there would be
+        // sending it nowhere.
+        const cabinet = cabinets.find((c) => c.id === container.cabinetId);
+        if (!cabinet)
+            continue;
+        if (container.kind === "zone" && !storageRowFor(cabinet, container.zone))
+            continue;
+        if (container.kind === "bottom" && !cabinet.has_bottom_zone)
+            continue;
+        const tier = tierOf(draft, wine);
+        if (!tier)
+            continue;
+        const k = `${containerKey(container)}::${tier}`;
+        const entry = byContainer.get(k);
+        if (entry)
+            entry.matches.push(wine);
+        else
+            byContainer.set(k, { container, tier, matches: [wine] });
+    }
+    // A container reached through several tiers is only worth listing once, at
+    // its most specific tier.
+    const bestPerContainer = new Map();
+    for (const entry of byContainer.values()) {
+        const k = containerKey(entry.container);
+        const current = bestPerContainer.get(k);
+        if (!current || TIER_ORDER.indexOf(entry.tier) < TIER_ORDER.indexOf(current.tier)) {
+            bestPerContainer.set(k, entry);
+        }
+    }
+    const ranked = Array.from(bestPerContainer.values()).sort((a, b) => TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier) || b.matches.length - a.matches.length);
+    return ranked.slice(0, limit).map((entry) => {
+        const cabinet = cabinets.find((c) => c.id === entry.container.cabinetId);
+        const usage = containerUsage(entry.container, cabinet, wines);
+        const matchIds = new Set(entry.matches.map((w) => w.id));
+        return {
+            container: entry.container,
+            label: containerLabel(entry.container, cabinets),
+            usage,
+            tier: entry.tier,
+            reason: reasonFor(entry.tier, draft, entry.matches),
+            matches: entry.matches,
+            alternative: usage.full && cabinet ? alternativeFor(entry.container, cabinet, wines, matchIds) : null,
+        };
+    });
+}
+
+const MIN_GROUP_BOTTLES = 3;
+const MIN_CONTAINER_BOTTLES = 4;
+const DOMINANCE = 0.75;
+const MAX_INTRUDERS = 2;
+const groupKey = (w) => `${cuveeKey(w.name)}|${normalizeText(w.winery).trim()}`.replace(/^\||\|$/g, "");
+// A bottle whose window is closing: explicitly marked drink/past, or carrying a
+// drink-by year that has arrived.
+function isDrinkSoon(wine) {
+    const code = (wine.disposition || "").toUpperCase();
+    if (code === "D" || code === "P")
+        return true;
+    const year = drinkByYear(wine);
+    return year !== null && year <= new Date().getFullYear();
+}
+function isKeeper(wine) {
+    return (wine.disposition || "").toUpperCase() === "H" && !isDrinkSoon(wine);
+}
+// Containers that actually exist in the current rack layout. Bottles can
+// outlive a deleted storage row, but proposing a move into one would be
+// proposing a move into nothing.
+function liveContainers(cabinets) {
+    const out = new Map();
+    for (const cabinet of cabinets) {
+        for (const container of containersOf(cabinet)) {
+            out.set(containerKey(container), { container, cabinet });
+        }
+    }
+    return out;
+}
+function placedWines(wines, live) {
+    return wines
+        .map((wine) => ({ wine, container: containerOf(wine) }))
+        .filter((x) => x.container !== null && live.has(containerKey(x.container)));
+}
+function dominantType(bottles) {
+    const counts = new Map();
+    for (const w of bottles)
+        counts.set(w.type, (counts.get(w.type) || 0) + 1);
+    let best = null;
+    let bestCount = 0;
+    for (const [type, count] of counts) {
+        if (count > bestCount) {
+            best = type;
+            bestCount = count;
+        }
+    }
+    if (best === null)
+        return null;
+    return { type: best, share: bestCount / bottles.length };
+}
+// Bottles of one wine scattered across several places. The fix is real work,
+// so only worth raising for a series big enough to be worth gathering.
+function findScatter(placed, live, cabinets, wines) {
+    const groups = new Map();
+    for (const entry of placed) {
+        const k = groupKey(entry.wine);
+        if (!k)
+            continue;
+        const list = groups.get(k);
+        if (list)
+            list.push(entry);
+        else
+            groups.set(k, [entry]);
+    }
+    const out = [];
+    for (const [key, entries] of groups) {
+        if (entries.length < MIN_GROUP_BOTTLES)
+            continue;
+        const byContainer = new Map();
+        for (const e of entries) {
+            const ck = containerKey(e.container);
+            const list = byContainer.get(ck);
+            if (list)
+                list.push(e);
+            else
+                byContainer.set(ck, [e]);
+        }
+        if (byContainer.size < 2)
+            continue;
+        // Gather towards wherever most of the series already sits, preferring the
+        // one that can actually take the rest.
+        const candidates = [...byContainer.entries()]
+            .map(([ck, held]) => {
+            const entry = live.get(ck);
+            const strays = entries.length - held.length;
+            const usage = containerUsage(entry.container, entry.cabinet, wines);
+            return { ck, held, strays, free: usage.free, container: entry.container };
+        })
+            .sort((a, b) => (b.free >= b.strays ? 1 : 0) - (a.free >= a.strays ? 1 : 0) || b.held.length - a.held.length || b.free - a.free);
+        const target = candidates[0];
+        if (!target || target.free < 1)
+            continue;
+        const strays = entries.filter((e) => containerKey(e.container) !== target.ck);
+        const movable = strays.slice(0, Number.isFinite(target.free) ? target.free : strays.length);
+        if (!movable.length)
+            continue;
+        const targetLabel = containerLabel(target.container, cabinets);
+        const name = entries[0].wine.name || entries[0].wine.winery || "This wine";
+        const partial = movable.length < strays.length;
+        out.push({
+            id: `consolidate:${key}`,
+            kind: "consolidate",
+            title: `${name} — ${entries.length} bottles across ${byContainer.size} places`,
+            detail: partial
+                ? `${targetLabel} holds ${target.held.length} of them and has room for ${movable.length} more, not all ${strays.length}. Gathering what fits still cuts the search in half.`
+                : `${targetLabel} already holds ${target.held.length} of them and has room for the other ${movable.length}.`,
+            wines: entries.map((e) => e.wine),
+            moves: movable.map((e) => ({
+                wine: e.wine,
+                from: e.container,
+                to: target.container,
+                fromLabel: containerLabel(e.container, cabinets),
+                toLabel: targetLabel,
+            })),
+        });
+    }
+    return out;
+}
+// A bin that is overwhelmingly one kind of wine, with a couple of bottles that
+// are not. The bin's purpose was never declared, but at this concentration it
+// plainly has one.
+function findOutliers(placed, live, cabinets, wines) {
+    const byContainer = new Map();
+    for (const e of placed) {
+        const ck = containerKey(e.container);
+        const list = byContainer.get(ck);
+        if (list)
+            list.push(e.wine);
+        else
+            byContainer.set(ck, [e.wine]);
+    }
+    // Where each type feels at home, for suggesting somewhere better.
+    const homes = new Map();
+    for (const [ck, bottles] of byContainer) {
+        const dom = dominantType(bottles);
+        if (!dom || dom.share < DOMINANCE)
+            continue;
+        const entry = live.get(ck);
+        const list = homes.get(dom.type) || [];
+        list.push({ ...entry, count: bottles.filter((w) => w.type === dom.type).length });
+        homes.set(dom.type, list);
+    }
+    const out = [];
+    for (const [ck, bottles] of byContainer) {
+        if (bottles.length < MIN_CONTAINER_BOTTLES)
+            continue;
+        const dom = dominantType(bottles);
+        if (!dom || dom.share < DOMINANCE)
+            continue;
+        const intruders = bottles.filter((w) => w.type !== dom.type);
+        if (!intruders.length || intruders.length > MAX_INTRUDERS)
+            continue;
+        const here = live.get(ck);
+        const moves = [];
+        for (const wine of intruders) {
+            const better = (homes.get(wine.type) || [])
+                .filter((h) => containerKey(h.container) !== ck)
+                .map((h) => ({ ...h, free: containerUsage(h.container, h.cabinet, wines).free }))
+                .filter((h) => h.free > 0)
+                .sort((a, b) => b.count - a.count || b.free - a.free)[0];
+            if (!better)
+                continue;
+            moves.push({
+                wine,
+                from: here.container,
+                to: better.container,
+                fromLabel: containerLabel(here.container, cabinets),
+                toLabel: containerLabel(better.container, cabinets),
+            });
+        }
+        if (!moves.length)
+            continue;
+        const label = containerLabel(here.container, cabinets);
+        const typeName = WINE_TYPE_LABELS[dom.type] || dom.type;
+        out.push({
+            id: `outlier:${ck}:${dom.type}`,
+            kind: "outlier",
+            title: `${label} is ${Math.round(dom.share * 100)}% ${typeName}`,
+            detail: `${intruders.length === 1 ? "One bottle does" : `${intruders.length} bottles do`} not belong to that group. Nothing says this bin is only for ${typeName} — but it nearly is.`,
+            wines: intruders,
+            moves,
+        });
+    }
+    return out;
+}
+// A bottle whose drinking window is closing, stuck behind or under bottles
+// meant to be kept. No move is proposed: freeing it means two bottles trading
+// places, and writing that as one-way moves would misdescribe the rack.
+function findBuried(placed, cabinets) {
+    const byContainer = new Map();
+    for (const e of placed) {
+        const ck = containerKey(e.container);
+        const list = byContainer.get(ck);
+        if (list)
+            list.push(e);
+        else
+            byContainer.set(ck, [e]);
+    }
+    const out = [];
+    for (const entries of byContainer.values()) {
+        if (entries.length < 2)
+            continue;
+        for (const e of entries) {
+            if (!isDrinkSoon(e.wine))
+                continue;
+            const depth = e.wine.depth || 0;
+            const inFront = entries.filter((o) => (o.wine.depth || 0) < depth && isKeeper(o.wine));
+            if (!inFront.length)
+                continue;
+            const label = containerLabel(e.container, cabinets);
+            const year = drinkByYear(e.wine);
+            out.push({
+                id: `buried:${e.wine.id}`,
+                kind: "buried",
+                title: `${e.wine.name || "A bottle"} is due${year ? ` by ${year}` : ""} but hard to reach`,
+                detail: `It sits at slot ${depth + 1} of ${label}, behind ${inFront.length === 1 ? "a bottle" : `${inFront.length} bottles`} marked to keep. Swap them by hand next time the door is open.`,
+                wines: [e.wine, ...inFront.map((o) => o.wine)],
+                moves: [],
+            });
+        }
+    }
+    return out;
+}
+const KIND_ORDER = ["consolidate", "outlier", "buried"];
+// Everything the cellar's own arrangement disagrees about, minus what the user
+// has waved off for good.
+function analyzeArrangement(wines, cabinets, dismissed = []) {
+    const live = liveContainers(cabinets);
+    const placed = placedWines(wines, live);
+    const hidden = new Set(dismissed);
+    return [
+        ...findScatter(placed, live, cabinets, wines),
+        ...findOutliers(placed, live, cabinets, wines),
+        ...findBuried(placed, cabinets),
+    ]
+        .filter((f) => !hidden.has(f.id))
+        .sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
+}
+
+const SECTIONS = [
+    {
+        kind: "consolidate",
+        title: "Scattered",
+        blurb: "Bottles of one wine sitting in several places.",
+    },
+    {
+        kind: "outlier",
+        title: "Odd ones out",
+        blurb: "Bins that are almost entirely one kind of wine, with a stray or two.",
+    },
+    {
+        kind: "buried",
+        title: "Hard to reach",
+        blurb: "Bottles due soon, stuck behind ones you meant to keep.",
+    },
+];
+// The arrangement report. Deliberately a place you visit rarely — after
+// scanning a cellar in, mostly — and leave empty once the moves are done.
+//
+// Every move is applied only when the user says it happened. The database
+// follows the bottles, never the other way around: renumbering a rack the
+// moment a suggestion is generated would make every later "where is it"
+// a lie.
+let ArrangementDialog = class ArrangementDialog extends i {
+    constructor() {
+        super(...arguments);
+        this.open = false;
+        this.wines = [];
+        this.cabinets = [];
+        this.dismissed = [];
+        this._busy = "";
+        this._error = "";
+    }
+    get _findings() {
+        return analyzeArrangement(this.wines, this.cabinets, this.dismissed);
+    }
+    // Apply every move in a finding, then tell the card to reload. Moves are
+    // sequential on purpose: each one consumes a slot the next one might have
+    // been aiming at.
+    async _applyMoves(finding) {
+        this._busy = finding.id;
+        this._error = "";
+        try {
+            let known = [...this.wines];
+            for (const move of finding.moves) {
+                const cabinet = this.cabinets.find((c) => c.id === move.to.cabinetId);
+                // Re-derive the landing slot per move rather than trusting the depth
+                // the analysis saw: earlier moves in this same batch have taken slots
+                // since, and the cellar may have changed under us.
+                const patch = placementIn(move.to, cabinet, known.filter((w) => w.id !== move.wine.id));
+                if (!patch) {
+                    this._error = `${move.toLabel} filled up before the move could be recorded.`;
+                    break;
+                }
+                await this.hass.callWS({
+                    type: "wine_cellar/move_wine",
+                    wine_id: move.wine.id,
+                    cabinet_id: patch.cabinet_id,
+                    row: patch.row ?? undefined,
+                    col: patch.col ?? undefined,
+                    zone: patch.zone,
+                    depth: patch.depth,
+                });
+                known = known.map((w) => (w.id === move.wine.id ? { ...w, ...patch } : w));
+            }
+            this.dispatchEvent(new CustomEvent("moves-applied", { bubbles: true, composed: true }));
+        }
+        catch (err) {
+            this._error = `Could not record the move: ${err?.message || err}`;
+        }
+        finally {
+            this._busy = "";
+        }
+    }
+    _dismiss(finding) {
+        this.dispatchEvent(new CustomEvent("dismiss-finding", {
+            detail: { id: finding.id },
+            bubbles: true,
+            composed: true,
+        }));
+    }
+    _renderMove(move) {
+        return b `
+      <div class="arr-move">
+        <span>${move.wine.name || "Bottle"}${move.wine.vintage ? ` ${move.wine.vintage}` : ""}</span>
+        <span class="arr-move-where">${move.fromLabel}</span>
+        <span class="arr-move-arrow">→</span>
+        <span class="arr-move-where">${move.toLabel}</span>
+      </div>
+    `;
+    }
+    _renderFinding(finding) {
+        const busy = this._busy === finding.id;
+        return b `
+      <div class="arr-finding">
+        <div class="arr-title">${finding.title}</div>
+        <div class="arr-detail">${finding.detail}</div>
+        ${finding.moves.length
+            ? b `<div class="arr-moves">${finding.moves.map((m) => this._renderMove(m))}</div>`
+            : A}
+        <div class="arr-actions">
+          ${finding.moves.length
+            ? b `
+                <button class="btn btn-primary" ?disabled=${busy} @click=${() => this._applyMoves(finding)}>
+                  ${busy
+                ? "Recording..."
+                : finding.moves.length === 1
+                    ? "I moved it"
+                    : `I moved all ${finding.moves.length}`}
+                </button>
+              `
+            : A}
+          <button class="btn btn-outline" ?disabled=${busy} @click=${() => this._dismiss(finding)}>
+            ${finding.moves.length ? "Leave it as it is" : "Noted"}
+          </button>
+        </div>
+      </div>
+    `;
+    }
+    render() {
+        if (!this.open)
+            return A;
+        const findings = this._findings;
+        return b `
+      <div class="dialog-overlay" @click=${() => this.dispatchEvent(new CustomEvent("close"))}>
+        <div class="dialog" style="max-width:620px" @click=${(e) => e.stopPropagation()}>
+          <div class="dialog-header">🧹 Arrangement</div>
+
+          <div class="dialog-body">
+            ${findings.length === 0
+            ? b `
+                  <div class="arr-empty">
+                    Nothing worth moving. Your cellar agrees with itself.
+                  </div>
+                `
+            : b `
+                  <div class="arr-intro">
+                    Read from where your bottles already are — there are no rules to
+                    configure. Tick a move once you have actually made it; nothing is
+                    recorded before that.
+                  </div>
+                  ${SECTIONS.map((section) => {
+                const inSection = findings.filter((f) => f.kind === section.kind);
+                if (!inSection.length)
+                    return A;
+                return b `
+                      <div class="arr-section">
+                        <div class="arr-section-title">${section.title}</div>
+                        <div class="arr-section-blurb">${section.blurb}</div>
+                        ${inSection.map((f) => this._renderFinding(f))}
+                      </div>
+                    `;
+            })}
+                `}
+            ${this._error ? b `<div class="arr-error">${this._error}</div>` : A}
+          </div>
+
+          <div class="dialog-footer">
+            <button class="btn btn-outline" @click=${() => this.dispatchEvent(new CustomEvent("close"))}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    }
+};
+ArrangementDialog.styles = [
+    sharedStyles,
+    i$3 `
+      .arr-intro {
+        font-size: 0.85em;
+        color: var(--wc-text-secondary);
+        margin-bottom: 14px;
+      }
+
+      .arr-section {
+        margin-bottom: 18px;
+      }
+
+      .arr-section-title {
+        font-weight: 600;
+        font-size: 0.9em;
+        margin-bottom: 2px;
+      }
+
+      .arr-section-blurb {
+        font-size: 0.78em;
+        color: var(--wc-text-secondary);
+        margin-bottom: 8px;
+      }
+
+      .arr-finding {
+        border: 1px solid var(--wc-border);
+        border-radius: 10px;
+        padding: 10px 12px;
+        margin-bottom: 8px;
+      }
+
+      .arr-title {
+        font-weight: 600;
+        font-size: 0.88em;
+      }
+
+      .arr-detail {
+        font-size: 0.78em;
+        color: var(--wc-text-secondary);
+        margin-top: 3px;
+      }
+
+      .arr-moves {
+        margin-top: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .arr-move {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.78em;
+        flex-wrap: wrap;
+      }
+
+      .arr-move-where {
+        color: var(--wc-text-secondary);
+      }
+
+      .arr-move-arrow {
+        opacity: 0.6;
+      }
+
+      .arr-actions {
+        margin-top: 10px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .arr-empty {
+        text-align: center;
+        padding: 28px 12px;
+        color: var(--wc-text-secondary);
+        font-size: 0.9em;
+      }
+
+      .arr-error {
+        color: #c62828;
+        font-size: 0.8em;
+        margin-top: 8px;
+      }
+    `,
+];
+__decorate([
+    n({ type: Boolean })
+], ArrangementDialog.prototype, "open", void 0);
+__decorate([
+    n({ attribute: false })
+], ArrangementDialog.prototype, "hass", void 0);
+__decorate([
+    n({ attribute: false })
+], ArrangementDialog.prototype, "wines", void 0);
+__decorate([
+    n({ attribute: false })
+], ArrangementDialog.prototype, "cabinets", void 0);
+__decorate([
+    n({ attribute: false })
+], ArrangementDialog.prototype, "dismissed", void 0);
+__decorate([
+    r()
+], ArrangementDialog.prototype, "_busy", void 0);
+__decorate([
+    r()
+], ArrangementDialog.prototype, "_error", void 0);
+ArrangementDialog = __decorate([
+    t("arrangement-dialog")
+], ArrangementDialog);
+
 let CabinetGrid = class CabinetGrid extends i {
     constructor() {
         super(...arguments);
         this.wines = [];
+        // Set briefly by "locate" so the bottle is marked on the rack drawing too,
+        // not just in the side panel's slot list.
+        this.highlightWineId = null;
         this._dragOverCell = null;
         // --- Long press (mobile move) ---
         this._longPressTimer = null;
@@ -939,7 +2003,7 @@ let CabinetGrid = class CabinetGrid extends i {
             const bottleKey = `${zoneKey}-${wine.id}`;
             return b `
             <div
-              class="zone-bottle ${this._dragOverCell === bottleKey ? "drag-over" : ""}"
+              class="zone-bottle ${this._dragOverCell === bottleKey ? "drag-over" : ""} ${wine.id === this.highlightWineId ? "locate-highlight" : ""}"
               style="background: ${WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red}"
               data-wine-id="${wine.id}"
               draggable="true"
@@ -975,7 +2039,12 @@ let CabinetGrid = class CabinetGrid extends i {
                 const d = w.depth || 0;
                 return d >= start && d < start + boxSize;
             });
-            return { size: boxSize, start, wineCount: boxWines.length };
+            return {
+                size: boxSize,
+                start,
+                wineCount: boxWines.length,
+                hasHighlight: !!this.highlightWineId && boxWines.some((w) => w.id === this.highlightWineId),
+            };
         });
         return b `
       <div class="bottom-zone zone-box-row ${isDragOver ? "drag-over" : ""}"
@@ -986,7 +2055,7 @@ let CabinetGrid = class CabinetGrid extends i {
         <div class="bottom-zone-label">📦 ${name} <span class="zone-count">${wines.length}/${capacity}</span></div>
         <div class="zone-box-grid">
           ${boxSegments.map((seg) => b `
-            <div class="zone-box-item ${seg.wineCount > 0 ? "has-wine" : ""}">
+            <div class="zone-box-item ${seg.wineCount > 0 ? "has-wine" : ""} ${seg.hasHighlight ? "locate-highlight" : ""}">
               <div class="zone-box-shape">
                 <div class="box-lid"></div>
                 <div class="box-body"><span class="box-count">${seg.wineCount}/${seg.size}</span></div>
@@ -1017,9 +2086,10 @@ let CabinetGrid = class CabinetGrid extends i {
             const ringColor = frontWine ? this._brightenColor(bgColor) : "";
             const cellKey = `${row}-${col}`;
             const isDragOver = this._dragOverCell === cellKey;
+            const isHighlighted = !!this.highlightWineId && wines.some((w) => w.id === this.highlightWineId);
             return b `
             <div
-              class="cell ${frontWine ? "filled" : "empty"} ${isDragOver ? "drag-over" : ""}"
+              class="cell ${frontWine ? "filled" : "empty"} ${isDragOver ? "drag-over" : ""} ${isHighlighted ? "locate-highlight" : ""}"
               style=${frontWine ? `background: ${bgColor}; --bottle-type-color: ${ringColor}` : ""}
               draggable=${frontWine ? "true" : "false"}
               @click=${() => this._onCellClick(row, col, frontWine, wineCount, cabinetDepth, wines)}
@@ -1337,6 +2407,31 @@ CabinetGrid.styles = [
 
       .cell.filled:hover .bottle-label {
         display: block;
+      }
+
+      /* "Locate" marker: a pulsing ring drawn outside the element so it
+         reads on a filled bottle, an empty slot and a box alike. */
+      .locate-highlight {
+        position: relative;
+        z-index: 3;
+        outline: 2px solid rgba(255, 193, 7, 0.9);
+        outline-offset: 1px;
+        animation: locatePulse 1.2s ease-in-out 3;
+        border-radius: inherit;
+      }
+
+      @keyframes locatePulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(255, 193, 7, 0);
+          outline: 2px solid rgba(255, 193, 7, 0.9);
+          outline-offset: 1px;
+        }
+        50% {
+          box-shadow: 0 0 10px 4px rgba(255, 193, 7, 0.65);
+          outline: 2px solid rgba(255, 193, 7, 1);
+          outline-offset: 2px;
+        }
       }
 
       .cell .disposition {
@@ -1699,6 +2794,9 @@ __decorate([
     n({ attribute: false })
 ], CabinetGrid.prototype, "wines", void 0);
 __decorate([
+    n({ attribute: false })
+], CabinetGrid.prototype, "highlightWineId", void 0);
+__decorate([
     r()
 ], CabinetGrid.prototype, "_dragOverCell", void 0);
 CabinetGrid = __decorate([
@@ -1859,6 +2957,48 @@ StarRating = __decorate([
     t("star-rating")
 ], StarRating);
 
+// Shared camera diagnostics.
+//
+// Both camera components used to decide what went wrong by substring-matching
+// err.message ("NotAllowed", "Permission"). The name is in err.name, and
+// Safari's message text ("The request is not allowed by the user agent or the
+// platform in the current context.") matches neither, so on iOS every failure
+// fell through to a generic "could not access camera" that told the user
+// nothing about the actual cause.
+// Why the live camera cannot even be attempted, or "" when it can be.
+//
+// Over plain http:// the page is not a secure context and the browser does not
+// expose navigator.mediaDevices at all — calling getUserMedia throws a
+// TypeError that reads like a mysterious failure. There is no code-side fix
+// for that, so the honest move is to say it up front and point at the device's
+// own camera, which needs no secure context.
+function cameraBlockedReason() {
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+        return ("The live camera needs a secure connection. Home Assistant is being served over " +
+            "http://, and browsers only allow camera access over https:// (or on localhost).");
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+        return "This browser does not offer live camera access.";
+    }
+    return "";
+}
+// A getUserMedia failure, in words that suggest what to do about it.
+function describeCameraError(err) {
+    switch (err?.name) {
+        case "NotAllowedError":
+        case "SecurityError":
+            return "Camera access was denied. Allow it for this site in your browser settings.";
+        case "NotFoundError":
+        case "OverconstrainedError":
+            return "No camera found on this device.";
+        case "NotReadableError":
+        case "AbortError":
+            return "The camera is busy or unavailable — another app may be using it.";
+        default:
+            return `Could not access the camera${err?.name ? ` (${err.name})` : ""}.`;
+    }
+}
+
 let LabelCamera = class LabelCamera extends i {
     constructor() {
         super(...arguments);
@@ -1886,6 +3026,14 @@ let LabelCamera = class LabelCamera extends i {
     }
     async _startCamera() {
         this._error = "";
+        // Ask why before asking for the camera: over http:// there is nothing to
+        // ask, and a TypeError from a missing navigator.mediaDevices would read as
+        // a generic failure.
+        const blocked = cameraBlockedReason();
+        if (blocked) {
+            this._error = blocked;
+            return;
+        }
         try {
             this._stream = await navigator.mediaDevices.getUserMedia({
                 video: {
@@ -1903,13 +3051,7 @@ let LabelCamera = class LabelCamera extends i {
             }
         }
         catch (err) {
-            const msg = err?.message || String(err);
-            if (msg.includes("NotAllowed") || msg.includes("Permission")) {
-                this._error = "Camera access denied. Use the upload button below instead.";
-            }
-            else {
-                this._error = "Could not access camera. Use the upload button below instead.";
-            }
+            this._error = describeCameraError(err);
         }
     }
     _stopCamera() {
@@ -1999,7 +3141,12 @@ let LabelCamera = class LabelCamera extends i {
         }
         return b `
       ${this._error
-            ? b `<div class="error-message">${this._error}</div>`
+            ? b `
+            <div class="error-message">${this._error}</div>
+            <div class="hint">
+              The button below opens your device's own camera, which works either way.
+            </div>
+          `
             : b `
             <div class="camera-container">
               <video autoplay playsinline muted></video>
@@ -2012,7 +3159,7 @@ let LabelCamera = class LabelCamera extends i {
 
       <div class="fallback-area">
         <label class="file-input-label">
-          📁 Upload from gallery
+          ${this._error ? "📷 Take a photo" : "📁 Upload from gallery"}
           <input type="file" accept="image/*" capture="environment" @change=${this._onFileSelected} />
         </label>
       </div>
@@ -2235,7 +3382,19 @@ let WineDetailDialog = class WineDetailDialog extends i {
     _updateEditField(field, value) {
         this._editData = { ...this._editData, [field]: value };
     }
+    // Applying a result to whatever is on screen now is only correct if it is
+    // still the same bottle. A Vivino refresh takes a second or two — long
+    // enough to close the dialog and open another wine — and the old result
+    // would then overwrite the new bottle wholesale, id included, silently
+    // showing the previous wine under the new one's name.
+    _applyIfStillShowing(wineId, patch) {
+        if (!this.wine || this.wine.id !== wineId)
+            return false;
+        this.wine = { ...this.wine, ...patch };
+        return true;
+    }
     async _saveFields() {
+        const wineId = this.wine?.id ?? "";
         if (!this.wine || !this.hass)
             return;
         this._saving = true;
@@ -2260,7 +3419,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
                     item_id: this.wine.id,
                     updates,
                 });
-                this.wine = { ...this.wine, ...updates };
+                if (!this._applyIfStillShowing(wineId, updates))
+                    return;
                 this._editingFields = false;
                 this._editData = {};
                 this.dispatchEvent(new CustomEvent("buy-list-updated", { bubbles: true, composed: true }));
@@ -2271,7 +3431,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
                     wine_id: this.wine.id,
                     updates,
                 });
-                this.wine = { ...this.wine, ...updates };
+                if (!this._applyIfStillShowing(wineId, updates))
+                    return;
                 this._editingFields = false;
                 this._editData = {};
                 this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
@@ -2347,6 +3508,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._tastingNotes = { ...this._tastingNotes, [field]: value };
     }
     async _saveRating() {
+        const wineId = this.wine?.id ?? "";
         if (!this.wine || !this.hass)
             return;
         this._saving = true;
@@ -2369,7 +3531,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
                     updates,
                 });
             }
-            this.wine = { ...this.wine, ...updates };
+            if (!this._applyIfStillShowing(wineId, updates))
+                return;
             this._editing = false;
             this.dispatchEvent(new CustomEvent(this.mode === "buylist" ? "buy-list-updated" : "wine-updated", { bubbles: true, composed: true }));
         }
@@ -2379,6 +3542,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._saving = false;
     }
     async _refreshFromVivino() {
+        const wineId = this.wine?.id ?? "";
         if (!this.wine || !this.hass)
             return;
         this._refreshing = true;
@@ -2405,7 +3569,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 alert(resp.error);
             }
             else if (resp.wine) {
-                this.wine = { ...this.wine, ...resp.wine };
+                if (!this._applyIfStillShowing(wineId, resp.wine))
+                    return;
                 this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
                 if (resp.vivino_image_url) {
                     this._pendingVivinoImage = resp.vivino_image_url;
@@ -2435,6 +3600,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
         this._aiFallbackReason = null;
     }
     async _updatePhoto(image_url, field = "image_url") {
+        const wineId = this.wine?.id ?? "";
         if (!this.wine || !this.hass)
             return;
         this._photoBusy = true;
@@ -2446,7 +3612,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
             else {
                 await this.hass.callWS({ type: "wine_cellar/update_wine", wine_id: this.wine.id, updates });
             }
-            this.wine = { ...this.wine, [field]: image_url };
+            if (!this._applyIfStillShowing(wineId, { [field]: image_url }))
+                return;
             this.dispatchEvent(new CustomEvent(this.mode === "buylist" ? "buy-list-updated" : "wine-updated", { bubbles: true, composed: true }));
         }
         catch (err) {
@@ -2496,6 +3663,7 @@ let WineDetailDialog = class WineDetailDialog extends i {
         }
     }
     async _analyzeWithAI() {
+        const wineId = this.wine?.id ?? "";
         if (!this.wine || !this.hass)
             return;
         this._analyzing = true;
@@ -2508,7 +3676,8 @@ let WineDetailDialog = class WineDetailDialog extends i {
                 alert(resp.error);
             }
             else if (resp.wine) {
-                this.wine = { ...this.wine, ...resp.wine };
+                if (!this._applyIfStillShowing(wineId, resp.wine))
+                    return;
                 this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
             }
         }
@@ -2542,6 +3711,19 @@ let WineDetailDialog = class WineDetailDialog extends i {
     _hasTastingNotes() {
         const n = this._tastingNotes;
         return !!(n.aroma || n.taste || n.finish || n.overall);
+    }
+    // A check later than the last update means that attempt found nothing —
+    // worth showing, so a fruitless retry stays visibly different from never
+    // having tried at all.
+    _renderSourceDates(updatedAt, checkedAt) {
+        if (!updatedAt) {
+            return b `nothing found · checked ${this._formatUpdatedAt(checkedAt)}`;
+        }
+        if (checkedAt && checkedAt > updatedAt) {
+            return b `${this._formatUpdatedAt(updatedAt)} · rechecked
+        ${this._formatUpdatedAt(checkedAt)}, nothing new`;
+        }
+        return b `${this._formatUpdatedAt(updatedAt)}`;
     }
     _formatUpdatedAt(iso) {
         if (!iso)
@@ -2794,10 +3976,10 @@ let WineDetailDialog = class WineDetailDialog extends i {
                   <button class="btn btn-primary" style="background:#c62828"
                     @click=${this._onRemove}>✕ Remove</button>
                 </div>
-                ${wine.vivino_updated_at || wine.ai_updated_at
+                ${wine.vivino_checked_at || wine.ai_checked_at || wine.vivino_updated_at || wine.ai_updated_at
                 ? b `
                       <div style="text-align:center;font-size:0.68em;color:var(--wc-text-secondary);margin-top:-6px;padding-bottom:10px">
-                        ${wine.vivino_updated_at
+                        ${wine.vivino_checked_at || wine.vivino_updated_at
                     ? b `${wine.vivino_id
                         ? b `<a
                                   href="https://www.vivino.com/w/${wine.vivino_id}"
@@ -2806,10 +3988,15 @@ let WineDetailDialog = class WineDetailDialog extends i {
                                   style="color:inherit;text-decoration:underline"
                                   @click=${(e) => e.stopPropagation()}
                                 >Vivino</a>`
-                        : b `Vivino`}: ${this._formatUpdatedAt(wine.vivino_updated_at)}`
+                        : b `Vivino`}: ${this._renderSourceDates(wine.vivino_updated_at, wine.vivino_checked_at)}`
                     : A}
-                        ${wine.vivino_updated_at && wine.ai_updated_at ? " · " : A}
-                        ${wine.ai_updated_at ? b `AI: ${this._formatUpdatedAt(wine.ai_updated_at)}` : A}
+                        ${(wine.vivino_checked_at || wine.vivino_updated_at) &&
+                    (wine.ai_checked_at || wine.ai_updated_at)
+                    ? " · "
+                    : A}
+                        ${wine.ai_checked_at || wine.ai_updated_at
+                    ? b `AI: ${this._renderSourceDates(wine.ai_updated_at, wine.ai_checked_at)}`
+                    : A}
                       </div>
                     `
                 : A}
@@ -3707,6 +4894,16 @@ let BarcodeScanner = class BarcodeScanner extends i {
             }));
             return;
         }
+        const blocked = cameraBlockedReason();
+        if (blocked) {
+            this._error = `${blocked} Enter the barcode manually below.`;
+            this.dispatchEvent(new CustomEvent("scanner-error", {
+                detail: { error: this._error },
+                bubbles: true,
+                composed: true,
+            }));
+            return;
+        }
         try {
             this._stream = await navigator.mediaDevices.getUserMedia({
                 video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -3725,16 +4922,7 @@ let BarcodeScanner = class BarcodeScanner extends i {
             this._scanFrame();
         }
         catch (err) {
-            const msg = err?.message || String(err);
-            if (msg.includes("NotAllowed") || msg.includes("Permission")) {
-                this._error = "Camera access denied. Please allow camera access in your browser settings.";
-            }
-            else if (msg.includes("NotFound") || msg.includes("no camera")) {
-                this._error = "No camera found on this device.";
-            }
-            else {
-                this._error = `Camera error: ${msg}`;
-            }
+            this._error = `${describeCameraError(err)} Enter the barcode manually below.`;
             this.dispatchEvent(new CustomEvent("scanner-error", {
                 detail: { error: this._error },
                 bubbles: true,
@@ -3912,6 +5100,8 @@ let AddWineDialog = class AddWineDialog extends i {
         this._scanMode = "idle";
         this._barcode = "";
         this._loading = false;
+        this._quantity = 1;
+        this._addProgress = 0;
         this._lookupResult = null;
         this._wineData = {};
         this._error = "";
@@ -3921,6 +5111,12 @@ let AddWineDialog = class AddWineDialog extends i {
         this._frontImageRaw = "";
         this._showBackPrompt = false;
         this._searchResults = [];
+        // Bumped every time the dialog opens. Label recognition waits up to 45
+        // seconds on the AI, which is long enough to cancel, close, and start
+        // adding a different bottle — and the late reply would then overwrite that
+        // bottle's form with the previous one's reading and jump to the details
+        // step. Every async handler here checks the session it started in.
+        this._session = 0;
     }
     get _steps() {
         return this.buyListMode
@@ -3936,6 +5132,9 @@ let AddWineDialog = class AddWineDialog extends i {
                 this._lookupResult = null;
                 this._error = "";
                 this._loading = false;
+                this._quantity = 1;
+                this._addProgress = 0;
+                this._session++;
                 this._labelLoading = false;
                 this._searchResults = [];
                 this._captureStage = "front";
@@ -3987,6 +5186,7 @@ let AddWineDialog = class AddWineDialog extends i {
     async _lookupBarcode() {
         if (!this._barcode.trim())
             return;
+        const session = this._session;
         this._loading = true;
         this._error = "";
         try {
@@ -3994,6 +5194,8 @@ let AddWineDialog = class AddWineDialog extends i {
                 type: "wine_cellar/lookup_barcode",
                 barcode: this._barcode.trim(),
             });
+            if (session !== this._session)
+                return;
             if (result.result) {
                 this._lookupResult = result.result;
                 this._wineData = {
@@ -4013,6 +5215,7 @@ let AddWineDialog = class AddWineDialog extends i {
                     food_pairings: result.result.food_pairings || "",
                     alcohol: result.result.alcohol || "",
                     vivino_updated_at: result.result.source === "vivino" ? new Date().toISOString() : this._wineData.vivino_updated_at,
+                    vivino_checked_at: result.result.source === "vivino" ? new Date().toISOString() : this._wineData.vivino_checked_at,
                 };
                 this._step = "details";
             }
@@ -4022,6 +5225,8 @@ let AddWineDialog = class AddWineDialog extends i {
             }
         }
         catch (err) {
+            if (session !== this._session)
+                return;
             this._wineData = { ...this._wineData, barcode: this._barcode.trim() };
             this._onBarcodeLookupFailed("Barcode lookup failed.");
         }
@@ -4044,6 +5249,7 @@ let AddWineDialog = class AddWineDialog extends i {
         }
     }
     async _searchWine() {
+        const session = this._session;
         const input = this.shadowRoot?.querySelector(".search-input");
         if (!input?.value.trim())
             return;
@@ -4055,6 +5261,8 @@ let AddWineDialog = class AddWineDialog extends i {
                 type: "wine_cellar/search_wine",
                 query: input.value.trim(),
             });
+            if (session !== this._session)
+                return;
             if (result.results && result.results.length > 0) {
                 this._searchResults = result.results;
             }
@@ -4085,6 +5293,7 @@ let AddWineDialog = class AddWineDialog extends i {
             food_pairings: item.food_pairings || "",
             alcohol: item.alcohol || "",
             vivino_updated_at: new Date().toISOString(),
+            vivino_checked_at: new Date().toISOString(),
         };
         this._searchResults = [];
         this._step = "details";
@@ -4104,6 +5313,7 @@ let AddWineDialog = class AddWineDialog extends i {
         }
     }
     async _finishLabelScan(backImageRaw) {
+        const session = this._session;
         this._showBackPrompt = false;
         this._labelLoading = true;
         this._error = "";
@@ -4113,6 +5323,10 @@ let AddWineDialog = class AddWineDialog extends i {
                 image: this._frontImageRaw,
                 ...(backImageRaw ? { back_image: backImageRaw } : {}),
             });
+            // The slowest wait in the app. If the dialog was reopened meanwhile,
+            // this reading belongs to a bottle the user has moved on from.
+            if (session !== this._session)
+                return;
             if (result.result) {
                 // Resize captured photos to thumbnails for storage
                 const thumbUrl = await resizeImageForStorage(this._frontImageRaw);
@@ -4138,6 +5352,7 @@ let AddWineDialog = class AddWineDialog extends i {
                     image_url: thumbUrl,
                     back_image_url: backThumbUrl,
                     ai_updated_at: new Date().toISOString(),
+                    ai_checked_at: new Date().toISOString(),
                 };
                 this._scanMode = "idle";
                 this._step = "details";
@@ -4152,6 +5367,8 @@ let AddWineDialog = class AddWineDialog extends i {
             }
         }
         catch (err) {
+            if (session !== this._session)
+                return;
             const msg = err?.message || String(err);
             console.error("Wine Cellar: label recognition error:", msg);
             this._error = `Label recognition error: ${msg}`;
@@ -4164,14 +5381,60 @@ let AddWineDialog = class AddWineDialog extends i {
     _updateField(field, value) {
         this._wineData = { ...this._wineData, [field]: value };
     }
-    _selectZone(zoneId) {
-        // Land after the last occupied depth in that zone instead of always
-        // depth 0 — otherwise a second bottle added to the same zone collides
-        // with whatever's already at depth 0.
-        const depth = this.wines
-            .filter((w) => w.cabinet_id === this._wineData.cabinet_id && w.zone === zoneId)
-            .reduce((max, w) => Math.max(max, w.depth || 0), -1) + 1;
-        this._wineData = { ...this._wineData, zone: zoneId, row: null, col: null, depth };
+    _zoneUsage(sr) {
+        const cabinet = this.cabinets.find((c) => c.id === this._wineData.cabinet_id);
+        const container = {
+            cabinetId: this._wineData.cabinet_id || "",
+            kind: "zone",
+            zone: `storage-${sr.row}`,
+            row: null,
+            col: null,
+        };
+        return containerUsage(container, cabinet, this.wines);
+    }
+    _selectZone(sr) {
+        // Adding a bottle used to append past the end of a full bin, silently
+        // growing it beyond its configured capacity. Refuse instead, the way
+        // drag-and-drop and paste already do.
+        const { used, capacity, nextDepth, full } = this._zoneUsage(sr);
+        const label = sr.name || (sr.type === "box" ? "This box" : "This bin");
+        if (full) {
+            this._error = `${label} is full (${used}/${capacity}). Free a slot, or raise its capacity in Manage Racks.`;
+            return;
+        }
+        this._error = "";
+        this._wineData = {
+            ...this._wineData,
+            zone: `storage-${sr.row}`,
+            row: null,
+            col: null,
+            depth: nextDepth,
+        };
+    }
+    // Send the bottle to a container the suggestion strip proposed, landing on
+    // its first free depth.
+    _applyContainer(c) {
+        const cabinet = this.cabinets.find((cab) => cab.id === c.cabinetId);
+        const patch = placementIn(c, cabinet, this.wines);
+        if (!patch) {
+            this._error = `${containerLabel(c, this.cabinets)} is full. Free a slot, or raise its capacity in Manage Racks.`;
+            return;
+        }
+        this._error = "";
+        this._wineData = { ...this._wineData, ...patch };
+    }
+    _planSlots(count) {
+        return planSlots(this._wineData, this.cabinets, this.wines, count);
+    }
+    // Free space at the chosen destination; null when there is no limit.
+    _availableSlots() {
+        const free = freeAt(this._wineData, this.cabinets, this.wines);
+        return Number.isFinite(free) ? free : null;
+    }
+    _setQuantity(value) {
+        const available = this._availableSlots();
+        const max = available === null ? 99 : Math.max(1, Math.min(99, available));
+        this._quantity = Math.max(1, Math.min(max, Math.round(value) || 1));
     }
     async _addWine() {
         this._loading = true;
@@ -4184,10 +5447,36 @@ let AddWineDialog = class AddWineDialog extends i {
                 this.dispatchEvent(new CustomEvent("buy-list-updated", { bubbles: true, composed: true }));
             }
             else {
-                await this.hass.callWS({
-                    type: "wine_cellar/add_wine",
-                    wine: this._wineData,
-                });
+                const slots = this._planSlots(this._quantity);
+                if (!slots.length) {
+                    this._error = "No free slot left at that destination.";
+                    this._loading = false;
+                    return;
+                }
+                // Each bottle is added at its own slot, so identical bottles never
+                // stack on top of each other.
+                const addedIds = [];
+                for (let i = 0; i < slots.length; i++) {
+                    this._addProgress = i + 1;
+                    const result = await this.hass.callWS({
+                        type: "wine_cellar/add_wine",
+                        wine: { ...this._wineData, ...slots[i] },
+                    });
+                    if (result?.wine?.id)
+                        addedIds.push(result.wine.id);
+                }
+                // A bin is a pile: what you just put in sits on top, so the new
+                // bottles take the first slots and the rest shift down. One call
+                // renumbers the bin; listing only the new ids is enough, the backend
+                // appends the others in their existing order.
+                if (this._wineData.zone && addedIds.length) {
+                    await this.hass.callWS({
+                        type: "wine_cellar/reorder_zone",
+                        cabinet_id: this._wineData.cabinet_id,
+                        zone: this._wineData.zone,
+                        wine_ids: addedIds,
+                    });
+                }
                 this.dispatchEvent(new CustomEvent("wine-added", { bubbles: true, composed: true }));
             }
             this._close();
@@ -4195,6 +5484,7 @@ let AddWineDialog = class AddWineDialog extends i {
         catch (err) {
             this._error = this.buyListMode ? "Failed to add to buy list." : "Failed to add wine.";
         }
+        this._addProgress = 0;
         this._loading = false;
     }
     async _quickAddToBuyList() {
@@ -4576,6 +5866,55 @@ let AddWineDialog = class AddWineDialog extends i {
       </div>
     `;
     }
+    // Destinations deduced from where this bottle's relatives already sit. The
+    // cellar has no declared zone rules, so its own layout is the only signal:
+    // every suggestion says which bottles are already there and why they match.
+    _renderSuggestions() {
+        const suggestions = suggestDestinations(this._wineData, this.wines, this.cabinets, 3);
+        if (!suggestions.length)
+            return A;
+        const current = containerOf(this._wineData);
+        const spaceText = (s) => {
+            if (s.usage.full)
+                return `Full · ${s.usage.used}/${s.usage.capacity}`;
+            if (!Number.isFinite(s.usage.free))
+                return "Room";
+            return s.usage.free === 1 ? "1 free" : `${s.usage.free} free`;
+        };
+        return b `
+      <div class="suggest-strip">
+        <div class="suggest-title">Suggested — where its relatives are</div>
+        ${suggestions.map((s) => {
+            const selected = !!current && sameContainer(current, s.container);
+            return b `
+            <button
+              class="suggest-item ${s.usage.full ? "full" : ""} ${selected ? "selected" : ""}"
+              ?disabled=${s.usage.full}
+              @click=${() => this._applyContainer(s.container)}
+            >
+              <span class="suggest-where">${s.label}</span>
+              <span class="suggest-why">${s.reason}</span>
+              <span class="suggest-space ${s.usage.full || s.usage.free <= 1 ? "tight" : ""}">
+                ${spaceText(s)}
+              </span>
+            </button>
+            ${s.alternative
+                ? b `
+                  <div class="suggest-alt">
+                    No room left there — split the series into
+                    <button @click=${() => this._applyContainer(s.alternative.container)}>
+                      ${s.alternative.label}
+                    </button>
+                    (${s.alternative.free === 1 ? "1 free" : `${s.alternative.free} free`}), or free a
+                    slot first.
+                  </div>
+                `
+                : A}
+          `;
+        })}
+      </div>
+    `;
+    }
     _renderLocationStep() {
         const selectedCabinet = this.cabinets.find((c) => c.id === this._wineData.cabinet_id);
         const zones = selectedCabinet?.storage_rows || [];
@@ -4586,6 +5925,8 @@ let AddWineDialog = class AddWineDialog extends i {
         <div style="font-size: 0.85em; color: var(--wc-text-secondary); margin-bottom: 12px">
           Select a cabinet and position for this bottle
         </div>
+
+        ${this._renderSuggestions()}
 
         <div class="location-grid">
           ${this.cabinets.map((cab) => b `
@@ -4610,13 +5951,21 @@ let AddWineDialog = class AddWineDialog extends i {
                 style="font-size:0.8em;padding:6px 10px"
                 @click=${() => this._updateField("zone", "")}
               >None — use grid Row/Col</button>
-              ${zones.map((sr) => b `
-                <button
-                  class="btn ${this._wineData.zone === `storage-${sr.row}` ? "btn-primary" : "btn-outline"}"
-                  style="font-size:0.8em;padding:6px 10px"
-                  @click=${() => this._selectZone(`storage-${sr.row}`)}
-                >${sr.name || (sr.type === "box" ? "Box" : "Bulk Bin")}</button>
-              `)}
+              ${zones.map((sr) => {
+            const usage = this._zoneUsage(sr);
+            const selected = this._wineData.zone === `storage-${sr.row}`;
+            return b `
+                  <button
+                    class="btn ${selected ? "btn-primary" : "btn-outline"}"
+                    style="font-size:0.8em;padding:6px 10px${usage.full ? ";opacity:0.5" : ""}"
+                    title=${usage.full ? "Full — free a slot or raise its capacity" : ""}
+                    @click=${() => this._selectZone(sr)}
+                  >
+                    ${sr.name || (sr.type === "box" ? "Box" : "Bulk Bin")}
+                    <span style="opacity:0.75">${usage.used}/${usage.capacity}</span>
+                  </button>
+                `;
+        })}
             </div>
           </div>
         ` : A}
@@ -4667,8 +6016,76 @@ let AddWineDialog = class AddWineDialog extends i {
             this._error = "Pick a zone, or enter both Row and Column, so the bottle has a findable spot.";
             return;
         }
+        const cabinet = this.cabinets.find((c) => c.id === d.cabinet_id);
+        if (cabinet && !d.zone && d.row != null && d.col != null) {
+            if (d.row < 0 || d.row >= cabinet.rows || d.col < 0 || d.col >= cabinet.cols) {
+                this._error = `That slot is outside ${cabinet.name} (${cabinet.rows} rows × ${cabinet.cols} columns).`;
+                return;
+            }
+            const isStorageRow = (cabinet.storage_rows || []).some((sr) => sr.row === d.row);
+            if (isStorageRow) {
+                this._error = "That row is a bin or box, not grid slots — pick it from the zone list above.";
+                return;
+            }
+            // Stack behind whatever is already in the slot, up to the rack's depth,
+            // instead of landing on top of another bottle at depth 0.
+            const occupied = new Set(this.wines
+                .filter((w) => w.cabinet_id === d.cabinet_id && w.row === d.row && w.col === d.col)
+                .map((w) => w.depth || 0));
+            const rackDepth = cabinet.depth || 1;
+            let depth = 0;
+            while (occupied.has(depth))
+                depth++;
+            if (depth >= rackDepth) {
+                this._error = `Row ${d.row + 1}, column ${d.col + 1} is full (${occupied.size}/${rackDepth} deep).`;
+                return;
+            }
+            this._wineData = { ...this._wineData, depth };
+        }
         this._error = "";
         this._goToStep("confirm");
+    }
+    _renderQuantityPicker() {
+        const available = this._availableSlots();
+        const max = available === null ? 99 : Math.max(1, Math.min(99, available));
+        const destination = this._wineData.cabinet_id
+            ? this._planSlots(this._quantity)
+            : null;
+        return b `
+      <div class="qty-row">
+        <span class="qty-label">Bottles</span>
+        <div class="qty-stepper">
+          <button
+            class="qty-btn"
+            ?disabled=${this._quantity <= 1}
+            @click=${() => this._setQuantity(this._quantity - 1)}
+          >−</button>
+          <input
+            class="qty-input"
+            type="number"
+            min="1"
+            max=${max}
+            .value=${String(this._quantity)}
+            @change=${(e) => this._setQuantity(Number(e.target.value))}
+          />
+          <button
+            class="qty-btn"
+            ?disabled=${this._quantity >= max}
+            @click=${() => this._setQuantity(this._quantity + 1)}
+          >+</button>
+        </div>
+      </div>
+      <div class="qty-hint">
+        ${available === null
+            ? "Identical bottles, added unassigned."
+            : available === 0
+                ? "That destination is full."
+                : b `${available} slot${available > 1 ? "s" : ""} free here.
+              ${destination && destination.length > 1
+                    ? `The ${destination.length} bottles take consecutive free slots.`
+                    : ""}`}
+      </div>
+    `;
     }
     _renderConfirmStep() {
         const cabinetName = this.cabinets.find((c) => c.id === this._wineData.cabinet_id)?.name ||
@@ -4735,6 +6152,8 @@ let AddWineDialog = class AddWineDialog extends i {
             : A}
         </div>
 
+        ${this.buyListMode ? A : this._renderQuantityPicker()}
+
         ${this._error
             ? b `<div class="error-msg">${this._error}</div>`
             : A}
@@ -4746,8 +6165,14 @@ let AddWineDialog = class AddWineDialog extends i {
         </button>
         <button class="btn btn-primary" @click=${this._addWine}>
           ${this._loading
-            ? b `<span class="loading-spinner"></span>`
-            : this.buyListMode ? "Add to Buy List" : "Add Wine"}
+            ? b `<span class="loading-spinner"></span>${this._addProgress && this._quantity > 1
+                ? b ` ${this._addProgress}/${this._quantity}`
+                : A}`
+            : this.buyListMode
+                ? "Add to Buy List"
+                : this._quantity > 1
+                    ? `Add ${this._quantity} Bottles`
+                    : "Add Wine"}
         </button>
       </div>
     `;
@@ -4937,6 +6362,97 @@ AddWineDialog.styles = [
         margin-top: 12px;
       }
 
+      .suggest-strip {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 14px;
+        padding: 10px;
+        border: 1px solid var(--wc-border);
+        border-radius: 10px;
+        background: rgba(114, 47, 55, 0.04);
+      }
+
+      .suggest-title {
+        font-size: 0.75em;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--wc-text-secondary);
+      }
+
+      .suggest-item {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        width: 100%;
+        text-align: left;
+        font: inherit;
+        color: inherit;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        background: var(--wc-card-bg, transparent);
+        padding: 8px 10px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+
+      .suggest-item:hover:not(.full) {
+        border-color: var(--wc-primary);
+        background: rgba(114, 47, 55, 0.08);
+      }
+
+      .suggest-item.selected {
+        border-color: var(--wc-primary);
+        background: rgba(114, 47, 55, 0.12);
+      }
+
+      .suggest-item.full {
+        cursor: default;
+        opacity: 0.65;
+      }
+
+      .suggest-item.full .suggest-where {
+        text-decoration: line-through;
+      }
+
+      .suggest-where {
+        font-weight: 600;
+        font-size: 0.85em;
+        white-space: nowrap;
+      }
+
+      .suggest-why {
+        flex: 1;
+        font-size: 0.78em;
+        color: var(--wc-text-secondary);
+      }
+
+      .suggest-space {
+        font-size: 0.75em;
+        white-space: nowrap;
+        color: var(--wc-text-secondary);
+      }
+
+      .suggest-space.tight {
+        color: #c62828;
+      }
+
+      .suggest-alt {
+        margin: -2px 0 2px 10px;
+        font-size: 0.75em;
+        color: var(--wc-text-secondary);
+      }
+
+      .suggest-alt button {
+        font: inherit;
+        color: var(--wc-primary);
+        background: none;
+        border: none;
+        padding: 0;
+        cursor: pointer;
+        text-decoration: underline;
+      }
+
       .location-cabinet {
         border: 2px solid var(--wc-border);
         border-radius: 10px;
@@ -4995,6 +6511,67 @@ AddWineDialog.styles = [
 
       @keyframes spin {
         to { transform: rotate(360deg); }
+      }
+
+      .qty-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .qty-label {
+        font-size: 0.85em;
+        font-weight: 500;
+        color: var(--wc-text-secondary);
+      }
+
+      .qty-stepper {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .qty-btn {
+        width: 32px;
+        height: 32px;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        font-size: 1.1em;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      .qty-btn:hover:not(:disabled) {
+        border-color: var(--wc-primary);
+        color: var(--wc-primary);
+      }
+
+      .qty-btn:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+
+      .qty-input {
+        width: 56px;
+        padding: 6px 4px;
+        text-align: center;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        font-size: 1em;
+        font-weight: 600;
+      }
+
+      .qty-hint {
+        margin-top: 6px;
+        font-size: 0.78em;
+        color: var(--wc-text-secondary);
+        line-height: 1.4;
       }
 
       .confirm-summary {
@@ -5165,6 +6742,12 @@ __decorate([
 ], AddWineDialog.prototype, "_loading", void 0);
 __decorate([
     r()
+], AddWineDialog.prototype, "_quantity", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_addProgress", void 0);
+__decorate([
+    r()
 ], AddWineDialog.prototype, "_lookupResult", void 0);
 __decorate([
     r()
@@ -5198,18 +6781,32 @@ let WineSearchBar = class WineSearchBar extends i {
     constructor() {
         super(...arguments);
         this.value = "";
-        this._filter = "all";
+        this.filter = "all";
     }
     _onInput(e) {
         const value = e.target.value;
         this.dispatchEvent(new CustomEvent("search-change", {
-            detail: { query: value, filter: this._filter },
+            detail: { query: value, filter: this.filter },
             bubbles: true,
             composed: true,
         }));
     }
+    // Emptying the field by hand is fiddly on a phone even once it is wide
+    // enough to see. One tap, and the caret stays where the user can keep typing.
+    _clear() {
+        this.dispatchEvent(new CustomEvent("search-change", {
+            detail: { query: "", filter: this.filter },
+            bubbles: true,
+            composed: true,
+        }));
+        const input = this.shadowRoot?.querySelector("input");
+        if (input) {
+            input.value = "";
+            input.focus();
+        }
+    }
     _onFilterChange(filter) {
-        this._filter = filter;
+        this.filter = filter;
         const input = this.shadowRoot?.querySelector("input");
         this.dispatchEvent(new CustomEvent("search-change", {
             detail: { query: input?.value || "", filter },
@@ -5231,16 +6828,28 @@ let WineSearchBar = class WineSearchBar extends i {
         <div class="search-input-wrapper">
           <span class="search-icon">🔍</span>
           <input
-            type="text"
+            type="search"
             placeholder="Search wines..."
+            enterkeyhint="search"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
             .value=${this.value}
             @input=${this._onInput}
           />
+          ${this.value
+            ? b `
+                <button class="search-clear" title="Clear search" aria-label="Clear search" @click=${this._clear}>
+                  ✕
+                </button>
+              `
+            : A}
         </div>
         <div class="filter-chips">
           ${filters.map((f) => b `
               <button
-                class="chip ${this._filter === f.id ? "active" : ""}"
+                class="chip ${this.filter === f.id ? "active" : ""}"
                 @click=${() => this._onFilterChange(f.id)}
               >
                 ${f.label}
@@ -5258,15 +6867,21 @@ WineSearchBar.styles = [
         display: block;
       }
 
+      /* The chips and the field used to share one non-wrapping row. Six chips
+         that refuse to break left the input 46px wide on a phone, of which two
+         were usable for text. The field keeps a floor and the chips drop to
+         their own line rather than crushing it. */
       .search-container {
         display: flex;
+        flex-wrap: wrap;
         gap: 8px;
         padding: 0 16px 8px;
         align-items: center;
       }
 
       .search-input-wrapper {
-        flex: 1;
+        flex: 1 1 220px;
+        min-width: 0;
         position: relative;
       }
 
@@ -5282,7 +6897,7 @@ WineSearchBar.styles = [
 
       input {
         width: 100%;
-        padding: 8px 12px 8px 32px;
+        padding: 8px 38px 8px 32px;
         border: 1px solid var(--wc-border);
         border-radius: 20px;
         font-size: 0.9em;
@@ -5297,8 +6912,53 @@ WineSearchBar.styles = [
         outline: none;
       }
 
+      /* Safari zooms the whole page when a focused field computes under 16px,
+         which is the other half of "the search box is unusable on my phone".
+         Touch pointers only, so the desktop field keeps its size. */
+      @media (pointer: coarse) {
+        input {
+          font-size: 16px;
+        }
+      }
+
+      /* One clear button, ours: WebKit's own only appears on some platforms
+         and would sit on top of this one where it does. */
+      input::-webkit-search-cancel-button,
+      input::-webkit-search-decoration {
+        -webkit-appearance: none;
+        appearance: none;
+      }
+
+      /* 30px rather than the icon's visual size: this is a thumb target on the
+         device where the field was unusable in the first place. */
+      .search-clear {
+        position: absolute;
+        right: 5px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--wc-text-secondary);
+        font-size: 0.8em;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0;
+      }
+
+      .search-clear:hover {
+        background: rgba(114, 47, 55, 0.12);
+        color: var(--wc-text);
+      }
+
       .filter-chips {
         display: flex;
+        flex-wrap: wrap;
         gap: 4px;
       }
 
@@ -5329,13 +6989,14 @@ __decorate([
     n({ type: String })
 ], WineSearchBar.prototype, "value", void 0);
 __decorate([
-    r()
-], WineSearchBar.prototype, "_filter", void 0);
+    n({ type: String })
+], WineSearchBar.prototype, "filter", void 0);
 WineSearchBar = __decorate([
     t("wine-search-bar")
 ], WineSearchBar);
 
-let RackSettingsDialog = class RackSettingsDialog extends i {
+var RackSettingsDialog_1;
+let RackSettingsDialog = RackSettingsDialog_1 = class RackSettingsDialog extends i {
     constructor() {
         super(...arguments);
         this.open = false;
@@ -5365,11 +7026,51 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
     _winesInCabinet(cabinetId) {
         return this.wines.filter((w) => w.cabinet_id === cabinetId).length;
     }
-    _winesOutOfBounds(cabinetId, newRows, newCols) {
-        return this.wines.filter((w) => w.cabinet_id === cabinetId &&
-            w.row != null &&
-            w.col != null &&
-            (w.row >= newRows || w.col >= newCols)).length;
+    // Storage rows that survive the pending row count — a bin on a row that no
+    // longer exists is gone, whatever the editor still holds.
+    _survivingStorageRows() {
+        const newRows = this._editCabinet.rows || 1;
+        return this._editStorageRows.filter((sr) => sr.row < newRows);
+    }
+    static _capacityOf(sr) {
+        return sr.type === "box"
+            ? (sr.boxes || []).reduce((sum, b) => sum + b, 0)
+            : sr.capacity || 0;
+    }
+    // Every bottle the pending edit would leave without a slot that exists.
+    //
+    // The warning and the save both read this, so what the user is promised
+    // and what actually happens cannot drift apart. It used to consider only
+    // rows and columns, which meant three ways of losing a bottle's position
+    // went unwarned and unhandled: making a rack shallower, shrinking a bin
+    // past its contents, and deleting a bin outright. None of them ever
+    // deleted a bottle — they left it pointing at a slot the rack no longer
+    // had, counted in the total and drawn nowhere.
+    _displacedWines() {
+        const cabinetId = this._editCabinet.id;
+        if (!cabinetId)
+            return [];
+        const newRows = this._editCabinet.rows || 1;
+        const newCols = this._editCabinet.cols || 8;
+        const newDepth = this._editCabinet.depth || 1;
+        const rows = this._survivingStorageRows();
+        return this.wines.filter((w) => {
+            if (w.cabinet_id !== cabinetId)
+                return false;
+            if (w.zone) {
+                const sr = rows.find((s) => `storage-${s.row}` === w.zone);
+                if (!sr)
+                    return true;
+                return (w.depth || 0) >= RackSettingsDialog_1._capacityOf(sr);
+            }
+            if (w.row == null || w.col == null)
+                return false;
+            if (w.row >= newRows || w.col >= newCols)
+                return true;
+            if ((w.depth || 0) >= newDepth)
+                return true;
+            return rows.some((sr) => sr.row === w.row);
+        });
     }
     _startAdd() {
         this._mode = "add";
@@ -5533,7 +7234,10 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
             const newRows = this._editCabinet.rows || 1;
             const newCols = this._editCabinet.cols || 8;
             // Filter out storage rows beyond the new row count
-            const validStorageRows = this._editStorageRows.filter((sr) => sr.row < newRows);
+            const validStorageRows = this._survivingStorageRows();
+            // Worked out before the rack changes shape: afterwards the old slot
+            // is unrecoverable, and this is the same list the warning showed.
+            const displaced = this._displacedWines();
             await this.hass.callWS({
                 type: "wine_cellar/update_cabinet",
                 cabinet_id: cabinetId,
@@ -5548,16 +7252,11 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
                     orientation: "vertical",
                 },
             });
-            // Unassign wines that are out of bounds or on rows that became storage
-            const outOfBounds = this.wines.filter((w) => w.cabinet_id === cabinetId &&
-                w.row != null &&
-                w.col != null &&
-                (w.row >= newRows || w.col >= newCols || validStorageRows.some((sr) => sr.row === w.row)));
-            for (const wine of outOfBounds) {
+            for (const wine of displaced) {
                 await this.hass.callWS({
                     type: "wine_cellar/update_wine",
                     wine_id: wine.id,
-                    updates: { cabinet_id: "", row: null, col: null, zone: "" },
+                    updates: { cabinet_id: "", row: null, col: null, zone: "", depth: 0 },
                 });
             }
             this._notifyUpdate();
@@ -5695,18 +7394,8 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
         const numRows = this._editCabinet.rows || 1;
         const numCols = this._editCabinet.cols || 8;
         const numDepth = this._editCabinet.depth || 1;
-        // Calculate out-of-bounds warning for edits
-        let oobCount = 0;
-        if (isEdit && this._editCabinet.id) {
-            const orig = this.cabinets.find((c) => c.id === this._editCabinet.id);
-            if (orig) {
-                const newRows = this._editCabinet.rows || orig.rows;
-                const newCols = this._editCabinet.cols || orig.cols;
-                if (newRows < orig.rows || newCols < orig.cols) {
-                    oobCount = this._winesOutOfBounds(this._editCabinet.id, newRows, newCols);
-                }
-            }
-        }
+        // Which bottles this edit would displace, whichever way it shrinks.
+        const displaced = isEdit ? this._displacedWines() : [];
         return b `
       <div class="dialog-body">
         <div class="form-group">
@@ -5799,7 +7488,7 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
                         <input
                           type="text"
                           class="row-name-input"
-                          .value=${sr?.name || "Storage"}
+                          .value=${sr?.name ?? ""}
                           @input=${(e) => this._updateStorageRowName(row, e.target.value)}
                           @click=${(e) => e.stopPropagation()}
                           placeholder="Zone name"
@@ -5840,10 +7529,20 @@ let RackSettingsDialog = class RackSettingsDialog extends i {
           <!-- Use the Rows stepper above to add/remove rows -->
         </div>
 
-        ${oobCount > 0
+        ${displaced.length > 0
             ? b `
               <div class="warning-msg">
-                Shrinking will unassign ${oobCount} wine${oobCount > 1 ? "s" : ""} that are outside the new grid bounds.
+                This leaves ${displaced.length}
+                bottle${displaced.length > 1 ? "s" : ""} without a slot.
+                ${displaced.length > 1 ? "They" : "It"} will be moved to
+                <strong>Unassigned</strong> — nothing is deleted, and you can put
+                ${displaced.length > 1 ? "them" : "it"} back anywhere.
+                <div class="warning-list">
+                  ${displaced.slice(0, 6).map((w) => b `<div>${w.name || "Unnamed wine"}</div>`)}
+                  ${displaced.length > 6
+                ? b `<div>…and ${displaced.length - 6} more</div>`
+                : A}
+                </div>
               </div>
             `
             : A}
@@ -6009,6 +7708,13 @@ RackSettingsDialog.styles = [
         font-size: 0.85em;
         color: #e65100;
         margin-top: 12px;
+      }
+
+      .warning-list {
+        margin-top: 6px;
+        padding-left: 10px;
+        font-size: 0.95em;
+        opacity: 0.85;
       }
 
       .delete-info {
@@ -6369,7 +8075,7 @@ __decorate([
 __decorate([
     r()
 ], RackSettingsDialog.prototype, "_error", void 0);
-RackSettingsDialog = __decorate([
+RackSettingsDialog = RackSettingsDialog_1 = __decorate([
     t("rack-settings-dialog")
 ], RackSettingsDialog);
 
@@ -6720,8 +8426,8 @@ let WineListDialog = class WineListDialog extends i {
                   ${wine.bottle_size && wine.bottle_size !== "750ml"
                 ? b `<div class="wl-detail-row"><span class="wl-detail-label">Size:</span>${wine.bottle_size}</div>`
                 : A}
-                  ${wine.vivino_ratings_count
-                ? b `<div class="wl-detail-row"><span class="wl-detail-label">Vivino:</span>${wine.vivino_rating?.toFixed(1)} (${wine.vivino_ratings_count.toLocaleString()} ratings)</div>`
+                  ${wine.vivino_rating
+                ? b `<div class="wl-detail-row"><span class="wl-detail-label">Vivino:</span>${wine.vivino_rating.toFixed(1)}${wine.vivino_ratings_count ? ` (${wine.vivino_ratings_count.toLocaleString()} ratings)` : ""}</div>`
                 : A}
                 </div>
               `
@@ -7237,6 +8943,23 @@ WineListDialog = __decorate([
     t("wine-list-dialog")
 ], WineListDialog);
 
+// Persisted so the inventory reopens the way it was left; the search query is
+// deliberately excluded — a stale query silently hiding the cellar is far more
+// confusing than a stale sort order.
+const PREFS_KEY = "wine_cellar_inventory_prefs_v1";
+const DEFAULT_FILTERS = {
+    typeFilter: "all",
+    dispositionFilter: "all",
+    countryFilter: "all",
+    grapeFilter: "all",
+    foodFilter: "all",
+    cabinetFilter: "all",
+    minRating: 0,
+    maxPrice: null,
+    vintageMin: null,
+    vintageMax: null,
+    preset: "all",
+};
 let InventoryDialog = class InventoryDialog extends i {
     constructor() {
         super(...arguments);
@@ -7246,7 +8969,18 @@ let InventoryDialog = class InventoryDialog extends i {
         this.hasGemini = false;
         this.currency = "USD";
         this._searchQuery = "";
-        this._typeFilter = "all";
+        this._typeFilter = DEFAULT_FILTERS.typeFilter;
+        this._dispositionFilter = DEFAULT_FILTERS.dispositionFilter;
+        this._countryFilter = DEFAULT_FILTERS.countryFilter;
+        this._grapeFilter = DEFAULT_FILTERS.grapeFilter;
+        this._foodFilter = DEFAULT_FILTERS.foodFilter;
+        this._cabinetFilter = DEFAULT_FILTERS.cabinetFilter;
+        this._minRating = DEFAULT_FILTERS.minRating;
+        this._maxPrice = DEFAULT_FILTERS.maxPrice;
+        this._vintageMin = DEFAULT_FILTERS.vintageMin;
+        this._vintageMax = DEFAULT_FILTERS.vintageMax;
+        this._preset = DEFAULT_FILTERS.preset;
+        this._showFilters = false;
         this._sortField = "name";
         this._sortDir = "asc";
         this._detailWine = null;
@@ -7256,26 +8990,39 @@ let InventoryDialog = class InventoryDialog extends i {
         this._restoring = false;
         this._confirmRestore = false;
         this._restoreData = null;
+        this._confirmImport = false;
+        this._pendingImport = null;
+        this._importMatches = 0;
         this._statusMsg = "";
         this._serverBackingUp = false;
         this._serverBackupLabel = "";
         this._showServerRestore = false;
         this._serverBackups = [];
         this._serverRestoring = false;
+        this._backupKeep = 10;
+        this._backupKeepChoices = [0, 5, 10, 20, 50];
+        this._storageInfo = null;
+        this._enriching = "";
+        this._confirmEnrich = "";
+        this._confirmEnrichRetry = false;
         this._viewMode = "inventory";
         this._historyItems = [];
         this._historyLoading = false;
     }
     updated(changedProps) {
         if (changedProps.has("open") && this.open) {
+            // Only the search query is transient. Sort order and filters are
+            // restored from localStorage on connect and must survive a reopen —
+            // resetting them here would silently undo the saved preferences.
             this._searchQuery = "";
-            this._typeFilter = "all";
-            this._sortField = "name";
-            this._sortDir = "asc";
             this._showDetail = false;
             this._detailWine = null;
             this._statusMsg = "";
             this._confirmRestore = false;
+            this._confirmEnrich = "";
+            this._confirmEnrichRetry = false;
+            this._confirmImport = false;
+            this._pendingImport = null;
             this._showServerRestore = false;
             this._restoreData = null;
             this._viewMode = "inventory";
@@ -7286,32 +9033,284 @@ let InventoryDialog = class InventoryDialog extends i {
         this.open = false;
         this.dispatchEvent(new CustomEvent("close"));
     }
+    // ── Preferences (sort + filters survive a reopen) ─────────────
+    connectedCallback() {
+        super.connectedCallback();
+        this._loadPrefs();
+    }
+    _loadPrefs() {
+        try {
+            const raw = localStorage.getItem(PREFS_KEY);
+            if (!raw)
+                return;
+            const p = JSON.parse(raw);
+            if (p.sortField)
+                this._sortField = p.sortField;
+            if (p.sortDir)
+                this._sortDir = p.sortDir;
+            if (p.typeFilter)
+                this._typeFilter = p.typeFilter;
+            if (p.dispositionFilter)
+                this._dispositionFilter = p.dispositionFilter;
+            if (p.countryFilter)
+                this._countryFilter = p.countryFilter;
+            if (p.grapeFilter)
+                this._grapeFilter = p.grapeFilter;
+            if (p.foodFilter)
+                this._foodFilter = p.foodFilter;
+            if (p.cabinetFilter)
+                this._cabinetFilter = p.cabinetFilter;
+            if (typeof p.minRating === "number")
+                this._minRating = p.minRating;
+            if (p.maxPrice !== undefined)
+                this._maxPrice = p.maxPrice;
+            if (p.vintageMin !== undefined)
+                this._vintageMin = p.vintageMin;
+            if (p.vintageMax !== undefined)
+                this._vintageMax = p.vintageMax;
+            if (p.preset)
+                this._preset = p.preset;
+        }
+        catch {
+            // A corrupt or unavailable localStorage must never keep the dialog
+            // from opening — fall back to defaults silently.
+        }
+    }
+    _savePrefs() {
+        try {
+            localStorage.setItem(PREFS_KEY, JSON.stringify({
+                sortField: this._sortField,
+                sortDir: this._sortDir,
+                typeFilter: this._typeFilter,
+                dispositionFilter: this._dispositionFilter,
+                countryFilter: this._countryFilter,
+                grapeFilter: this._grapeFilter,
+                foodFilter: this._foodFilter,
+                cabinetFilter: this._cabinetFilter,
+                minRating: this._minRating,
+                maxPrice: this._maxPrice,
+                vintageMin: this._vintageMin,
+                vintageMax: this._vintageMax,
+                preset: this._preset,
+            }));
+        }
+        catch {
+            // Private browsing / full quota — not worth surfacing.
+        }
+    }
+    _clearFilters() {
+        this._typeFilter = DEFAULT_FILTERS.typeFilter;
+        this._dispositionFilter = DEFAULT_FILTERS.dispositionFilter;
+        this._countryFilter = DEFAULT_FILTERS.countryFilter;
+        this._grapeFilter = DEFAULT_FILTERS.grapeFilter;
+        this._foodFilter = DEFAULT_FILTERS.foodFilter;
+        this._cabinetFilter = DEFAULT_FILTERS.cabinetFilter;
+        this._minRating = DEFAULT_FILTERS.minRating;
+        this._maxPrice = DEFAULT_FILTERS.maxPrice;
+        this._vintageMin = DEFAULT_FILTERS.vintageMin;
+        this._vintageMax = DEFAULT_FILTERS.vintageMax;
+        this._preset = DEFAULT_FILTERS.preset;
+        this._searchQuery = "";
+        this._savePrefs();
+    }
+    // Everything that is currently narrowing the list, so a persisted filter
+    // can never silently hide half the cellar.
+    _activeFilterCount() {
+        let n = 0;
+        if (this._typeFilter !== "all")
+            n++;
+        if (this._dispositionFilter !== "all")
+            n++;
+        if (this._countryFilter !== "all")
+            n++;
+        if (this._grapeFilter !== "all")
+            n++;
+        if (this._foodFilter !== "all")
+            n++;
+        if (this._cabinetFilter !== "all")
+            n++;
+        if (this._minRating > 0)
+            n++;
+        if (this._maxPrice !== null)
+            n++;
+        if (this._vintageMin !== null)
+            n++;
+        if (this._vintageMax !== null)
+            n++;
+        if (this._preset !== "all")
+            n++;
+        return n;
+    }
+    // ── Facets ────────────────────────────────────────────────────
+    _countryOptions() {
+        return collectFacet(this.wines, (w) => (w.country ? [w.country] : []));
+    }
+    _grapeOptions() {
+        return collectFacet(this.wines, (w) => splitMulti(w.grape_variety));
+    }
+    // Vivino returns pairings from a closed vocabulary ("Beef", "Blue cheese",
+    // "Spicy food"…), so offering the ones actually present in the cellar beats
+    // hoping the user guesses the exact wording.
+    _foodOptions() {
+        return collectFacet(this.wines, (w) => splitMulti(w.food_pairings));
+    }
+    _winesWithoutPairings() {
+        return this.wines.filter((w) => !splitMulti(w.food_pairings).length).length;
+    }
+    // ── Enrichment ────────────────────────────────────────────────
+    // Vivino is the *only* source of food pairings; it also supplies the
+    // description. Rating and photo are deliberately not part of the test —
+    // Vivino has no match for plenty of bottles, and a wine that will never
+    // gain a photo must not sit in this list forever nagging the user.
+    _missingVivinoData(w) {
+        return !w.food_pairings || !w.description;
+    }
+    // The AI supplies the drinking verdict and window; it never returns food
+    // pairings. Critic scores are excluded for the same reason as the photo
+    // above — the AI legitimately has none for many wines.
+    _missingAIData(w) {
+        return !w.disposition || !w.drink_window;
+    }
+    // Never consulted: the source has genuinely not been asked yet.
+    _winesNeedingVivino() {
+        return this.wines.filter((w) => !w.vivino_checked_at && this._missingVivinoData(w));
+    }
+    _winesNeedingAI() {
+        return this.wines.filter((w) => !w.ai_checked_at && this._missingAIData(w));
+    }
+    // Asked, and the source had nothing. Kept apart from the counts above so a
+    // retry is a deliberate act rather than an endless nag: Vivino does add
+    // bottles to its catalogue over time, so retrying later is worth offering,
+    // just not automatically.
+    _winesVivinoNotFound() {
+        return this.wines.filter((w) => !!w.vivino_checked_at && this._missingVivinoData(w));
+    }
+    _winesAINotFound() {
+        return this.wines.filter((w) => !!w.ai_checked_at && this._missingAIData(w));
+    }
+    async _runEnrich(source, retry = false) {
+        const wines = retry
+            ? source === "vivino"
+                ? this._winesVivinoNotFound()
+                : this._winesAINotFound()
+            : source === "vivino"
+                ? this._winesNeedingVivino()
+                : this._winesNeedingAI();
+        this._confirmEnrich = "";
+        this._confirmEnrichRetry = false;
+        if (!wines.length)
+            return;
+        const sourceLabel = source === "vivino" ? "Vivino" : "the AI";
+        this._enriching = source;
+        this._statusMsg = `Refreshing ${wines.length} wines via ${sourceLabel}…`;
+        try {
+            const result = await this.hass.callWS({
+                type: source === "vivino" ? "wine_cellar/batch_refresh_vivino" : "wine_cellar/batch_analyze_wines",
+                wine_ids: wines.map((w) => w.id),
+            });
+            if (result?.error) {
+                this._statusMsg = `Refresh failed: ${result.error}`;
+            }
+            else {
+                const updated = result?.updated ?? 0;
+                const unchanged = result?.unchanged ?? 0;
+                const errors = result?.errors ?? 0;
+                const source = sourceLabel;
+                const parts = [`${updated} updated`];
+                if (unchanged)
+                    parts.push(`${unchanged} had nothing new on ${source}`);
+                if (errors)
+                    parts.push(`${errors} could not be reached`);
+                this._statusMsg =
+                    `${parts.join(", ")}.` +
+                        (unchanged
+                            ? retry
+                                ? " Their check date is updated — try again later."
+                                : " Their check date is updated; they move to the retry line."
+                            : "");
+                this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
+            }
+        }
+        catch (err) {
+            this._statusMsg = `Refresh failed: ${err.message || err}`;
+        }
+        this._enriching = "";
+    }
+    // ── Filtering & sorting ───────────────────────────────────────
+    _matchesPreset(wine, currentYear, recentCutoff) {
+        switch (this._preset) {
+            case "drink_this_year": {
+                if (wine.disposition === "P")
+                    return false;
+                const year = drinkByYear(wine);
+                return year !== null ? year <= currentYear : wine.disposition === "D";
+            }
+            case "past_peak":
+                return wine.disposition === "P";
+            case "unrated":
+                return !wine.user_rating;
+            case "incomplete":
+                return (!wine.food_pairings || !wine.description || !wine.drink_window || !wine.image_url);
+            case "recent":
+                return !!wine.added_at && wine.added_at >= recentCutoff;
+            default:
+                return true;
+        }
+    }
     _getFilteredAndSortedWines() {
         let wines = [...this.wines];
         if (this._typeFilter !== "all") {
             wines = wines.filter((w) => w.type === this._typeFilter);
         }
+        if (this._dispositionFilter !== "all") {
+            const want = this._dispositionFilter;
+            wines = wines.filter((w) => want === "none" ? !w.disposition : w.disposition === want);
+        }
+        if (this._countryFilter !== "all") {
+            const want = normalizeText(this._countryFilter);
+            wines = wines.filter((w) => normalizeText(w.country) === want);
+        }
+        if (this._grapeFilter !== "all") {
+            const want = normalizeText(this._grapeFilter);
+            wines = wines.filter((w) => normalizeText(w.grape_variety).includes(want));
+        }
+        if (this._foodFilter !== "all") {
+            const want = normalizeText(this._foodFilter);
+            wines = wines.filter((w) => normalizeText(w.food_pairings).includes(want));
+        }
+        if (this._cabinetFilter !== "all") {
+            const known = new Set(this.cabinets.map((c) => c.id));
+            wines = wines.filter((w) => this._cabinetFilter === "unassigned"
+                ? !w.cabinet_id || !known.has(w.cabinet_id)
+                : w.cabinet_id === this._cabinetFilter);
+        }
+        if (this._minRating > 0) {
+            wines = wines.filter((w) => (w.rating || 0) >= this._minRating);
+        }
+        // "Under X" can only be answered for wines that actually carry a price —
+        // an unpriced bottle is unknown, not cheap.
+        if (this._maxPrice !== null) {
+            const max = this._maxPrice;
+            wines = wines.filter((w) => {
+                const price = w.retail_price || w.price;
+                return !!price && price <= max;
+            });
+        }
+        if (this._vintageMin !== null) {
+            const min = this._vintageMin;
+            wines = wines.filter((w) => w.vintage !== null && w.vintage >= min);
+        }
+        if (this._vintageMax !== null) {
+            const max = this._vintageMax;
+            wines = wines.filter((w) => w.vintage !== null && w.vintage <= max);
+        }
+        if (this._preset !== "all") {
+            const currentYear = new Date().getFullYear();
+            const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
+            wines = wines.filter((w) => this._matchesPreset(w, currentYear, cutoff));
+        }
         if (this._searchQuery) {
-            const q = this._searchQuery.toLowerCase();
-            // Map disposition search terms to codes
-            const dispMap = {
-                drink: "D", "drink now": "D",
-                hold: "H",
-                past: "P", "past peak": "P", "past-peak": "P",
-            };
-            const dispCode = dispMap[q];
-            wines = wines.filter((w) => w.name.toLowerCase().includes(q) ||
-                w.winery.toLowerCase().includes(q) ||
-                (w.region || "").toLowerCase().includes(q) ||
-                (w.country || "").toLowerCase().includes(q) ||
-                (w.grape_variety || "").toLowerCase().includes(q) ||
-                (w.type || "").toLowerCase().includes(q) ||
-                (w.notes || "").toLowerCase().includes(q) ||
-                (w.description || "").toLowerCase().includes(q) ||
-                String(w.vintage || "").includes(q) ||
-                (w.barcode || "").includes(q) ||
-                (dispCode && w.disposition === dispCode) ||
-                (w.drink_window || "").toLowerCase().includes(q));
+            wines = wines.filter((w) => matchesQuery(w, this._searchQuery, this.cabinets));
         }
         const dir = this._sortDir === "asc" ? 1 : -1;
         wines.sort((a, b) => {
@@ -7326,8 +9325,23 @@ let InventoryDialog = class InventoryDialog extends i {
                     return dir * (a.type || "").localeCompare(b.type || "");
                 case "rating":
                     return dir * ((a.rating || 0) - (b.rating || 0));
+                case "user_rating":
+                    return dir * ((a.user_rating || 0) - (b.user_rating || 0));
                 case "price":
                     return dir * ((a.retail_price || a.price || 0) - (b.retail_price || b.price || 0));
+                case "drink_by":
+                    return compareNullable(drinkByYear(a), drinkByYear(b), dir, (x, y) => x - y);
+                case "urgency": {
+                    // Past peak first, then drink-now, then hold, then unanalyzed —
+                    // within a bucket, the soonest drink-by year leads.
+                    const rank = (w) => w.disposition === "P" ? 0 : w.disposition === "D" ? 1 : w.disposition === "H" ? 2 : 3;
+                    const byRank = rank(a) - rank(b);
+                    if (byRank !== 0)
+                        return dir * byRank;
+                    return compareNullable(drinkByYear(a), drinkByYear(b), dir, (x, y) => x - y);
+                }
+                case "purchase_date":
+                    return compareNullable(a.purchase_date || null, b.purchase_date || null, dir, (x, y) => x.localeCompare(y));
                 case "added_at":
                     return dir * (a.added_at || "").localeCompare(b.added_at || "");
                 case "cabinet": {
@@ -7359,6 +9373,7 @@ let InventoryDialog = class InventoryDialog extends i {
     async _switchToHistory() {
         this._viewMode = "history";
         this._historyLoading = true;
+        this._loadStorageInfo();
         try {
             const result = await this.hass.callWS({ type: "wine_cellar/get_wine_history" });
             this._historyItems = (result?.history || []).sort((a, b) => (b.removed_at || "").localeCompare(a.removed_at || ""));
@@ -7373,6 +9388,7 @@ let InventoryDialog = class InventoryDialog extends i {
         try {
             await this.hass.callWS({ type: "wine_cellar/clear_wine_history" });
             this._historyItems = [];
+            this._loadStorageInfo();
             this._statusMsg = "History cleared";
         }
         catch (err) {
@@ -7414,6 +9430,7 @@ let InventoryDialog = class InventoryDialog extends i {
         }
         if (this._historyItems.length === 0) {
             return b `
+        ${this._renderStorageInfo()}
         <div class="inv-empty">No removal history yet</div>
         <div class="inv-footer">
           <span class="inv-count">0 wines removed</span>
@@ -7421,6 +9438,7 @@ let InventoryDialog = class InventoryDialog extends i {
       `;
         }
         return b `
+      ${this._renderStorageInfo()}
       <div class="inv-list">
         ${this._historyItems.map(item => b `
           <div class="inv-history-item">
@@ -7453,10 +9471,132 @@ let InventoryDialog = class InventoryDialog extends i {
       </div>
     `;
     }
+    // Sits under the list: how many bottles are still missing data, and the two
+    // actions that can fill it. Each source is labelled with what it actually
+    // supplies, so nobody runs AI hoping for food pairings.
+    _renderEnrichRow(source, wines, retry, text, label) {
+        if (!wines.length)
+            return A;
+        if (source === "ai" && !this.hasGemini)
+            return A;
+        const busy = !!this._enriching;
+        return b `
+      <div class="inv-enrich-row ${retry ? "retry" : ""}">
+        <span class="inv-enrich-text">${text}</span>
+        <button
+          class="inv-btn"
+          ?disabled=${busy}
+          @click=${() => {
+            this._confirmEnrich = source;
+            this._confirmEnrichRetry = retry;
+        }}
+        >
+          ${this._enriching === source ? "Working…" : `${label} (${wines.length})`}
+        </button>
+      </div>
+    `;
+    }
+    _renderEnrichBar() {
+        const needVivino = this._winesNeedingVivino();
+        const needAI = this._winesNeedingAI();
+        const missVivino = this._winesVivinoNotFound();
+        const missAI = this._winesAINotFound();
+        if (!needVivino.length && !needAI.length && !missVivino.length && !missAI.length) {
+            return A;
+        }
+        return b `
+      <div class="inv-enrich">
+        ${this._renderEnrichRow("vivino", needVivino, false, b `<strong>${needVivino.length}</strong> missing pairings or description, never
+            checked against Vivino`, "Fill from Vivino")}
+        ${this._renderEnrichRow("ai", needAI, false, b `<strong>${needAI.length}</strong> missing a drink window or verdict, never
+            analyzed by AI`, "Analyze with AI")}
+        ${this._renderEnrichRow("vivino", missVivino, true, b `<strong>${missVivino.length}</strong> checked against Vivino, still nothing —
+            Vivino does add bottles over time`, "Retry Vivino")}
+        ${this._renderEnrichRow("ai", missAI, true, b `<strong>${missAI.length}</strong> analyzed by AI, still without a verdict`, "Retry AI")}
+      </div>
+    `;
+    }
+    _renderEnrichConfirm() {
+        if (!this._confirmEnrich)
+            return A;
+        const source = this._confirmEnrich;
+        const retry = this._confirmEnrichRetry;
+        const count = retry
+            ? source === "vivino"
+                ? this._winesVivinoNotFound().length
+                : this._winesAINotFound().length
+            : source === "vivino"
+                ? this._winesNeedingVivino().length
+                : this._winesNeedingAI().length;
+        return b `
+      <div class="inv-confirm-overlay" @click=${() => (this._confirmEnrich = "")}>
+        <div class="inv-confirm-box" @click=${(e) => e.stopPropagation()}>
+          <h3>
+            ${source === "vivino"
+            ? retry
+                ? "🍇 Retry Vivino?"
+                : "🍇 Fill from Vivino?"
+            : retry
+                ? "🤖 Retry AI analysis?"
+                : "🤖 Analyze with AI?"}
+          </h3>
+          <p>
+            ${count} wine${count > 1 ? "s" : ""} will be looked up one at a time. This is a
+            slow, rate-limited network call — expect it to run for a while, and leave the
+            dialog open until it finishes.
+          </p>
+          <div class="inv-confirm-stats">
+            ${retry
+            ? b `These were already checked and came back empty. The check date is
+                  updated either way, so you can always see when the last attempt was.`
+            : b `Some will come back with nothing new — not every bottle exists in
+                  ${source === "vivino" ? "Vivino's catalogue" : "what the AI can infer"}.
+                  Those move to the retry line below rather than staying here.`}
+          </div>
+          <div class="inv-confirm-stats">
+            ${source === "vivino"
+            ? "Fills food pairings, description, rating and the label photo where Vivino has them. Existing values are kept."
+            : "Fills the drinking verdict, drink window and critic scores where the AI can infer them. Existing values are kept."}
+          </div>
+          <div class="inv-confirm-btns">
+            <button class="inv-confirm-cancel" @click=${() => (this._confirmEnrich = "")}>
+              Cancel
+            </button>
+            <button class="inv-confirm-go" @click=${() => this._runEnrich(source, retry)}>
+              Start
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    }
+    _renderStorageInfo() {
+        const info = this._storageInfo;
+        if (!info)
+            return A;
+        const share = info.total_bytes
+            ? Math.round((info.history_bytes / info.total_bytes) * 100)
+            : 0;
+        const heavy = info.history_bytes > 512 * 1024;
+        return b `
+      <div class="inv-storage-info ${heavy ? "heavy" : ""}">
+        Database ${this._formatBytes(info.total_bytes)} ·
+        history ${this._formatBytes(info.history_bytes)} (${share}%) ·
+        ${info.wines_count} wines, ${info.history_count} archived
+        ${heavy
+            ? b `<br /><small
+              >Home Assistant rewrites this whole file on every change —
+              clearing old history speeds up every edit.</small
+            >`
+            : A}
+      </div>
+    `;
+    }
     // ── Export CSV ─────────────────────────────────────────────────
     _exportCSV() {
         const wines = this._getFilteredAndSortedWines();
         const headers = [
+            "ID",
             "Name", "Winery", "Vintage", "Type", "Region", "Country",
             "Grape Variety", "Rating", "Ratings Count", "Purchase Price",
             "Retail Price", "Purchase Date", "Drink By", "Drink Window",
@@ -7468,12 +9608,13 @@ let InventoryDialog = class InventoryDialog extends i {
             if (val === null || val === undefined)
                 return "";
             const str = String(val);
-            if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+            if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
                 return `"${str.replace(/"/g, '""')}"`;
             }
             return str;
         };
         const rows = wines.map((w) => [
+            w.id,
             w.name, w.winery, w.vintage, w.type, w.region, w.country,
             w.grape_variety, w.rating, w.ratings_count, w.price,
             w.retail_price, w.purchase_date, w.drink_by, w.drink_window,
@@ -7486,7 +9627,9 @@ let InventoryDialog = class InventoryDialog extends i {
         ]
             .map(escapeCSV)
             .join(","));
-        const csv = [headers.join(","), ...rows].join("\n");
+        // Excel only recognizes a CSV as UTF-8 when it starts with a BOM;
+        // without it every accented wine name comes back mangled.
+        const csv = "\ufeff" + [headers.join(","), ...rows].join("\n");
         this._downloadFile(csv, `wine-cellar-inventory-${new Date().toISOString().slice(0, 10)}.csv`, "text/csv;charset=utf-8;");
     }
     // ── Backup JSON ───────────────────────────────────────────────
@@ -7516,21 +9659,52 @@ let InventoryDialog = class InventoryDialog extends i {
         const file = e.target.files?.[0];
         if (!file)
             return;
+        this._statusMsg = "";
+        let wines;
+        try {
+            wines = this._parseCSV(await file.text());
+        }
+        catch (err) {
+            this._statusMsg = `Import failed: ${err.message || err}`;
+            return;
+        }
+        if (wines.length === 0) {
+            this._statusMsg = "No wines found in CSV file.";
+            return;
+        }
+        // A CSV exported from here carries each bottle's ID. When those IDs match
+        // wines already in the cellar the user almost certainly edited an export
+        // (bulk price or drinking-window changes) and wants those bottles
+        // updated, not duplicated — so ask instead of silently doubling the cellar.
+        const knownIds = new Set(this.wines.map((w) => w.id));
+        this._importMatches = wines.filter((w) => w.id && knownIds.has(w.id)).length;
+        if (this._importMatches > 0) {
+            this._pendingImport = wines;
+            this._confirmImport = true;
+            return;
+        }
+        await this._runImport(wines, "add");
+    }
+    async _runImport(wines, mode) {
+        this._confirmImport = false;
+        this._pendingImport = null;
         this._importing = true;
         this._statusMsg = "";
         try {
-            const text = await file.text();
-            const wines = this._parseCSV(text);
-            if (wines.length === 0) {
-                this._statusMsg = "No wines found in CSV file.";
-                this._importing = false;
-                return;
-            }
             const result = await this.hass.callWS({
                 type: "wine_cellar/import_wines",
                 wines,
+                mode,
             });
-            this._statusMsg = `Imported ${result.imported} wines successfully!`;
+            const added = result.imported || 0;
+            const updated = result.updated || 0;
+            const skipped = result.location_skipped || 0;
+            const base = updated
+                ? `Updated ${updated} wines${added ? `, added ${added} new` : ""}.`
+                : `Imported ${added} wines successfully!`;
+            this._statusMsg = skipped
+                ? `${base} ${skipped} row${skipped > 1 ? "s" : ""} kept their previous spot — the location given was unknown, out of range or already taken.`
+                : base;
             this.dispatchEvent(new CustomEvent("wine-updated", { bubbles: true, composed: true }));
         }
         catch (err) {
@@ -7539,7 +9713,7 @@ let InventoryDialog = class InventoryDialog extends i {
         this._importing = false;
     }
     _parseCSV(text) {
-        const rows = this._parseCSVRows(text);
+        const rows = this._parseCSVRows(text.replace(/^\ufeff/, ""));
         if (rows.length < 2)
             return [];
         // Parse header row
@@ -7577,10 +9751,17 @@ let InventoryDialog = class InventoryDialog extends i {
             "user rating": "user_rating",
             user_rating: "user_rating",
             barcode: "barcode",
+            id: "id",
+            depth: "depth",
+            cabinet: "cabinet",
+            row: "row",
+            col: "col",
+            "added at": "added_at",
+            added_at: "added_at",
         };
         const numericFields = new Set([
             "vintage", "rating", "ratings_count", "price",
-            "retail_price", "user_rating",
+            "retail_price", "user_rating", "depth", "row", "col",
         ]);
         const wines = [];
         for (let i = 1; i < rows.length; i++) {
@@ -7756,10 +9937,64 @@ let InventoryDialog = class InventoryDialog extends i {
         try {
             const result = await this.hass.callWS({ type: "wine_cellar/server_backup_list" });
             this._serverBackups = result?.backups || [];
+            if (typeof result?.keep === "number")
+                this._backupKeep = result.keep;
+            if (Array.isArray(result?.keep_choices))
+                this._backupKeepChoices = result.keep_choices;
         }
         catch (err) {
             this._statusMsg = `Failed to list backups: ${err.message || err}`;
             this._serverBackups = [];
+        }
+    }
+    _formatBytes(bytes) {
+        if (!bytes)
+            return "0 KB";
+        if (bytes < 1024)
+            return `${bytes} B`;
+        if (bytes < 1024 * 1024)
+            return `${Math.round(bytes / 1024)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+    async _setBackupKeep(keep) {
+        this._backupKeep = keep;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/update_settings",
+                updates: { server_backup_keep: keep },
+            });
+            this._statusMsg =
+                keep === 0
+                    ? "Keeping every server backup."
+                    : `Keeping the ${keep} most recent server backups.`;
+        }
+        catch (err) {
+            this._statusMsg = `Could not save retention: ${err.message || err}`;
+        }
+    }
+    async _serverBackupDelete(filename) {
+        try {
+            const result = await this.hass.callWS({
+                type: "wine_cellar/server_backup_delete",
+                filename,
+            });
+            if (result?.error) {
+                this._statusMsg = `Delete failed: ${result.error}`;
+                return;
+            }
+            this._serverBackups = this._serverBackups.filter((b) => b.filename !== filename);
+            this._statusMsg = `Deleted ${filename}`;
+        }
+        catch (err) {
+            this._statusMsg = `Delete failed: ${err.message || err}`;
+        }
+    }
+    async _loadStorageInfo() {
+        try {
+            this._storageInfo = await this.hass.callWS({ type: "wine_cellar/get_storage_info" });
+        }
+        catch {
+            this._storageInfo = null;
         }
     }
     async _serverBackupRestore(filename) {
@@ -7797,9 +10032,163 @@ let InventoryDialog = class InventoryDialog extends i {
         this._detailWine = wine;
         this._showDetail = true;
     }
+    // Parses a number input back to `null` when emptied, so clearing a bound
+    // actually removes the filter instead of turning it into 0.
+    _numberOrNull(e) {
+        const raw = e.target.value.trim();
+        if (!raw)
+            return null;
+        const parsed = Number(raw);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    _renderFilterPanel(missingPairings) {
+        const foodOptions = this._foodOptions();
+        const countryOptions = this._countryOptions();
+        const grapeOptions = this._grapeOptions();
+        return b `
+      <div class="inv-filter-panel">
+        <label class="inv-filter-field">
+          <span>Ready to drink</span>
+          <select
+            @change=${(e) => {
+            this._dispositionFilter = e.target.value;
+            this._savePrefs();
+        }}
+          >
+            <option value="all" ?selected=${this._dispositionFilter === "all"}>Any</option>
+            <option value="D" ?selected=${this._dispositionFilter === "D"}>Drink now</option>
+            <option value="H" ?selected=${this._dispositionFilter === "H"}>Hold</option>
+            <option value="P" ?selected=${this._dispositionFilter === "P"}>Past peak</option>
+            <option value="none" ?selected=${this._dispositionFilter === "none"}>
+              Not analyzed
+            </option>
+          </select>
+        </label>
+
+        <label class="inv-filter-field">
+          <span>Pairs with</span>
+          <select
+            @change=${(e) => {
+            this._foodFilter = e.target.value;
+            this._savePrefs();
+        }}
+          >
+            <option value="all" ?selected=${this._foodFilter === "all"}>Any food</option>
+            ${foodOptions.map((f) => b `<option value=${f} ?selected=${this._foodFilter === f}>${f}</option>`)}
+          </select>
+          ${missingPairings
+            ? b `<small class="inv-filter-hint"
+                >${missingPairings} wine${missingPairings > 1 ? "s have" : " has"} no pairing
+                data. Only Vivino supplies pairings — use “Fill from Vivino” below the
+                list.</small
+              >`
+            : A}
+        </label>
+
+        <label class="inv-filter-field">
+          <span>Country</span>
+          <select
+            @change=${(e) => {
+            this._countryFilter = e.target.value;
+            this._savePrefs();
+        }}
+          >
+            <option value="all" ?selected=${this._countryFilter === "all"}>Any</option>
+            ${countryOptions.map((c) => b `<option value=${c} ?selected=${this._countryFilter === c}>${c}</option>`)}
+          </select>
+        </label>
+
+        <label class="inv-filter-field">
+          <span>Grape</span>
+          <select
+            @change=${(e) => {
+            this._grapeFilter = e.target.value;
+            this._savePrefs();
+        }}
+          >
+            <option value="all" ?selected=${this._grapeFilter === "all"}>Any</option>
+            ${grapeOptions.map((g) => b `<option value=${g} ?selected=${this._grapeFilter === g}>${g}</option>`)}
+          </select>
+        </label>
+
+        <label class="inv-filter-field">
+          <span>Cabinet</span>
+          <select
+            @change=${(e) => {
+            this._cabinetFilter = e.target.value;
+            this._savePrefs();
+        }}
+          >
+            <option value="all" ?selected=${this._cabinetFilter === "all"}>Any</option>
+            ${this.cabinets.map((c) => b `<option value=${c.id} ?selected=${this._cabinetFilter === c.id}>
+                  ${c.name}
+                </option>`)}
+            <option value="unassigned" ?selected=${this._cabinetFilter === "unassigned"}>
+              Unassigned
+            </option>
+          </select>
+        </label>
+
+        <label class="inv-filter-field">
+          <span>Min rating</span>
+          <select
+            @change=${(e) => {
+            this._minRating = Number(e.target.value);
+            this._savePrefs();
+        }}
+          >
+            ${[0, 3, 3.5, 4, 4.5].map((r) => b `<option value=${r} ?selected=${this._minRating === r}>
+                  ${r === 0 ? "Any" : `★ ${r}+`}
+                </option>`)}
+          </select>
+        </label>
+
+        <label class="inv-filter-field">
+          <span>Max price</span>
+          <input
+            type="number"
+            min="0"
+            placeholder="Any"
+            .value=${this._maxPrice === null ? "" : String(this._maxPrice)}
+            @change=${(e) => {
+            this._maxPrice = this._numberOrNull(e);
+            this._savePrefs();
+        }}
+          />
+          <small class="inv-filter-hint">Priced wines only.</small>
+        </label>
+
+        <label class="inv-filter-field">
+          <span>Vintage</span>
+          <div class="inv-filter-range">
+            <input
+              type="number"
+              placeholder="From"
+              .value=${this._vintageMin === null ? "" : String(this._vintageMin)}
+              @change=${(e) => {
+            this._vintageMin = this._numberOrNull(e);
+            this._savePrefs();
+        }}
+            />
+            <input
+              type="number"
+              placeholder="To"
+              .value=${this._vintageMax === null ? "" : String(this._vintageMax)}
+              @change=${(e) => {
+            this._vintageMax = this._numberOrNull(e);
+            this._savePrefs();
+        }}
+            />
+          </div>
+        </label>
+      </div>
+    `;
+    }
     _renderWineItem(wine) {
         const typeColor = WINE_TYPE_COLORS[wine.type] || WINE_TYPE_COLORS.red;
         const location = getWineLocation(wine, this.cabinets).text;
+        // Sorting by drink-by is useless if the value stays invisible.
+        const drinkBy = drinkByYear(wine);
         const displayPrice = wine.retail_price || wine.price;
         // A retail_price keeps the currency it was actually captured in — show
         // that instead of the globally selected one, or a stale price ends up
@@ -7833,6 +10222,8 @@ let InventoryDialog = class InventoryDialog extends i {
                         ? "Past Peak"
                         : ""}</span
                   >`
+            : A}${drinkBy
+            ? b ` · <span class="inv-drink-by">by ${drinkBy}</span>`
             : A}
           </div>
         </div>
@@ -7847,16 +10238,41 @@ let InventoryDialog = class InventoryDialog extends i {
         if (!this.open)
             return A;
         const filteredWines = this._getFilteredAndSortedWines();
-        const allStats = this._computeStats(this.wines);
+        const activeFilters = this._activeFilterCount();
+        const narrowed = activeFilters > 0 || !!this._searchQuery;
+        // With a filter on, cellar-wide totals are the wrong answer: the point of
+        // narrowing is to know what the *selection* holds and what it is worth.
+        const allStats = this._computeStats(narrowed ? filteredWines : this.wines);
+        const missingPairings = this._winesWithoutPairings();
         const sortOptions = [
             { value: "name", label: "Name" },
             { value: "winery", label: "Winery" },
             { value: "vintage", label: "Vintage" },
             { value: "type", label: "Type" },
             { value: "rating", label: "Rating" },
+            { value: "user_rating", label: "My Rating" },
             { value: "price", label: "Price" },
+            { value: "drink_by", label: "Drink By" },
+            { value: "urgency", label: "Urgency" },
+            { value: "purchase_date", label: "Purchase Date" },
             { value: "added_at", label: "Date Added" },
             { value: "cabinet", label: "Cabinet" },
+        ];
+        const presets = [
+            { id: "all", label: "All", hint: "Every wine in the cellar" },
+            {
+                id: "drink_this_year",
+                label: "Drink this year",
+                hint: `Drink-by year ${new Date().getFullYear()} or earlier, or marked "Drink now" with no year. Excludes past peak.`,
+            },
+            { id: "past_peak", label: "Past peak", hint: 'Marked "Past peak" by the AI analysis' },
+            { id: "unrated", label: "Not rated", hint: "You have not given these a personal star rating" },
+            {
+                id: "incomplete",
+                label: "Missing data",
+                hint: "Missing at least one of: food pairings, description, drink window, label photo",
+            },
+            { id: "recent", label: "Added recently", hint: "Added to the cellar in the last 30 days" },
         ];
         const filters = [
             { id: "all", label: "All" },
@@ -7892,7 +10308,8 @@ let InventoryDialog = class InventoryDialog extends i {
           <!-- Summary Stats -->
           <div class="inv-stats">
             <div class="stat">
-              <span class="stat-value">${allStats.count}</span> bottles
+              <span class="stat-value">${allStats.count}</span>
+              ${narrowed ? `of ${this.wines.length} bottles` : "bottles"}
             </div>
             ${allStats.totalValue
             ? b `
@@ -7933,6 +10350,7 @@ let InventoryDialog = class InventoryDialog extends i {
               <select
                 @change=${(e) => {
             this._sortField = e.target.value;
+            this._savePrefs();
         }}
               >
                 ${sortOptions.map((o) => b `<option value=${o.value} ?selected=${this._sortField === o.value}>
@@ -7943,12 +10361,40 @@ let InventoryDialog = class InventoryDialog extends i {
                 class="inv-sort-dir"
                 @click=${() => {
             this._sortDir = this._sortDir === "asc" ? "desc" : "asc";
+            this._savePrefs();
         }}
                 title="${this._sortDir === "asc" ? "Ascending" : "Descending"}"
               >
                 ${this._sortDir === "asc" ? "↑" : "↓"}
               </button>
+              <button
+                class="inv-filter-toggle ${activeFilters ? "active" : ""}"
+                @click=${() => {
+            this._showFilters = !this._showFilters;
+        }}
+                title="More filters"
+              >
+                ⚙︎ Filters${activeFilters
+            ? b `<span class="inv-filter-badge">${activeFilters}</span>`
+            : A}
+              </button>
             </div>
+          </div>
+
+          <!-- Quick views -->
+          <div class="inv-chips">
+            ${presets.map((p) => b `
+                <button
+                  class="inv-chip preset ${this._preset === p.id ? "active" : ""}"
+                  title=${p.hint}
+                  @click=${() => {
+            this._preset = p.id;
+            this._savePrefs();
+        }}
+                >
+                  ${p.label}
+                </button>
+              `)}
           </div>
 
           <!-- Type Filter Chips -->
@@ -7958,12 +10404,32 @@ let InventoryDialog = class InventoryDialog extends i {
                   class="inv-chip ${this._typeFilter === f.id ? "active" : ""}"
                   @click=${() => {
             this._typeFilter = f.id;
+            this._savePrefs();
         }}
                 >
                   ${f.label}
                 </button>
               `)}
           </div>
+
+          ${this._showFilters ? this._renderFilterPanel(missingPairings) : A}
+
+          ${narrowed
+            ? b `
+                <div class="inv-active-filters">
+                  <span
+                    >${filteredWines.length} of ${this.wines.length} wines shown${activeFilters
+                ? ` · ${activeFilters} filter${activeFilters > 1 ? "s" : ""} active`
+                : ""}</span
+                  >
+                  <button class="inv-clear-filters" @click=${this._clearFilters}>
+                    Clear all
+                  </button>
+                </div>
+              `
+            : A}
+
+          ${this._renderEnrichBar()}
 
           <!-- Wine List -->
           <div class="inv-list">
@@ -8057,27 +10523,94 @@ let InventoryDialog = class InventoryDialog extends i {
             ? b `
                 <div class="inv-confirm-overlay" @click=${() => (this._showServerRestore = false)}>
                   <div class="inv-confirm-box" style="max-width:420px" @click=${(e) => e.stopPropagation()}>
-                    <h3>Restore from Server</h3>
+                    <h3>Server Backups</h3>
+                    <label class="inv-keep-row">
+                      <span>Keep the last</span>
+                      <select
+                        @change=${(e) => this._setBackupKeep(Number(e.target.value))}
+                      >
+                        ${this._backupKeepChoices.map((n) => b `<option value=${n} ?selected=${this._backupKeep === n}>
+                            ${n === 0 ? "All (never delete)" : `${n} backups`}
+                          </option>`)}
+                      </select>
+                    </label>
                     ${this._serverBackups.length === 0
                 ? b `<p>No server backups found. Use "Server Backup" to create one.</p>`
                 : b `
-                        <p>Select a backup to restore. This will <strong>replace</strong> all current data.</p>
-                        <div style="max-height:250px;overflow-y:auto;margin:8px 0;">
+                        <p>
+                          Select a backup to restore — this will <strong>replace</strong> all
+                          current data. ${this._serverBackups.length} stored,
+                          ${this._formatBytes(this._serverBackups.reduce((t, b) => t + (b.size || 0), 0))} on disk.
+                        </p>
+                        <div class="inv-backup-list">
                           ${this._serverBackups.map((b$1) => b `
-                              <button
-                                class="inv-btn"
-                                style="width:100%;margin-bottom:4px;text-align:left;font-size:0.82em;padding:8px 12px;"
-                                @click=${() => this._serverBackupRestore(b$1.filename)}
-                              >
-                                <div>${b$1.timestamp ? new Date(b$1.timestamp).toLocaleString() : b$1.filename}</div>
-                                <div style="font-size:0.85em;color:var(--wc-text-secondary);">${b$1.wines} wines, ${b$1.cabinets} racks</div>
-                              </button>
+                              <div class="inv-backup-row">
+                                <button
+                                  class="inv-btn inv-backup-pick"
+                                  @click=${() => this._serverBackupRestore(b$1.filename)}
+                                >
+                                  <div>${b$1.timestamp ? new Date(b$1.timestamp).toLocaleString() : b$1.filename}</div>
+                                  <div class="inv-backup-meta">
+                                    ${b$1.error
+                    ? "unreadable file"
+                    : `${b$1.wines} wines, ${b$1.cabinets} racks · ${this._formatBytes(b$1.size || 0)}`}
+                                  </div>
+                                </button>
+                                <button
+                                  class="inv-backup-del"
+                                  title="Delete this backup"
+                                  @click=${() => this._serverBackupDelete(b$1.filename)}
+                                >
+                                  🗑
+                                </button>
+                              </div>
                             `)}
                         </div>
                       `}
                     <div class="inv-confirm-btns">
                       <button class="inv-confirm-cancel" @click=${() => (this._showServerRestore = false)}>
-                        Cancel
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              `
+            : A}
+
+          ${this._renderEnrichConfirm()}
+
+          <!-- CSV Import Mode Overlay -->
+          ${this._confirmImport && this._pendingImport
+            ? b `
+                <div class="inv-confirm-overlay" @click=${() => (this._confirmImport = false)}>
+                  <div class="inv-confirm-box" @click=${(e) => e.stopPropagation()}>
+                    <h3>📄 Update existing wines?</h3>
+                    <p>
+                      This CSV looks like an edited export — some rows carry the ID of a
+                      wine already in your cellar.
+                    </p>
+                    <div class="inv-confirm-stats">
+                      <strong>${this._importMatches}</strong> row${this._importMatches > 1 ? "s" : ""}
+                      match existing wines ·
+                      <strong>${this._pendingImport.length - this._importMatches}</strong> new
+                      <br />
+                      <small>
+                        Updating only touches the columns present in the file; blank cells
+                        leave the stored value alone.
+                      </small>
+                    </div>
+                    <div class="inv-confirm-btns">
+                      <button
+                        class="inv-confirm-cancel"
+                        @click=${() => this._runImport(this._pendingImport, "add")}
+                      >
+                        Add all as new
+                      </button>
+                      <button
+                        class="inv-confirm-go"
+                        @click=${() => this._runImport(this._pendingImport, "update")}
+                      >
+                        Update ${this._importMatches} wine${this._importMatches > 1 ? "s" : ""}
                       </button>
                     </div>
                   </div>
@@ -8279,11 +10812,243 @@ InventoryDialog.styles = [
         background: var(--wc-hover);
       }
 
+      .inv-filter-toggle {
+        background: none;
+        border: 1px solid var(--wc-border);
+        border-radius: 14px;
+        padding: 5px 10px;
+        cursor: pointer;
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        white-space: nowrap;
+      }
+
+      .inv-filter-toggle:hover {
+        background: var(--wc-hover);
+      }
+
+      .inv-filter-toggle.active {
+        border-color: var(--wc-primary);
+        color: var(--wc-primary);
+      }
+
+      .inv-filter-badge {
+        background: var(--wc-primary);
+        color: #fff;
+        border-radius: 9px;
+        padding: 1px 6px;
+        font-size: 0.85em;
+        font-weight: 600;
+      }
+
+      .inv-filter-panel {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 10px 12px;
+        padding: 12px 16px;
+        margin: 0 16px 10px;
+        border: 1px solid var(--wc-border);
+        border-radius: 10px;
+        background: var(--wc-bg);
+      }
+
+      .inv-filter-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 0.75em;
+        color: var(--wc-text-secondary);
+      }
+
+      .inv-filter-field select,
+      .inv-filter-field input {
+        padding: 6px 8px;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        background: var(--wc-card-bg, var(--wc-bg));
+        color: var(--wc-text);
+        font-size: 1.05em;
+        width: 100%;
+        box-sizing: border-box;
+      }
+
+      .inv-filter-field select:focus,
+      .inv-filter-field input:focus {
+        outline: none;
+        border-color: var(--wc-primary);
+      }
+
+      .inv-filter-range {
+        display: flex;
+        gap: 6px;
+      }
+
+      .inv-filter-hint {
+        font-size: 0.9em;
+        opacity: 0.75;
+        line-height: 1.3;
+      }
+
+      .inv-active-filters {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin: 0 16px 10px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: rgba(114, 47, 55, 0.08);
+        font-size: 0.75em;
+        color: var(--wc-text-secondary);
+      }
+
+      .inv-clear-filters {
+        background: none;
+        border: none;
+        color: var(--wc-primary);
+        cursor: pointer;
+        font-size: 1em;
+        font-weight: 600;
+        padding: 2px 4px;
+        white-space: nowrap;
+      }
+
+      .inv-clear-filters:hover {
+        text-decoration: underline;
+      }
+
+      .inv-drink-by {
+        opacity: 0.8;
+      }
+
+      .inv-enrich {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin: 0 16px 10px;
+        padding: 8px 10px;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        font-size: 0.75em;
+        color: var(--wc-text-secondary);
+      }
+
+      .inv-enrich-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .inv-enrich-row.retry {
+        opacity: 0.75;
+        border-top: 1px solid var(--wc-border);
+        padding-top: 6px;
+      }
+
+      .inv-enrich-text {
+        line-height: 1.4;
+      }
+
+      .inv-enrich-text strong {
+        color: var(--wc-text);
+      }
+
+      .inv-enrich-btns {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      .inv-storage-info {
+        margin: 0 16px 8px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: var(--wc-bg);
+        border: 1px solid var(--wc-border);
+        font-size: 0.75em;
+        color: var(--wc-text-secondary);
+        line-height: 1.4;
+      }
+
+      .inv-storage-info.heavy {
+        border-color: #c98a00;
+      }
+
+      .inv-keep-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 0.8em;
+        color: var(--wc-text-secondary);
+        margin-bottom: 8px;
+      }
+
+      .inv-keep-row select {
+        padding: 5px 8px;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        background: var(--wc-bg);
+        color: var(--wc-text);
+        font-size: 1em;
+        cursor: pointer;
+      }
+
+      .inv-backup-list {
+        max-height: 250px;
+        overflow-y: auto;
+        margin: 8px 0;
+      }
+
+      .inv-backup-row {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 4px;
+      }
+
+      .inv-backup-pick {
+        flex: 1;
+        text-align: left;
+        font-size: 0.82em;
+        padding: 8px 12px;
+      }
+
+      .inv-backup-meta {
+        font-size: 0.85em;
+        color: var(--wc-text-secondary);
+      }
+
+      .inv-backup-del {
+        background: none;
+        border: 1px solid var(--wc-border);
+        border-radius: 8px;
+        color: var(--wc-text-secondary);
+        cursor: pointer;
+        padding: 0 10px;
+        font-size: 0.9em;
+      }
+
+      .inv-backup-del:hover {
+        border-color: #c62828;
+        color: #c62828;
+      }
+
       .inv-chips {
         display: flex;
         gap: 4px;
         padding: 0 16px 10px;
         flex-wrap: wrap;
+      }
+
+      .inv-chip.preset.active {
+        background: var(--wc-text-secondary);
+        border-color: var(--wc-text-secondary);
       }
 
       .inv-chip {
@@ -8612,6 +11377,39 @@ __decorate([
 ], InventoryDialog.prototype, "_typeFilter", void 0);
 __decorate([
     r()
+], InventoryDialog.prototype, "_dispositionFilter", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_countryFilter", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_grapeFilter", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_foodFilter", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_cabinetFilter", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_minRating", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_maxPrice", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_vintageMin", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_vintageMax", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_preset", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_showFilters", void 0);
+__decorate([
+    r()
 ], InventoryDialog.prototype, "_sortField", void 0);
 __decorate([
     r()
@@ -8639,6 +11437,15 @@ __decorate([
 ], InventoryDialog.prototype, "_restoreData", void 0);
 __decorate([
     r()
+], InventoryDialog.prototype, "_confirmImport", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_pendingImport", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_importMatches", void 0);
+__decorate([
+    r()
 ], InventoryDialog.prototype, "_statusMsg", void 0);
 __decorate([
     r()
@@ -8655,6 +11462,24 @@ __decorate([
 __decorate([
     r()
 ], InventoryDialog.prototype, "_serverRestoring", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_backupKeep", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_backupKeepChoices", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_storageInfo", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_enriching", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_confirmEnrich", void 0);
+__decorate([
+    r()
+], InventoryDialog.prototype, "_confirmEnrichRetry", void 0);
 __decorate([
     r()
 ], InventoryDialog.prototype, "_viewMode", void 0);
@@ -8882,6 +11707,10 @@ VivinoAiSettingsDialog = __decorate([
     t("vivino-ai-settings-dialog")
 ], VivinoAiSettingsDialog);
 
+// How long an incoming change waits before the card re-fetches, and the floor
+// on how often it may do so at all.
+const REFRESH_DEBOUNCE_MS = 400;
+const REFRESH_MIN_INTERVAL_MS = 3000;
 let WineCellarCard = class WineCellarCard extends i {
     constructor() {
         super(...arguments);
@@ -8917,6 +11746,15 @@ let WineCellarCard = class WineCellarCard extends i {
         this._showVivinoAiSettings = false;
         this._showWineList = false;
         this._showInventory = false;
+        this._findingsCache = null;
+        this._unsubscribe = null;
+        this._subscribing = false;
+        this._connectionGeneration = 0;
+        this._refreshTimer = 0;
+        this._lastRefresh = 0;
+        this._toastTimer = 0;
+        this._showArrangement = false;
+        this._dismissedArrangements = [];
         this._buyList = [];
         this._addToBuyListMode = false;
         this._movingBuyListItem = null;
@@ -8947,6 +11785,8 @@ let WineCellarCard = class WineCellarCard extends i {
         this._rackPanelDragOverKey = null;
         // Briefly highlights a wine's slot after "locate" is used from the detail dialog.
         this._highlightWineId = null;
+        this._confirmZoneSort = false;
+        this._zoneSorting = false;
     }
     setConfig(config) {
         this._config = config;
@@ -8960,9 +11800,78 @@ let WineCellarCard = class WineCellarCard extends i {
     connectedCallback() {
         super.connectedCallback();
         this._loadData();
+        this._subscribeToUpdates();
     }
-    updated(changedProps) {
-        if (changedProps.has("hass") && this.hass) ;
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        // Invalidates any subscription still being set up.
+        this._connectionGeneration++;
+        this._unsubscribe?.();
+        this._unsubscribe = null;
+        if (this._refreshTimer) {
+            clearTimeout(this._refreshTimer);
+            this._refreshTimer = 0;
+        }
+        if (this._toastTimer) {
+            clearTimeout(this._toastTimer);
+            this._toastTimer = 0;
+        }
+    }
+    // The backend announces every change it makes on the event bus, and nobody
+    // was listening. Work it does on its own — the Vivino lookup fired after a
+    // wine is added, most visibly — landed in storage and stayed invisible
+    // until the user happened to do something that reloaded the card. That is
+    // why an added bottle could look like Vivino had never been consulted.
+    async _subscribeToUpdates() {
+        if (!this.hass?.connection || this._unsubscribe || this._subscribing) {
+            if (!this.hass)
+                setTimeout(() => this._subscribeToUpdates(), 500);
+            return;
+        }
+        this._subscribing = true;
+        const generation = this._connectionGeneration;
+        try {
+            const unsubscribe = await this.hass.connection.subscribeEvents(() => this._scheduleRefresh(), "wine_cellar_updated");
+            // Home Assistant detaches and reattaches a dashboard view when the user
+            // switches tabs, which can happen while this is still in flight. Storing
+            // the handle now would leave a subscription nothing can ever cancel,
+            // reloading a card that is no longer on screen — once per tab switch.
+            //
+            // Keyed on a counter the detach bumps rather than on isConnected, so it
+            // holds however the element was taken down.
+            if (generation !== this._connectionGeneration) {
+                unsubscribe();
+                return;
+            }
+            this._unsubscribe = unsubscribe;
+        }
+        catch (err) {
+            // Without this the card still works, it just will not notice background
+            // work. Not worth an error the user has to dismiss.
+            console.warn("Wine Cellar: could not subscribe to updates", err);
+        }
+        finally {
+            this._subscribing = false;
+        }
+    }
+    // Batch operations fire one event per bottle, and they pace themselves with
+    // a sleep of half a second to a second between wines. A plain debounce is
+    // the wrong shape for that: the gaps are longer than any sensible debounce,
+    // so every event would still get its own full reload. What is needed is a
+    // floor on how often the cellar is re-fetched.
+    //
+    // An already-pending refresh absorbs anything that arrives before it fires,
+    // so a tight burst still costs one reload. An isolated change still shows up
+    // within REFRESH_DEBOUNCE_MS.
+    _scheduleRefresh() {
+        if (this._refreshTimer)
+            return;
+        const since = Date.now() - this._lastRefresh;
+        const wait = Math.max(REFRESH_DEBOUNCE_MS, REFRESH_MIN_INTERVAL_MS - since);
+        this._refreshTimer = window.setTimeout(() => {
+            this._refreshTimer = 0;
+            this._loadData();
+        }, wait);
     }
     async _loadData() {
         if (!this.hass) {
@@ -8970,6 +11879,9 @@ let WineCellarCard = class WineCellarCard extends i {
             setTimeout(() => this._loadData(), 500);
             return;
         }
+        // Counts against the refresh floor: the card's own actions already reload,
+        // and the event they cause must not reload a second time straight after.
+        this._lastRefresh = Date.now();
         const isInitialLoad = this._wines.length === 0 && this._cabinets.length === 0;
         if (isInitialLoad)
             this._loading = true;
@@ -8991,6 +11903,7 @@ let WineCellarCard = class WineCellarCard extends i {
             this._metadataCurrency = capResult?.metadata_currency || "USD";
             this._supportedCurrencies = capResult?.supported_currencies || ["USD", "EUR", "GBP", "CHF"];
             this._aiFallbackAlways = capResult?.ai_fallback_always || false;
+            this._dismissedArrangements = capResult?.dismissed_arrangements || [];
             this._buyList = buyListResult?.buy_list || [];
             // Refresh selected wine if detail dialog is open
             if (this._selectedWine) {
@@ -9020,21 +11933,24 @@ let WineCellarCard = class WineCellarCard extends i {
         if (this._searchFilter !== "all") {
             wines = wines.filter((w) => w.type === this._searchFilter);
         }
-        // Filter by search query
+        // Filter by search query — same matcher as the inventory dialog, so a
+        // query never gives different results depending on which screen it was
+        // typed into.
         if (this._searchQuery) {
-            const q = this._searchQuery.toLowerCase();
-            wines = wines.filter((w) => w.name.toLowerCase().includes(q) ||
-                w.winery.toLowerCase().includes(q) ||
-                (w.region || "").toLowerCase().includes(q) ||
-                (w.grape_variety || "").toLowerCase().includes(q) ||
-                (w.type || "").toLowerCase().includes(q) ||
-                (w.country || "").toLowerCase().includes(q));
+            wines = wines.filter((w) => matchesQuery(w, this._searchQuery, this._cabinets));
         }
         return wines;
     }
     _showToast(message) {
         this._toast = message;
-        setTimeout(() => (this._toast = ""), 2500);
+        // Each toast gets its own full 2.5s: the previous timer would otherwise
+        // still be running and cut the new message short.
+        if (this._toastTimer)
+            clearTimeout(this._toastTimer);
+        this._toastTimer = window.setTimeout(() => {
+            this._toastTimer = 0;
+            this._toast = "";
+        }, 2500);
     }
     // --- Copy/Paste wine ---
     _onCellClick(e) {
@@ -9138,11 +12054,48 @@ let WineCellarCard = class WineCellarCard extends i {
             this._showAddDialog = true;
         }
     }
+    // The slot a new bottle takes in a bin: the first free one, so a gap left
+    // by a removed bottle is reused rather than skipped. Every path into a bin
+    // — add dialog, click-to-place, drag-and-drop — must agree, or two bottles
+    // end up sharing a depth and the order becomes undefined.
+    _firstFreeDepth(cabinetId, zone, excludeWineId) {
+        const occupied = new Set(this._wines
+            .filter((w) => w.cabinet_id === cabinetId && w.zone === zone && w.id !== excludeWineId)
+            .map((w) => w.depth || 0));
+        let depth = 0;
+        while (occupied.has(depth))
+            depth++;
+        return depth;
+    }
+    // Renumber a bin's slots in a single backend call. Looping a move per
+    // bottle rewrote the whole store each time, which made shifting a full bin
+    // far too slow to do on every add.
+    async _reorderZone(cabinetId, zone, wineIds) {
+        await this.hass.callWS({
+            type: "wine_cellar/reorder_zone",
+            cabinet_id: cabinetId,
+            zone,
+            wine_ids: wineIds,
+        });
+    }
+    // A bottle put into a bin lands on top of the pile, so slot 1 holds the one
+    // added last — slot 1 being the most accessible position, the same
+    // convention as depth 0 on a grid cell. Only the new bottles are listed:
+    // the backend appends every other bottle in the bin in its current order,
+    // which keeps this correct even when the card's copy of the cellar is a
+    // moment out of date.
+    async _placeOnTopOfBin(cabinetId, zone, newWineIds) {
+        if (!zone || !newWineIds.length)
+            return;
+        await this._reorderZone(cabinetId, zone, newWineIds);
+    }
     // --- Zone side panel (boxes, bulk bins) ---
     _onZoneContainerClick(e) {
         const { cabinet, zone, storageRow } = e.detail;
-        const nextDepth = this._wines.filter((w) => w.cabinet_id === cabinet.id && w.zone === zone).length;
-        const hasRoom = nextDepth < (storageRow.capacity || 20);
+        const occupantCount = this._wines.filter((w) => w.cabinet_id === cabinet.id && w.zone === zone).length;
+        const nextDepth = this._firstFreeDepth(cabinet.id, zone);
+        const capacity = storageRow.capacity || 20;
+        const hasRoom = occupantCount < capacity && nextDepth < capacity;
         // If we have a copied wine, paste it in this zone instead of opening panel
         if (this._copiedWine) {
             if (!hasRoom) {
@@ -9258,13 +12211,18 @@ let WineCellarCard = class WineCellarCard extends i {
                     updates: { cabinet_id: "", row: null, col: null, zone: "", depth: 0 },
                 });
             }
-            for (let i = slotIndex + 1; i < this._zonePanelWines.length; i++) {
+            // Closing the gap is one renumbering of the zone, not one round trip per
+            // bottle behind the deleted slot — emptying slot 1 of a full 20-bottle
+            // bin used to mean nineteen calls, each with its own disk write.
+            const remaining = this._zonePanelWines
+                .filter((_, i) => i !== slotIndex)
+                .map((w) => w.id);
+            if (remaining.length) {
                 await this.hass.callWS({
-                    type: "wine_cellar/move_wine",
-                    wine_id: this._zonePanelWines[i].id,
+                    type: "wine_cellar/reorder_zone",
                     cabinet_id: this._zonePanelCabinet.id,
                     zone: this._zonePanelZone,
-                    depth: i - 1,
+                    wine_ids: remaining,
                 });
             }
             if (this._zonePanelType === "box") {
@@ -9356,17 +12314,7 @@ let WineCellarCard = class WineCellarCard extends i {
         const [moved] = wines.splice(fromIndex, 1);
         wines.splice(targetIndex, 0, moved);
         try {
-            for (let i = 0; i < wines.length; i++) {
-                if ((wines[i].depth || 0) !== i) {
-                    await this.hass.callWS({
-                        type: "wine_cellar/move_wine",
-                        wine_id: wines[i].id,
-                        cabinet_id: this._zonePanelCabinet.id,
-                        zone: this._zonePanelZone,
-                        depth: i,
-                    });
-                }
-            }
+            await this._reorderZone(this._zonePanelCabinet.id, this._zonePanelZone, wines.map((w) => w.id));
             this._showToast("Wine reordered");
             await this._loadData();
         }
@@ -9411,17 +12359,66 @@ let WineCellarCard = class WineCellarCard extends i {
             this._showToast("Failed to reorder wine");
         }
     }
+    // Renumber the bin's slots to match when bottles were added.
+    //
+    // Direction matters physically. Slot 1 is the most accessible position —
+    // the same convention as depth 0 being the front bottle of a grid cell —
+    // so "newest first" matches dropping each new bottle on top of the pile,
+    // and "oldest first" matches lining bottles up in a row from one end.
+    // Only the user knows which of the two their bin really is.
+    //
+    // `added_at` is the only entry timestamp stored; bottles without one keep
+    // their relative position at the end in *both* directions rather than
+    // sorting to the front, which is what an empty string would otherwise do.
+    async _sortZoneByDateAdded(direction) {
+        this._confirmZoneSort = false;
+        if (!this._zonePanelCabinet)
+            return;
+        const ordered = [...this._zonePanelWines].sort((a, b) => {
+            const aDate = a.added_at || "";
+            const bDate = b.added_at || "";
+            if (!aDate && !bDate)
+                return (a.depth || 0) - (b.depth || 0);
+            if (!aDate)
+                return 1;
+            if (!bDate)
+                return -1;
+            return direction === "newest" ? bDate.localeCompare(aDate) : aDate.localeCompare(bDate);
+        });
+        this._zoneSorting = true;
+        try {
+            await this._reorderZone(this._zonePanelCabinet.id, this._zonePanelZone, ordered.map((w) => w.id));
+            this._showToast(direction === "newest" ? "Newest bottles first" : "Oldest bottles first");
+            await this._loadData();
+        }
+        catch (err) {
+            console.error("Failed to sort zone:", err);
+            this._showToast("Failed to sort");
+        }
+        this._zoneSorting = false;
+    }
     _getZoneSlotLabel(_type, index) {
         return `Slot ${index + 1}`;
     }
-    // Opens the right side panel for a wine's location and briefly highlights its slot.
+    // Opens the right side panel for a wine's location and highlights its slot,
+    // both in the panel and on the rack drawing.
     _locateWine(wine) {
         const loc = getWineLocation(wine, this._cabinets);
         if (!loc.cabinet) {
             this._showToast("This wine is unassigned");
             return;
         }
-        this._activeTab = "all";
+        // An active search replaces the rack drawing with a flat result list, so
+        // locating while searching would point at a rack that isn't on screen.
+        // Locating means "show me where it is" — clear the search and open the
+        // bottle's own rack.
+        this._searchQuery = "";
+        this._searchFilter = "all";
+        this._activeTab = loc.cabinet.id;
+        // Mark the bottle on the rack drawing regardless of whether a side panel
+        // opens — for a plain bottom-zone bottle the drawing is the only place it
+        // can be pointed at.
+        this._highlightWineId = wine.id;
         if (wine.row !== null && wine.col !== null) {
             this._openRackPanel(loc.cabinet);
         }
@@ -9430,16 +12427,31 @@ let WineCellarCard = class WineCellarCard extends i {
         }
         else {
             this._showToast(`In ${loc.text}`);
-            return;
         }
-        this._highlightWineId = wine.id;
-        this.updateComplete.then(() => {
+        this.updateComplete.then(async () => {
+            // The panel slot and the rack cell live in different scroll containers,
+            // so both can be brought into view without fighting each other.
             this.shadowRoot?.getElementById("highlight-slot")?.scrollIntoView({ behavior: "smooth", block: "center" });
+            // Each cabinet-grid runs its own update cycle, so the marked cell does
+            // not exist yet when this element's update resolves — wait for the
+            // children before looking for it.
+            const grids = [...(this.shadowRoot?.querySelectorAll("cabinet-grid") || [])];
+            await Promise.all(grids.map((g) => g.updateComplete));
+            for (const grid of grids) {
+                const marked = grid.shadowRoot?.querySelector(".locate-highlight");
+                if (marked) {
+                    // Instant, not smooth: a smooth scroll is silently dropped in some
+                    // environments (reduced-motion, embedded webviews), and landing on
+                    // the bottle matters more than the animation.
+                    marked.scrollIntoView({ block: "center" });
+                    break;
+                }
+            }
         });
         setTimeout(() => {
             if (this._highlightWineId === wine.id)
                 this._highlightWineId = null;
-        }, 2500);
+        }, 4000);
     }
     // --- Rack panel (grid-slot cabinets: list + reorder) ---
     _onRackClick(e) {
@@ -9649,6 +12661,8 @@ let WineCellarCard = class WineCellarCard extends i {
                 ...(row !== null ? { row } : {}),
                 ...(col !== null ? { col } : {}),
             });
+            if (zone)
+                await this._placeOnTopOfBin(cabinetId, zone, [this._movingWine.id]);
             this._showToast(`Moved "${this._movingWine.name}"`);
             this._movingWine = null;
             await this._loadData();
@@ -9681,17 +12695,15 @@ let WineCellarCard = class WineCellarCard extends i {
                 if (toIdx === -1)
                     return;
                 zoneWines.splice(d.insertBefore ? toIdx : toIdx + 1, 0, moved);
-                for (let i = 0; i < zoneWines.length; i++) {
-                    if ((zoneWines[i].depth || 0) !== i) {
-                        await this.hass.callWS({
-                            type: "wine_cellar/move_wine",
-                            wine_id: zoneWines[i].id,
-                            cabinet_id: d.targetCabinetId,
-                            zone: d.targetZone,
-                            depth: i,
-                        });
-                    }
-                }
+                // One renumbering rather than a move per bottle: dragging within a
+                // full twenty-bottle bin used to fire up to twenty calls, each with
+                // its own disk write on the other side.
+                await this.hass.callWS({
+                    type: "wine_cellar/reorder_zone",
+                    cabinet_id: d.targetCabinetId,
+                    zone: d.targetZone,
+                    wine_ids: zoneWines.map((w) => w.id),
+                });
                 this._showToast("Wine reordered");
                 await this._loadData();
             }
@@ -9706,6 +12718,9 @@ let WineCellarCard = class WineCellarCard extends i {
         // silently block reordering within the same zone.
         if (!d.targetZone && d.sourceCabinetId === d.targetCabinetId && d.sourceRow === d.targetRow && d.sourceCol === d.targetCol && d.sourceZone === d.targetZone)
             return;
+        // Set once the first half of a swap has happened, so a failure in the
+        // second half can be undone.
+        let swappedBack = null;
         try {
             // Check if target cell has a wine (swap)
             let targetWine;
@@ -9725,6 +12740,17 @@ let WineCellarCard = class WineCellarCard extends i {
                     ...(d.sourceRow !== null && d.sourceRow !== undefined ? { row: d.sourceRow } : {}),
                     ...(d.sourceCol !== null && d.sourceCol !== undefined ? { col: d.sourceCol } : {}),
                 });
+                // Half of a swap is not a state the rack can be in: the target bottle
+                // is now sitting where the dragged one still is. If the second half
+                // fails, put it back before reporting the failure.
+                swappedBack = () => this.hass.callWS({
+                    type: "wine_cellar/move_wine",
+                    wine_id: targetWine.id,
+                    cabinet_id: d.targetCabinetId,
+                    zone: d.targetZone || "",
+                    ...(d.targetRow !== null && d.targetRow !== undefined ? { row: d.targetRow } : {}),
+                    ...(d.targetCol !== null && d.targetCol !== undefined ? { col: d.targetCol } : {}),
+                });
             }
             // Dropped into a bulk/box zone's general area (not swapped onto a
             // specific bottle above): land past the last occupied depth instead
@@ -9737,11 +12763,12 @@ let WineCellarCard = class WineCellarCard extends i {
                 const targetCabinet = this._cabinets.find((c) => c.id === d.targetCabinetId);
                 const rowIdx = parseInt(d.targetZone.replace("storage-", ""), 10);
                 const storageRow = targetCabinet?.storage_rows?.find((s) => s.row === rowIdx);
-                if (storageRow && occupants.length >= (storageRow.capacity || 20)) {
+                const capacity = storageRow?.capacity || 20;
+                targetDepth = this._firstFreeDepth(d.targetCabinetId, d.targetZone, d.wineId);
+                if (storageRow && (occupants.length >= capacity || targetDepth >= capacity)) {
                     this._showToast(`"${storageRow.name || "Zone"}" is full — cannot move here.`);
                     return;
                 }
-                targetDepth = occupants.reduce((max, w) => Math.max(max, w.depth || 0), -1) + 1;
             }
             // Move dragged wine to target
             await this.hass.callWS({
@@ -9753,6 +12780,12 @@ let WineCellarCard = class WineCellarCard extends i {
                 ...(d.targetCol !== null && d.targetCol !== undefined ? { col: d.targetCol } : {}),
                 ...(targetDepth !== undefined ? { depth: targetDepth } : {}),
             });
+            // Dropped into a bin's open area rather than onto a specific bottle:
+            // that is putting it on the pile, so it lands on top. A drop *onto* a
+            // bottle is a deliberate position and is left exactly where it fell.
+            if (d.targetZone && !targetWine) {
+                await this._placeOnTopOfBin(d.targetCabinetId, d.targetZone, [d.wineId]);
+            }
             // Same container (rack/bin/box) = reordering; a different one = an
             // actual move between containers.
             const sameContainer = d.sourceCabinetId === d.targetCabinetId;
@@ -9761,7 +12794,19 @@ let WineCellarCard = class WineCellarCard extends i {
         }
         catch (err) {
             console.error("Failed to move wine:", err);
+            if (swappedBack) {
+                try {
+                    await swappedBack();
+                }
+                catch (undoErr) {
+                    console.error("Failed to undo half-completed swap:", undoErr);
+                    this._showToast("Move failed and could not be undone — check both slots");
+                    await this._loadData();
+                    return;
+                }
+            }
             this._showToast("Failed to move wine");
+            await this._loadData();
         }
     }
     _copyWine(wine) {
@@ -9778,7 +12823,7 @@ let WineCellarCard = class WineCellarCard extends i {
         if (!this._copiedWine)
             return;
         try {
-            await this.hass.callWS({
+            const result = await this.hass.callWS({
                 type: "wine_cellar/add_wine",
                 wine: {
                     barcode: this._copiedWine.barcode,
@@ -9813,10 +12858,15 @@ let WineCellarCard = class WineCellarCard extends i {
                     drink_window: this._copiedWine.drink_window,
                     ai_ratings: this._copiedWine.ai_ratings,
                     vivino_updated_at: this._copiedWine.vivino_updated_at,
+                    vivino_checked_at: this._copiedWine.vivino_checked_at,
                     ai_updated_at: this._copiedWine.ai_updated_at,
+                    ai_checked_at: this._copiedWine.ai_checked_at,
                     vivino_id: this._copiedWine.vivino_id,
                 },
             });
+            const pasted = result?.wine?.id;
+            if (zone && pasted)
+                await this._placeOnTopOfBin(cabinetId, zone, [pasted]);
             this._showToast("Wine pasted! Tap more empty cells or click ✕ to stop.");
             await this._loadData();
         }
@@ -9855,6 +12905,49 @@ let WineCellarCard = class WineCellarCard extends i {
             this._showToast("AI Batch analysis failed.");
         }
         this._analyzing = false;
+    }
+    // --- Arrangement ---
+    // Recomputed on render rather than cached: it reads the same wines and
+    // cabinets the card already holds, and a stale count would point at moves
+    // that have since been made.
+    get _arrangementFindings() {
+        // Read from render(), so it ran on every keystroke in the search box even
+        // though typing cannot change how the cellar is arranged. Cached against
+        // the three things it actually depends on — all replaced wholesale rather
+        // than mutated, so identity is a sound key.
+        if (this._findingsCache &&
+            this._findingsCache.wines === this._wines &&
+            this._findingsCache.cabinets === this._cabinets &&
+            this._findingsCache.dismissed === this._dismissedArrangements) {
+            return this._findingsCache.findings;
+        }
+        const findings = analyzeArrangement(this._wines, this._cabinets, this._dismissedArrangements);
+        this._findingsCache = {
+            wines: this._wines,
+            cabinets: this._cabinets,
+            dismissed: this._dismissedArrangements,
+            findings,
+        };
+        return findings;
+    }
+    // "Leave it as it is" has to stick, or the count becomes a badge people
+    // learn to ignore. Applied locally first so the finding disappears at once.
+    async _dismissArrangement(id) {
+        if (this._dismissedArrangements.includes(id))
+            return;
+        const previous = this._dismissedArrangements;
+        const next = [...previous, id];
+        this._dismissedArrangements = next;
+        try {
+            await this.hass.callWS({
+                type: "wine_cellar/update_settings",
+                updates: { dismissed_arrangements: next },
+            });
+        }
+        catch (err) {
+            this._dismissedArrangements = previous;
+            this._showToast("Failed to dismiss the suggestion");
+        }
     }
     // --- Metadata language (Vivino/AI) ---
     async _setMetadataLanguage(lang) {
@@ -10003,7 +13096,7 @@ let WineCellarCard = class WineCellarCard extends i {
         if (!this._movingBuyListItem)
             return;
         try {
-            await this.hass.callWS({
+            const result = await this.hass.callWS({
                 type: "wine_cellar/move_to_cellar",
                 item_id: this._movingBuyListItem.id,
                 cabinet_id: cabinetId,
@@ -10012,6 +13105,9 @@ let WineCellarCard = class WineCellarCard extends i {
                 zone,
                 depth,
             });
+            const moved = result?.wine?.id;
+            if (zone && moved)
+                await this._placeOnTopOfBin(cabinetId, zone, [moved]);
             this._showToast(`Moved "${this._movingBuyListItem.name}" to cellar`);
             this._movingBuyListItem = null;
             await this._loadData();
@@ -10181,6 +13277,18 @@ let WineCellarCard = class WineCellarCard extends i {
                   <span class="stat-value">${this._stats.available_slots}</span>
                   available
                 </div>
+                ${this._arrangementFindings.length
+                ? b `
+                      <div
+                        class="stat stat-action"
+                        title="Suggestions read from where your bottles already are"
+                        @click=${() => (this._showArrangement = true)}
+                      >
+                        <span class="stat-value">🧹 ${this._arrangementFindings.length}</span>
+                        ${this._arrangementFindings.length === 1 ? "tidy-up" : "tidy-ups"}
+                      </div>
+                    `
+                : A}
                 ${this._stats.total_value
                 ? b `
                       <div class="stat">
@@ -10246,7 +13354,11 @@ let WineCellarCard = class WineCellarCard extends i {
         </div>
 
         <!-- Search bar -->
-        <wine-search-bar @search-change=${this._onSearch}></wine-search-bar>
+        <wine-search-bar
+          .value=${this._searchQuery}
+          .filter=${this._searchFilter}
+          @search-change=${this._onSearch}
+        ></wine-search-bar>
 
         <!-- Cabinet grids -->
         ${showGrid
@@ -10257,6 +13369,7 @@ let WineCellarCard = class WineCellarCard extends i {
                         <cabinet-grid
                           .cabinet=${cab}
                           .wines=${this._getCabinetWines(cab.id)}
+                          .highlightWineId=${this._highlightWineId}
                           @cell-click=${this._onCellClick}
                           @zone-click=${this._onZoneClick}
                           @zone-container-click=${this._onZoneContainerClick}
@@ -10274,6 +13387,7 @@ let WineCellarCard = class WineCellarCard extends i {
                           <cabinet-grid
                             .cabinet=${cab}
                             .wines=${this._getCabinetWines(cab.id)}
+                            .highlightWineId=${this._highlightWineId}
                             @cell-click=${this._onCellClick}
                             @zone-click=${this._onZoneClick}
                             @zone-container-click=${this._onZoneContainerClick}
@@ -10618,6 +13732,18 @@ let WineCellarCard = class WineCellarCard extends i {
           @buy-list-updated=${() => this._loadData()}
         ></wine-list-dialog>
 
+        <!-- Arrangement report -->
+        <arrangement-dialog
+          .open=${this._showArrangement}
+          .hass=${this.hass}
+          .wines=${this._wines}
+          .cabinets=${this._cabinets}
+          .dismissed=${this._dismissedArrangements}
+          @close=${() => (this._showArrangement = false)}
+          @moves-applied=${() => this._loadData()}
+          @dismiss-finding=${(e) => this._dismissArrangement(e.detail.id)}
+        ></arrangement-dialog>
+
         <!-- Inventory Dialog -->
         <inventory-dialog
           .open=${this._showInventory}
@@ -10737,14 +13863,57 @@ let WineCellarCard = class WineCellarCard extends i {
               <div class="depth-panel open">
                 <div class="depth-panel-header">
                   <span class="depth-panel-title">
+                    ${this._zonePanelCabinet
+                ? b `<span class="depth-panel-rack">${this._zonePanelCabinet.name}</span>`
+                : A}
                     ${this._zonePanelName}
                     <span class="depth-panel-subtitle">
                       ${this._zonePanelWines.length}/${this._zonePanelCapacity}
                       ${this._zonePanelType === "box" ? "bottles" : "stored"}
                     </span>
                   </span>
-                  <button class="depth-panel-close" @click=${this._closeZonePanel}>✕</button>
+                  <span class="depth-panel-actions">
+                    ${this._zonePanelWines.length > 1
+                ? b `<button
+                          class="depth-panel-sort"
+                          ?disabled=${this._zoneSorting}
+                          title="Renumber the slots to match when bottles were added"
+                          @click=${() => (this._confirmZoneSort = true)}
+                        >
+                          ${this._zoneSorting ? "Sorting…" : "↕ Sort by date"}
+                        </button>`
+                : A}
+                    <button class="depth-panel-close" @click=${this._closeZonePanel}>✕</button>
+                  </span>
                 </div>
+                ${this._confirmZoneSort
+                ? b `
+                      <div class="depth-panel-confirm">
+                        <strong>Reorder by date added?</strong>
+                        <span>
+                          Every bottle in ${this._zonePanelName} moves to a slot matching when
+                          it was added. Any order you arranged by hand is lost. Slot 1 is the
+                          most accessible position.
+                        </span>
+                        <span class="depth-panel-confirm-btns">
+                          <button @click=${() => (this._confirmZoneSort = false)}>Cancel</button>
+                          <button
+                            title="Slot 1 holds the bottle that has been in this bin longest — for a bin you fill in a row"
+                            @click=${() => this._sortZoneByDateAdded("oldest")}
+                          >
+                            Oldest first
+                          </button>
+                          <button
+                            class="primary"
+                            title="Slot 1 holds the bottle you added last — for a bin you stack, where the newest sits on top"
+                            @click=${() => this._sortZoneByDateAdded("newest")}
+                          >
+                            Newest first
+                          </button>
+                        </span>
+                      </div>
+                    `
+                : A}
                 <div class="depth-panel-slots">
                   ${this._zonePanelType === "bulk"
                 ? b `
@@ -11244,6 +14413,22 @@ WineCellarCard.styles = [
         font-size: 0.9em;
       }
 
+      /* The arrangement count is the only stat you can act on, and it is only
+         there at all when the cellar has something to say. */
+      .stat-action {
+        cursor: pointer;
+        border-radius: 6px;
+        padding: 2px 8px;
+        margin: -2px 0;
+        border: 1px solid var(--wc-border);
+        transition: all 0.15s;
+      }
+
+      .stat-action:hover {
+        border-color: var(--wc-primary);
+        background: rgba(114, 47, 55, 0.08);
+      }
+
       /* Phone: stack cabinets vertically */
       @media (max-width: 599px) {
         .header-row {
@@ -11394,6 +14579,12 @@ __decorate([
 ], WineCellarCard.prototype, "_showInventory", void 0);
 __decorate([
     r()
+], WineCellarCard.prototype, "_showArrangement", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_dismissedArrangements", void 0);
+__decorate([
+    r()
 ], WineCellarCard.prototype, "_buyList", void 0);
 __decorate([
     r()
@@ -11470,6 +14661,12 @@ __decorate([
 __decorate([
     r()
 ], WineCellarCard.prototype, "_highlightWineId", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_confirmZoneSort", void 0);
+__decorate([
+    r()
+], WineCellarCard.prototype, "_zoneSorting", void 0);
 WineCellarCard = __decorate([
     t("wine-cellar-card")
 ], WineCellarCard);

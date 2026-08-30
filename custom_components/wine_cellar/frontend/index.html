@@ -85,6 +85,15 @@
       ], order: 3 },
     ];
 
+    let mockIdSeq = 1;
+    let mockBackupKeep = 10;
+    const mockServerBackups = [
+      { filename: "wine_cellar_20260307_150000.json", timestamp: "2026-03-07T15:00:00Z", wines: 19, cabinets: 3, buy_list: 4, size: 12500 },
+      { filename: "wine_cellar_20260306_120000.json", timestamp: "2026-03-06T12:00:00Z", wines: 17, cabinets: 3, buy_list: 3, size: 11200 },
+      { filename: "wine_cellar_20260305_090000.json", timestamp: "2026-03-05T09:00:00Z", wines: 15, cabinets: 3, buy_list: 2, size: 9800 },
+    ];
+
+    const mockSettings = { dismissed_arrangements: [] };
     const mockBuyList = [
       { id: "bl-1", name: "Caymus Cabernet Sauvignon 2021", winery: "Caymus Vineyards", region: "Napa Valley", country: "USA", vintage: 2021, type: "red", grape_variety: "Cabernet Sauvignon", rating: 4.3, ratings_count: 7850, image_url: "https://images.vivino.com/thumbs/pC4wjq1BRtOFfWNi8IkFGA_375x500.jpg", price: null, retail_price: 90, notes: "", description: "Rich and full-bodied with ripe dark fruit and vanilla oak.", food_pairings: "Beef, Lamb", alcohol: "14.6%", disposition: "D", drink_window: "2024-2030", ai_ratings: { rating_ws: 92, rating_rp: 93 }, added_at: "2026-03-01T10:00:00Z" },
       { id: "bl-2", name: "Tignanello 2020", winery: "Antinori", region: "Tuscany", country: "Italy", vintage: 2020, type: "red", grape_variety: "Sangiovese/Cabernet", rating: 4.5, ratings_count: 5200, image_url: "https://images.vivino.com/thumbs/xmN-caL0R42OILQL67PLIA_375x500.jpg", price: null, retail_price: 120, notes: "Saw at restaurant", description: "Super Tuscan icon. Dark cherry, spice, and leather.", food_pairings: "Beef, Pasta, Game", alcohol: "14.0%", disposition: "H", drink_window: "2025-2035", ai_ratings: { rating_ws: 95, rating_rp: 94, rating_jd: 96 }, added_at: "2026-03-02T10:00:00Z" },
@@ -109,7 +118,24 @@
     };
 
     // Mock hass object
+    // The card subscribes to wine_cellar_updated so that work the backend does
+    // on its own becomes visible without the user prodding it. Mirrored here so
+    // that path is exercisable in the preview.
+    const mockEventListeners = new Set();
+    const fireWineCellarUpdated = () => {
+      for (const cb of mockEventListeners) cb({ event_type: "wine_cellar_updated" });
+    };
+    // Exposed so the event path can be driven from the console.
+    window.fireWineCellarUpdated = fireWineCellarUpdated;
+
     const mockHass = {
+      connection: {
+        subscribeEvents: async (cb, eventType) => {
+          if (eventType !== "wine_cellar_updated") return () => {};
+          mockEventListeners.add(cb);
+          return () => mockEventListeners.delete(cb);
+        },
+      },
       callWS: async (msg) => {
         switch (msg.type) {
           case "wine_cellar/get_wines":
@@ -119,7 +145,7 @@
           case "wine_cellar/get_stats":
             return mockStats;
           case "wine_cellar/get_capabilities":
-            return { has_gemini: true };
+            return { has_gemini: true, dismissed_arrangements: mockSettings.dismissed_arrangements || [] };
           case "wine_cellar/lookup_barcode":
             return { result: { name: "Test Wine", winery: "Test Winery", region: "Test Region", country: "France", vintage: 2020, type: "red", grape_variety: "Merlot", rating: 4.0, ratings_count: 500, image_url: "https://images.vivino.com/thumbs/ApnxEJsiSaCuFadP5WMFKQ_375x500.jpg", price: 30, description: "A rich, full-bodied red.", food_pairings: "Beef, Pasta", alcohol: "13.5%", source: "mock" }, cached: false };
           case "wine_cellar/search_wine":
@@ -137,7 +163,7 @@
             if (cabIdx >= 0) mockCabinets.splice(cabIdx, 1);
             return { success: true };
           case "wine_cellar/add_wine":
-            mockWines.push({ ...msg.wine, id: "new-" + Date.now(), added_at: new Date().toISOString() });
+            mockWines.push({ ...msg.wine, id: "new-" + (mockIdSeq++), added_at: new Date().toISOString() });
             return { wine: mockWines[mockWines.length - 1] };
           case "wine_cellar/remove_wine":
             const idx = mockWines.findIndex(w => w.id === msg.wine_id);
@@ -205,7 +231,7 @@
             }
             return { wine: aw, analysis: {} };
           case "wine_cellar/get_capabilities":
-            return { has_gemini: true };
+            return { has_gemini: true, dismissed_arrangements: mockSettings.dismissed_arrangements || [] };
           case "wine_cellar/get_buy_list":
             return { buy_list: mockBuyList };
           case "wine_cellar/add_to_buy_list":
@@ -250,14 +276,86 @@
                 { name: "Barolo Monfortino 2016", winery: "Giacomo Conterno", region: "Piedmont", country: "Italy", vintage: 2016, type: "red", grape_variety: "Nebbiolo", price: 450 },
               ],
             };
+          case "wine_cellar/update_settings":
+            if (msg.updates && msg.updates.server_backup_keep !== undefined) {
+              mockBackupKeep = msg.updates.server_backup_keep;
+            }
+            if (msg.updates && msg.updates.dismissed_arrangements !== undefined) {
+              mockSettings.dismissed_arrangements = msg.updates.dismissed_arrangements;
+            }
+            return { settings: msg.updates || {} };
           case "wine_cellar/server_backup_save":
             return { success: true, filename: "wine_cellar_" + new Date().toISOString().replace(/[:.]/g, "").slice(0, 15) + ".json", wines: mockWines.length, cabinets: mockCabinets.length, buy_list: mockBuyList.length, timestamp: new Date().toISOString() };
           case "wine_cellar/server_backup_list":
-            return { backups: [
-              { filename: "wine_cellar_20260307_150000.json", timestamp: "2026-03-07T15:00:00Z", wines: 19, cabinets: 3, buy_list: 4, size: 12500 },
-              { filename: "wine_cellar_20260306_120000.json", timestamp: "2026-03-06T12:00:00Z", wines: 17, cabinets: 3, buy_list: 3, size: 11200 },
-              { filename: "wine_cellar_20260305_090000.json", timestamp: "2026-03-05T09:00:00Z", wines: 15, cabinets: 3, buy_list: 2, size: 9800 },
-            ]};
+            return { backups: mockServerBackups, keep: mockBackupKeep, keep_choices: [0, 5, 10, 20, 50] };
+          case "wine_cellar/server_backup_delete": {
+            const bIdx = mockServerBackups.findIndex((b) => b.filename === msg.filename);
+            if (bIdx < 0) return { error: "Backup not found: " + msg.filename };
+            mockServerBackups.splice(bIdx, 1);
+            return { success: true, filename: msg.filename };
+          }
+          case "wine_cellar/batch_refresh_vivino": {
+            const vIds = msg.wine_ids || mockWines.map((w) => w.id);
+            let vN = 0, vSame = 0;
+            for (const w of mockWines) {
+              if (!vIds.includes(w.id)) continue;
+              // Every third wine is "not in Vivino's catalogue": checked, nothing new.
+              const known = (mockWines.indexOf(w) % 3) !== 0;
+              const now = new Date().toISOString();
+              if (known) {
+                if (!w.food_pairings) w.food_pairings = "Beef, Pasta";
+                if (!w.description) w.description = "Mock Vivino description.";
+                if (!w.rating) w.rating = 4.0;
+                w.vivino_updated_at = now;
+                vN++;
+              } else {
+                vSame++;
+              }
+              // The check is recorded either way — that is the whole point.
+              w.vivino_checked_at = now;
+            }
+            return { updated: vN, unchanged: vSame, total: vIds.length, errors: 0 };
+          }
+          case "wine_cellar/batch_analyze_wines": {
+            const aIds = msg.wine_ids || mockWines.map((w) => w.id);
+            let aN = 0;
+            for (const w of mockWines) {
+              if (!aIds.includes(w.id)) continue;
+              const aiNow = new Date().toISOString();
+              if (!w.disposition) w.disposition = "D";
+              if (!w.drink_window) w.drink_window = "2026-2030";
+              if (!w.ai_ratings) w.ai_ratings = { rating_ws: 92 };
+              w.ai_updated_at = aiNow;
+              w.ai_checked_at = aiNow;
+              aN++;
+            }
+            return { updated: aN, unchanged: 0, total: aIds.length, errors: 1 };
+          }
+          case "wine_cellar/reorder_zone": {
+            const inZone = mockWines.filter(
+              (w) => w.cabinet_id === msg.cabinet_id && (w.zone || "") === msg.zone
+            );
+            const byId = Object.fromEntries(inZone.map((w) => [w.id, w]));
+            const listed = (msg.wine_ids || []).map((id) => byId[id]).filter(Boolean);
+            const listedIds = new Set(listed.map((w) => w.id));
+            const rest = inZone
+              .filter((w) => !listedIds.has(w.id))
+              .sort((a, b) => (a.depth || 0) - (b.depth || 0));
+            [...listed, ...rest].forEach((w, i) => { w.depth = i; });
+            return { reordered: listed.length + rest.length };
+          }
+          case "wine_cellar/get_storage_info": {
+            const bytes = (v) => new TextEncoder().encode(JSON.stringify(v)).length;
+            return {
+              total_bytes: bytes({ wines: mockWines, cabinets: mockCabinets, buy_list: mockBuyList, wine_history: mockWineHistory }),
+              wines_bytes: bytes(mockWines),
+              wines_count: mockWines.length,
+              history_bytes: bytes(mockWineHistory),
+              history_count: mockWineHistory.length,
+              barcode_cache_bytes: 0,
+              barcode_cache_count: 0,
+            };
+          }
           case "wine_cellar/server_backup_restore":
             return { success: true, filename: msg.filename, wines: mockWines.length, cabinets: mockCabinets.length, buy_list: mockBuyList.length, timestamp: new Date().toISOString() };
           case "wine_cellar/backup_data":

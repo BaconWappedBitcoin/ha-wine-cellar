@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -141,18 +142,31 @@ class VivinoClient:
         self._hass = hass
 
     async def lookup_barcode(self, barcode: str, language: str = "en") -> dict[str, Any] | None:
-        """Look up a wine by barcode using multiple sources."""
-        # 1. Try UPC Item DB first (good barcode database)
-        result = await self._lookup_upc_itemdb(barcode)
-        if result:
-            return result
+        """Look up a wine by barcode using multiple sources.
 
-        # 2. Try Open Food Facts
-        result = await self._search_open_food_facts(barcode)
-        if result:
-            return result
+        The two barcode databases are asked at the same time and the answer is
+        then picked by preference, not by whichever replied first — UPC Item DB
+        still wins over Open Food Facts. They used to be tried one after the
+        other, so a barcode neither of them knew paid both waits end to end
+        before anything else could happen. That is the common case for wine:
+        most bottles are not in a grocery barcode database, and the caller
+        falls back to photographing the label, so the "no match" verdict is
+        worth reaching quickly.
 
-        # 3. Try Vivino HTML search as last resort
+        Vivino's HTML search stays out of that pair deliberately. It is the
+        slow one and it rarely recognises a barcode at all, so firing it every
+        time would add a heavy request to every successful scan to save a
+        rounding error on the rare one it answers.
+        """
+        upc_result, off_result = await asyncio.gather(
+            self._lookup_upc_itemdb(barcode),
+            self._search_open_food_facts(barcode),
+            return_exceptions=True,
+        )
+        for result in (upc_result, off_result):
+            if result and not isinstance(result, BaseException):
+                return result
+
         html_results = await self._search_vivino_html(barcode, language)
         if html_results:
             return html_results[0]
@@ -296,14 +310,27 @@ class VivinoClient:
             composition.items(), key=lambda kv: -(kv[1] or 0)
         )
         show_percent = len(entries) > 1
-        parts: list[str] = []
+        wanted: list[tuple[int, Any]] = []
         for gid_str, pct in entries[:5]:
             try:
-                gid = int(gid_str)
+                wanted.append((int(gid_str), pct))
             except (TypeError, ValueError):
                 continue
-            name = await self._resolve_grape_name(gid)
-            if not name:
+        if not wanted:
+            return []
+
+        # One request per grape, asked together rather than one after the
+        # other: a five-grape blend used to serialise five round trips to
+        # build one string. Results stay in blend order regardless of which
+        # replies first.
+        names = await asyncio.gather(
+            *(self._resolve_grape_name(gid) for gid, _ in wanted),
+            return_exceptions=True,
+        )
+
+        parts: list[str] = []
+        for (_, pct), name in zip(wanted, names):
+            if not name or isinstance(name, BaseException):
                 continue
             parts.append(f"{pct:g}% {name}" if show_percent and pct else name)
         return parts
@@ -360,14 +387,20 @@ class VivinoClient:
     ) -> list[dict[str, Any]]:
         """Search for wines by name/text query.
 
-        Tries the explore API first (structured JSON, reliable prices) then
-        HTML scrape fallback. The explore API never returns `description` or
-        `food_pairings` — those only come from the HTML page. For a
-        well-indexed wine the explore API almost always succeeds, so without
-        this backfill those two fields would never get set at all (only
-        obscure wines that fail the explore API would ever reach the HTML
-        path). `fetch_extras=False` skips this extra request (used by batch
-        refresh, to avoid ~doubling its request volume across many wines).
+        Uses the explore API (structured JSON, reliable prices) with the HTML
+        scrape as both backfill and fallback. The explore API never returns
+        `description` or `food_pairings` — those only come from the HTML page.
+        For a well-indexed wine the explore API almost always succeeds, so
+        without this backfill those two fields would never get set at all
+        (only obscure wines that fail the explore API would ever reach the
+        HTML path).
+
+        Interactively the two are fetched **concurrently**: neither depends on
+        the other, and the common path needed both regardless, so running them
+        in sequence just added the waits together. `fetch_extras=False` keeps
+        the old sequential shape, asking for the HTML page only if the explore
+        API disappoints — batch refresh crosses the whole cellar and should
+        not double its request volume for a field it is not collecting.
 
         The explore API has been observed to silently ignore `q` for some
         queries and return a generic "trending wines" list instead of an
@@ -382,23 +415,40 @@ class VivinoClient:
         (which includes the year) influences ranking but doesn't guarantee
         the top hit is the right vintage among several Vivino returns.
         """
-        results = await self._search_vivino_explore(query, language, currency)
+        html_results: list[dict[str, Any]] | None = None
+        if fetch_extras:
+            # The two requests do not depend on each other, and the common
+            # path needed both anyway — one for structured data and prices,
+            # the other for description and food pairings. Running them one
+            # after the other simply added the two waits together.
+            explore_raw, html_raw = await asyncio.gather(
+                self._search_vivino_explore(query, language, currency),
+                self._search_vivino_html(query, language),
+                return_exceptions=True,
+            )
+            if isinstance(explore_raw, BaseException):
+                _LOGGER.warning("Vivino explore API failed for '%s': %s", query, explore_raw)
+                explore_raw = []
+            if isinstance(html_raw, BaseException):
+                _LOGGER.debug("Vivino HTML search failed for '%s': %s", query, html_raw)
+                html_raw = []
+            results, html_results = explore_raw, html_raw
+        else:
+            # Batch refresh walks the whole cellar, so the HTML page is only
+            # fetched when the explore API actually comes up short — the point
+            # of fetch_extras=False is to not double the request volume.
+            results = await self._search_vivino_explore(query, language, currency)
+
         results = _prefer_matching_vintage(results, vintage)
         if results and _explore_result_matches_query(query, results[0]):
-            if fetch_extras and not results[0].get("description") and not results[0].get("food_pairings"):
-                try:
-                    html_results = await self._search_vivino_html(query, language)
-                    html_results = _prefer_matching_vintage(html_results, vintage)
-                    if html_results:
-                        top = html_results[0]
-                        if top.get("description"):
-                            results[0]["description"] = top["description"]
-                        if top.get("food_pairings"):
-                            results[0]["food_pairings"] = top["food_pairings"]
-                except Exception as err:
-                    _LOGGER.debug(
-                        "Vivino: description/food_pairings backfill failed for '%s': %s", query, err
-                    )
+            if html_results and not results[0].get("description") and not results[0].get("food_pairings"):
+                ranked = _prefer_matching_vintage(html_results, vintage)
+                if ranked:
+                    top = ranked[0]
+                    if top.get("description"):
+                        results[0]["description"] = top["description"]
+                    if top.get("food_pairings"):
+                        results[0]["food_pairings"] = top["food_pairings"]
             return results
 
         # Explore API returned nothing, or its top result doesn't look
@@ -408,7 +458,8 @@ class VivinoClient:
         _LOGGER.debug(
             "Vivino explore API result for '%s' empty or unrelated, falling back to HTML scrape", query
         )
-        html_results = await self._search_vivino_html(query, language)
+        if html_results is None:
+            html_results = await self._search_vivino_html(query, language)
         html_results = _prefer_matching_vintage(html_results, vintage)
         if html_results:
             return html_results
@@ -718,6 +769,39 @@ class VivinoClient:
         return None
 
 
+# The search page embeds JSON inside HTML, and these fields are pulled out of
+# it by regex rather than parsed. That means the captured text still carries
+# JSON escapes — \u00e2 for â, \" for a quote, \/ for a slash — which nothing
+# decoded, so a French winery reached the cellar spelled "Ch\u00e2teau".
+_JSON_STR = r'((?:[^"\\]|\\.)*)'
+
+
+def _json_text(value: str) -> str:
+    """Decode a JSON string body captured by regex."""
+    if "\\" not in value:
+        return value
+    try:
+        decoded = json.loads(f'"{value}"')
+    except (json.JSONDecodeError, ValueError):
+        return value
+    return decoded if isinstance(decoded, str) else value
+
+
+def _as_float(value: str) -> float | None:
+    """A number, or None — the pattern that finds these accepts "4.5.6"."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_int(value: str) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _parse_vivino_html(html: str) -> list[dict[str, Any]]:
     """Extract wine results from Vivino's HTML search page.
 
@@ -730,7 +814,7 @@ def _parse_vivino_html(html: str) -> list[dict[str, Any]]:
 
         # Find wines via "seo_name":"slug","name":"Wine Name" pattern
         wine_iter = list(re.finditer(
-            r'"seo_name":"([^"]+)","name":"([^"]+)"', decoded
+            rf'"seo_name":"{_JSON_STR}","name":"{_JSON_STR}"', decoded
         ))
         if not wine_iter:
             return []
@@ -738,17 +822,23 @@ def _parse_vivino_html(html: str) -> list[dict[str, Any]]:
         seen_names: set[str] = set()
 
         for idx, match in enumerate(wine_iter[:10]):  # scan up to 10, keep up to 5
-            wine_name = match.group(2)
+            wine_name = _json_text(match.group(2))
 
             # Skip duplicates
             if wine_name in seen_names:
                 continue
             seen_names.add(wine_name)
 
-            # Extract a segment of HTML around this wine entry for per-wine fields
-            start = max(0, match.start() - 200)
+            # The slice of page this wine's fields are read from. It used to
+            # reach 200 characters past where the next wine's entry begins,
+            # and back into the previous one — so a wine missing a winery or
+            # a rating silently picked up its neighbour's. Confirmed on a
+            # synthetic page: the first wine came back with the second one's
+            # producer. Bounded by the neighbours now.
+            lower = wine_iter[idx - 1].end() if idx else 0
+            start = max(lower, match.start() - 200)
             if idx + 1 < len(wine_iter):
-                end = wine_iter[idx + 1].start() + 200
+                end = wine_iter[idx + 1].start()
             else:
                 end = min(len(decoded), match.end() + 3000)
             segment = decoded[start:end]
@@ -762,31 +852,31 @@ def _parse_vivino_html(html: str) -> list[dict[str, Any]]:
             # Extract winery name
             winery = ""
             winery_match = re.search(
-                r'"winery":\{"id":\d+,"name":"([^"]+)"', segment
+                rf'"winery":{{"id":\d+,"name":"{_JSON_STR}"', segment
             )
             if winery_match:
-                winery = winery_match.group(1)
+                winery = _json_text(winery_match.group(1))
 
             # Extract region name
             region = ""
             region_match = re.search(
-                r'"region":\{"id":\d+,"name":"([^"]+)"', segment
+                rf'"region":{{"id":\d+,"name":"{_JSON_STR}"', segment
             )
             if region_match:
-                region = region_match.group(1)
+                region = _json_text(region_match.group(1))
 
             # Extract country name
             country = ""
             country_match = re.search(
-                r'"country":\{"code":"[^"]*","name":"([^"]+)"', segment
+                rf'"country":{{"code":"[^"]*","name":"{_JSON_STR}"', segment
             )
             if country_match:
-                country = country_match.group(1)
+                country = _json_text(country_match.group(1))
 
             # Extract wine type
             type_match = re.search(r'"type_id":(\d+)', segment)
             wine_type = _map_wine_type(
-                int(type_match.group(1)) if type_match else None
+                _as_int(type_match.group(1)) if type_match else None
             )
 
             # Extract rating
@@ -795,8 +885,8 @@ def _parse_vivino_html(html: str) -> list[dict[str, Any]]:
                             r'"ratings_average":([\d.]+)']:
                 m = re.search(pattern, segment)
                 if m:
-                    val = float(m.group(1))
-                    if val > 0:
+                    val = _as_float(m.group(1))
+                    if val and val > 0:
                         rating = round(val, 1)
                         break
 
@@ -819,10 +909,10 @@ def _parse_vivino_html(html: str) -> list[dict[str, Any]]:
             # Extract grape variety
             grape = ""
             grape_match = re.search(
-                r'"grapes":\[\{"name":"([^"]+)"', segment
+                rf'"grapes":\[{{"name":"{_JSON_STR}"', segment
             )
             if grape_match:
-                grape = grape_match.group(1)
+                grape = _json_text(grape_match.group(1))
 
             # Extract ratings count
             ratings_count = None
@@ -832,9 +922,9 @@ def _parse_vivino_html(html: str) -> list[dict[str, Any]]:
             ]:
                 rc_match = re.search(rc_pattern, segment)
                 if rc_match:
-                    val = int(rc_match.group(1))
-                    if val > 0:
-                        ratings_count = val
+                    count = _as_int(rc_match.group(1))
+                    if count and count > 0:
+                        ratings_count = count
                         break
 
             # Extract wine style description
@@ -875,7 +965,7 @@ def _parse_vivino_html(html: str) -> list[dict[str, Any]]:
             vivino_id = None
             id_match = re.search(r'"wine":\{"id":(\d+)', segment)
             if id_match:
-                vivino_id = int(id_match.group(1))
+                vivino_id = _as_int(id_match.group(1))
 
             results.append({
                 "name": wine_name,
