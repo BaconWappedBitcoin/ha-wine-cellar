@@ -104,6 +104,17 @@ CONF_VIVINO_SESSION_COOKIE = "vivino_session_cookie"
 CONF_VIVINO_CELLAR_URL = "vivino_cellar_url"
 CONF_VIVINO_AUTO_SYNC = "vivino_auto_sync"
 
+# What the Vivino connection is allowed to do. "import" mirrors the Vivino
+# cellar into Cork Dork and never writes to the user's Vivino account;
+# "sync" is the full two-way reconcile that also pushes Cork Dork changes
+# back to Vivino. Import is the default so connecting an account never
+# modifies it unless the user explicitly opts in.
+CONF_VIVINO_MODE = "vivino_mode"
+VIVINO_MODE_SYNC = "sync"
+VIVINO_MODE_IMPORT = "import"
+VIVINO_MODES = [VIVINO_MODE_IMPORT, VIVINO_MODE_SYNC]
+DEFAULT_VIVINO_MODE = VIVINO_MODE_IMPORT
+
 VIVINO_AUTO_SYNC_INTERVAL_HOURS = 12
 
 ATTR_TOTAL_BOTTLES = "total_bottles"
