@@ -12,6 +12,11 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import (
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
 from .const import (
     AI_PROVIDERS,
@@ -23,10 +28,13 @@ from .const import (
     CONF_GEMINI_MODEL,
     CONF_VIVINO_AUTO_SYNC,
     CONF_VIVINO_CELLAR_URL,
+    CONF_VIVINO_MODE,
     CONF_VIVINO_SESSION_COOKIE,
     DEFAULT_AI_PROVIDER,
     DEFAULT_GEMINI_MODEL,
+    DEFAULT_VIVINO_MODE,
     DOMAIN,
+    VIVINO_MODES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -123,6 +131,16 @@ class WineCellarOptionsFlow(OptionsFlow):
                         CONF_VIVINO_SESSION_COOKIE,
                         default=current.get(CONF_VIVINO_SESSION_COOKIE, ""),
                     ): str,
+                    vol.Optional(
+                        CONF_VIVINO_MODE,
+                        default=current.get(CONF_VIVINO_MODE, DEFAULT_VIVINO_MODE),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=VIVINO_MODES,
+                            mode=SelectSelectorMode.DROPDOWN,
+                            translation_key="vivino_mode",
+                        )
+                    ),
                     vol.Optional(
                         CONF_VIVINO_AUTO_SYNC,
                         default=current.get(CONF_VIVINO_AUTO_SYNC, False),

@@ -43,14 +43,17 @@ use the **Network** tab instead — click any request to `www.vivino.com`, find
 
 1. **Settings → Devices & Services → Cork Dork → Configure**.
 2. Paste the **cellar URL** and the **session cookie**.
-3. Optionally enable **Automatically sync the Vivino cellar twice a day**.
-4. Save. The cookie is verified against your cellar immediately — a wrong or
+3. Choose the **Vivino mode** — see [Import or Synchronize](#import-or-synchronize)
+   below. The default, Import, never writes to your Vivino account.
+4. Optionally enable **Automatically sync the Vivino cellar twice a day**.
+5. Save. The cookie is verified against your cellar immediately — a wrong or
    expired cookie is rejected with an error so you can fix it.
 
 ### 4. Sync
 
-- Click **🔄 Vivino Sync** in the card header (or call the
-  `wine_cellar.sync_vivino` service) to import now.
+- Click the button in the card header — **⬇️ Vivino Import** or **🔄 Vivino
+  Sync**, depending on the mode — or call the `wine_cellar.sync_vivino`
+  service.
 - Imported bottles land in the **Unassigned** tab; open any wine and use
   **Move** to place it in a rack.
 - Only bottles you actually own (positive bottle count) are imported; your
@@ -59,6 +62,44 @@ use the **Network** tab instead — click any request to `www.vivino.com`, find
 > **Cookie lifetime:** Vivino sessions expire after a while. When that happens a
 > sync fails and Cork Dork shows a "Vivino session expired" notification — just
 > repeat steps 2–3 with a fresh cookie.
+
+## Import or Synchronize
+
+The Vivino mode in the integration's options decides what the connection is
+allowed to do:
+
+- **Import** (default) — a one-way mirror. Vivino is the source of truth:
+  bottles added or consumed there are reflected in Cork Dork on the next sync,
+  and **nothing is ever written to your Vivino account**. Local count changes
+  on Vivino-synced wines are overwritten by the mirror, so manage your bottle
+  counts in Vivino. Manually added wines are never touched.
+- **Synchronize** — a two-way reconcile. Changes on either side since the last
+  sync are applied to the other: Vivino-side changes update Cork Dork, and
+  bottles you add or drink in Cork Dork are pushed back to Vivino as cellar
+  events (visible — and undoable — in Vivino's cellar history, tagged
+  "Cork Dork sync"). Pushes are paced and capped per sync, with the remainder
+  queued for the next one. Two guards protect your data: a suspiciously short
+  Vivino fetch never deletes locally, and a suspiciously large local shortfall
+  never wipes your Vivino cellar.
+
+### When a bottle disappears from Vivino
+
+If the right bottle to remove is obvious — the wine is gone entirely, or
+unplaced bottles cover the removal — Cork Dork removes it and the sync toast
+reports the count. When a *placed* bottle would have to go and there are
+several to choose from, nothing is deleted: the card shows a panel, selecting
+the wine rings every candidate bottle in your racks in orange, and you click
+the bottle that is actually gone and confirm. Every removed bottle is archived
+to the wine history with the reason `removed_on_vivino`.
+
+### When both sides changed the same wine
+
+If a wine changed on Vivino *and* in Cork Dork between syncs (say a bottle was
+consumed on Vivino while another was added locally), the sync changes nothing
+and lists the conflict in the card. Select it to ring all of your local
+bottles for review, correct anything that's off, then confirm **Cork Dork is
+right** — Vivino is updated to match your local count and the conflict closes.
+Conflict resolution writes to Vivino and therefore requires Synchronize mode.
 
 ## Method B — One-time CSV export (no config)
 

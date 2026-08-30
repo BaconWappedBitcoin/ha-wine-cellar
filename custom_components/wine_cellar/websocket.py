@@ -18,12 +18,15 @@ from .const import (
     CONF_METADATA_CURRENCY,
     CONF_METADATA_LANGUAGE,
     CONF_SERVER_BACKUP_KEEP,
+    CONF_VIVINO_MODE,
     CONF_WINE_HISTORY,
     CONF_WINES,
     DEFAULT_METADATA_CURRENCY,
     DEFAULT_METADATA_LANGUAGE,
     DEFAULT_SERVER_BACKUP_KEEP,
+    DEFAULT_VIVINO_MODE,
     DOMAIN,
+    VIVINO_MODE_SYNC,
     SERVER_BACKUP_KEEP_CHOICES,
     SUPPORTED_METADATA_CURRENCIES,
     SUPPORTED_METADATA_LANGUAGES,
@@ -59,6 +62,14 @@ def _get_metadata_currency(hass: HomeAssistant) -> str:
     """Return the user's chosen currency for Vivino/AI price data."""
     storage = hass.data[DOMAIN]["storage"]
     return storage.settings.get(CONF_METADATA_CURRENCY, DEFAULT_METADATA_CURRENCY)
+
+
+def _get_vivino_mode(hass: HomeAssistant) -> str:
+    """Return the configured Vivino mode (import/sync) from the config entry."""
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if entries:
+        return entries[0].options.get(CONF_VIVINO_MODE, DEFAULT_VIVINO_MODE)
+    return DEFAULT_VIVINO_MODE
 
 
 def _select_wines(storage: Any, wine_ids: list[str] | None) -> list[dict[str, Any]]:
@@ -314,6 +325,9 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_cabinets)
     websocket_api.async_register_command(hass, ws_add_wine)
     websocket_api.async_register_command(hass, ws_remove_wine)
+    websocket_api.async_register_command(hass, ws_get_pending_removals)
+    websocket_api.async_register_command(hass, ws_resolve_vivino_removal)
+    websocket_api.async_register_command(hass, ws_resolve_vivino_conflict)
     websocket_api.async_register_command(hass, ws_update_wine)
     websocket_api.async_register_command(hass, ws_move_wine)
     websocket_api.async_register_command(hass, ws_lookup_barcode)
@@ -447,6 +461,172 @@ async def ws_remove_wine(
         await storage.async_save()
         hass.bus.async_fire(f"{DOMAIN}_updated")
     connection.send_result(msg["id"], {"success": success})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "wine_cellar/get_pending_removals"}
+)
+@callback
+def ws_get_pending_removals(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return Vivino-side removals awaiting the user's bottle choice.
+
+    Also carries the sync conflicts (both sides changed a wine differently),
+    so the card can offer manual resolution instead of burying them in the
+    sync sensor's attributes.
+    """
+    storage = hass.data[DOMAIN]["storage"]
+    status = storage.get_vivino_sync_status() or {}
+    connection.send_result(
+        msg["id"],
+        {
+            "pending_removals": storage.get_vivino_pending_removals(),
+            "conflicts": status.get("conflicts_detail") or [],
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "wine_cellar/resolve_vivino_removal",
+        vol.Required("wine_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_resolve_vivino_removal(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Remove the bottle the user picked for a pending Vivino removal."""
+    storage = hass.data[DOMAIN]["storage"]
+    wine = next(
+        (w for w in storage.wines if w.get("id") == msg["wine_id"]), None
+    )
+    if not wine:
+        connection.send_result(msg["id"], {"error": "Wine not found."})
+        return
+    vid = str(wine.get("vivino_id") or "")
+    pending = storage.get_vivino_pending_removals()
+    entry = pending.get(vid)
+    if not entry:
+        connection.send_result(
+            msg["id"], {"error": "No pending Vivino removal for this wine."}
+        )
+        return
+    success = storage.remove_wine(msg["wine_id"], reason="removed_on_vivino")
+    if success:
+        entry["count"] = int(entry.get("count", 1)) - 1
+        if entry["count"] <= 0:
+            pending.pop(vid, None)
+        storage.set_vivino_pending_removals(pending)
+        await storage.async_save()
+        hass.bus.async_fire(f"{DOMAIN}_updated")
+    connection.send_result(
+        msg["id"], {"success": success, "pending_removals": pending}
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "wine_cellar/resolve_vivino_conflict",
+        vol.Required("vivino_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_resolve_vivino_conflict(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Resolve a sync conflict by declaring Cork Dork's count the truth.
+
+    The user has reviewed (and possibly corrected) their local bottles, so
+    Vivino is adjusted to match Cork Dork's current count and the baseline
+    is advanced, closing the conflict.
+    """
+    from .vivino_reconcile import build_corkdork_state
+
+    domain_data = hass.data[DOMAIN]
+    storage = domain_data["storage"]
+    client = domain_data.get("vivino_account")
+    if not client:
+        connection.send_result(msg["id"], {"error": "No Vivino account configured."})
+        return
+    if _get_vivino_mode(hass) != VIVINO_MODE_SYNC:
+        connection.send_result(
+            msg["id"],
+            {"error": "Import mode never writes to Vivino — switch the Vivino "
+                      "mode to Synchronize to push this count."},
+        )
+        return
+
+    vid = str(msg["vivino_id"])
+    cd_count = build_corkdork_state(storage.wines).get(vid, 0)
+    try:
+        vivino_count = await client._count_for_vintage(int(vid))
+        delta = cd_count - vivino_count
+        ok = delta == 0
+        if not ok:
+            res = await client.async_change_bottles(
+                int(vid), delta, comment="Cork Dork conflict resolution"
+            )
+            ok = bool(res.get("ok"))
+            if not ok:
+                # Vivino often serves a stale count right after accepting its
+                # own write, which makes an applied change look failed. Give
+                # it a moment and verify against a fresh read before ruling.
+                await asyncio.sleep(3)
+                ok = await client._count_for_vintage(int(vid)) == cd_count
+        if not ok:
+            connection.send_result(
+                msg["id"],
+                {"error": f"Vivino did not accept the change ({vivino_count} -> {cd_count})."},
+            )
+            return
+    except Exception as err:  # noqa: BLE001 - surfaced to the card
+        connection.send_result(msg["id"], {"error": f"Vivino update failed: {err}"})
+        return
+
+    # Advance the baseline so the next sync sees an agreed state
+    baseline = storage.get_vivino_baseline()
+    entry = dict(baseline.get(vid) or {})
+    local = next(
+        (w for w in storage.wines if str(w.get("vivino_id") or "") == vid), {}
+    )
+    entry.update({
+        "count": cd_count,
+        "name": entry.get("name") or local.get("name", ""),
+        "winery": entry.get("winery") or local.get("winery", ""),
+        "vintage": entry.get("vintage", local.get("vintage")),
+    })
+    if cd_count > 0:
+        baseline[vid] = entry
+    else:
+        baseline.pop(vid, None)
+    storage.set_vivino_baseline(baseline)
+
+    # Clear the conflict from the stored sync snapshot so the card updates
+    status = storage.get_vivino_sync_status() or {}
+    details = [
+        c for c in (status.get("conflicts_detail") or [])
+        if str(c.get("vintage_id")) != vid
+    ]
+    status["conflicts_detail"] = details
+    status["cellar_conflicts"] = len(details)
+    storage.set_vivino_sync_status(status)
+    hass.data[DOMAIN]["vivino_sync_status"] = status
+
+    await storage.async_save()
+    hass.bus.async_fire(f"{DOMAIN}_updated")
+    connection.send_result(
+        msg["id"],
+        {"success": True, "vivino_count": cd_count, "delta": delta,
+         "conflicts": details},
+    )
 
 
 @websocket_api.websocket_command(
@@ -707,6 +887,7 @@ def ws_get_capabilities(
         {
             "has_gemini": "gemini" in domain_data,
             "has_vivino_account": "vivino_account" in domain_data,
+            "vivino_mode": _get_vivino_mode(hass),
             "metadata_language": _get_metadata_language(hass),
             "supported_languages": SUPPORTED_METADATA_LANGUAGES,
             "metadata_currency": _get_metadata_currency(hass),

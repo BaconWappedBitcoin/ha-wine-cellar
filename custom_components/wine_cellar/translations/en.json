@@ -26,6 +26,7 @@
           "ai_model": "AI model name",
           "vivino_cellar_url": "Vivino cellar page URL",
           "vivino_session_cookie": "Vivino session cookie (from your logged-in browser)",
+          "vivino_mode": "Vivino mode",
           "vivino_auto_sync": "Automatically sync the Vivino cellar twice a day"
         },
         "data_description": {
@@ -33,7 +34,8 @@
           "ai_base_url": "Format: https://host or https://host/your-path — with or without a trailing /v1/chat/completions, either works",
           "ai_api_key": "Sent as header: Authorization: Bearer {key}",
           "ai_model": "Format: the exact model name your provider expects, e.g. gemini-2.5-flash",
-          "vivino_cellar_url": "Open your cellar in a browser and copy the address from the address bar. It ends with /cellars/ and your cellar number."
+          "vivino_cellar_url": "Open your cellar in a browser and copy the address from the address bar. It ends with /cellars/ and your cellar number.",
+          "vivino_mode": "Import mirrors your Vivino cellar into Cork Dork and never writes to your Vivino account. Synchronize also pushes bottles you add or drink in Cork Dork back to Vivino — in Import mode, manage your bottle counts in Vivino."
         }
       }
     },
@@ -44,6 +46,14 @@
       "vivino_invalid_auth": "Vivino rejected the session cookie — it may be expired or wrong. Paste a fresh one from your logged-in browser.",
       "vivino_cannot_connect": "Could not reach Vivino — check your network connection and try again.",
       "vivino_incomplete": "Enter both the cellar URL and the session cookie, or leave both empty to disable the connection."
+    }
+  },
+  "selector": {
+    "vivino_mode": {
+      "options": {
+        "import": "Import (one-way — never writes to Vivino)",
+        "sync": "Synchronize (two-way — pushes your changes back to Vivino)"
+      }
     }
   }
 }

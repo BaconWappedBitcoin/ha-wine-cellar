@@ -32,7 +32,13 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
-from .const import DOMAIN
+from .const import (
+    CONF_VIVINO_MODE,
+    DEFAULT_VIVINO_MODE,
+    DOMAIN,
+    VIVINO_MODE_IMPORT,
+    VIVINO_MODE_SYNC,
+)
 from .vivino_reconcile import (
     build_corkdork_state,
     build_vivino_state,
@@ -855,13 +861,26 @@ async def _reconcile_cellar(
     client: VivinoAccountClient,
     cellar: list[dict[str, Any]],
     result: dict[str, Any],
-    apply_pushback: bool,
+    mode: str,
 ) -> None:
-    """Reconcile the fetched Vivino cellar against Cork Dork and apply changes."""
+    """Reconcile the fetched Vivino cellar against Cork Dork and apply changes.
+
+    ``mode`` is one of the ``VIVINO_MODE_*`` constants. In import mode Vivino
+    is authoritative: Cork Dork mirrors it and nothing is ever pushed back.
+    In sync mode a three-way merge against the stored baseline decides which
+    side changed, and Cork-Dork-side changes are pushed to Vivino.
+    """
     vivino_state = build_vivino_state(cellar)
     corkdork_counts = build_corkdork_state(storage.wines)
     old_baseline = storage.get_vivino_baseline()
-    plan = reconcile(old_baseline, vivino_state, corkdork_counts)
+    if mode == VIVINO_MODE_IMPORT:
+        # Mirror: use Cork Dork's own state as the baseline. Every difference
+        # then reads as "only Vivino changed", so the plan converges Cork Dork
+        # to Vivino and can never contain pushes or conflicts.
+        mirror_baseline = {v: {"count": n} for v, n in corkdork_counts.items()}
+        plan = reconcile(mirror_baseline, vivino_state, corkdork_counts)
+    else:
+        plan = reconcile(old_baseline, vivino_state, corkdork_counts)
 
     vivino_total = sum(e.get("count", 0) for e in vivino_state.values())
     corkdork_total = sum(corkdork_counts.values())
@@ -920,7 +939,15 @@ async def _reconcile_cellar(
         _LOGGER.debug("Vivino: fyllde i luckor på %d befintliga viner", enriched_count)
 
     # ── Apply Vivino → Cork Dork removals (unless suspicious) ─────────
+    #
+    # Obvious removals are applied directly; when a placed bottle must go
+    # and there are more candidates than removals, the remainder is queued
+    # so the user picks the actual bottle in the card instead of us guessing
+    # which physical bottle they drank. The queue is rebuilt from scratch on
+    # every reconcile, so entries vanish as soon as the user resolves them
+    # (or the discrepancy disappears some other way).
     removed = 0
+    choice_queue: dict[str, dict[str, Any]] = {}
     if plan.remove and removes_suspicious:
         result["errors"].append(
             f"Skipped removing {plan.remove_count} bottle(s): Vivino returned "
@@ -928,13 +955,31 @@ async def _reconcile_cellar(
         )
     else:
         for vid, n in plan.remove:
-            removed += storage.remove_vivino_bottles(vid, n)
+            got, need = storage.resolve_vivino_removal(vid, n)
+            removed += got
+            if need:
+                meta = vivino_state.get(vid, {}).get("wine") or {}
+                local = next(
+                    (w for w in storage.wines
+                     if str(w.get("vivino_id") or "") == str(vid)), {},
+                )
+                choice_queue[vid] = {
+                    "count": need,
+                    "name": meta.get("name") or local.get("name", ""),
+                    "winery": meta.get("winery") or local.get("winery", ""),
+                    "vintage": meta.get("vintage", local.get("vintage")),
+                    "detected_at": datetime.now(timezone.utc).isoformat(),
+                }
+        storage.set_vivino_pending_removals(choice_queue)
+    result["cellar_removal_choices"] = sum(
+        e["count"] for e in choice_queue.values()
+    )
 
     # ── Apply Cork Dork → Vivino push-back (paced + capped) ──────────
     pushed = 0
     push_failed = 0
     succeeded: set[str] = set()
-    if apply_pushback and plan.push and not pushback_suspicious:
+    if mode == VIVINO_MODE_SYNC and plan.push and not pushback_suspicious:
         for vid, frm, to in plan.push:
             if pushed + push_failed >= MAX_PUSHES_PER_SYNC:
                 break  # remainder stays queued and retries next sync
@@ -963,6 +1008,7 @@ async def _reconcile_cellar(
     corkdork_after = build_corkdork_state(storage.wines)
     unresolved: set[str] = {vid for (vid, _b, _v, _c) in plan.conflicts}
     unresolved |= {vid for (vid, _f, _t) in plan.push if vid not in succeeded}
+    unresolved |= set(choice_queue)
     if removes_suspicious:
         unresolved |= {vid for (vid, _n) in plan.remove}
 
@@ -1017,17 +1063,29 @@ async def async_sync_from_vivino(
     sync_cellar: bool = True,
     sync_wishlist: bool = True,
     sync_my_wines: bool = False,
-    apply_pushback: bool = True,
+    mode: str | None = None,
 ) -> dict[str, Any]:
-    """Two-way reconcile between the Vivino cellar and Cork Dork.
+    """Reconcile the Vivino cellar with Cork Dork, honoring the Vivino mode.
 
-    Uses a stored baseline (last-synced state) for a three-way merge:
-    Vivino-side changes are applied to Cork Dork (adds and removals),
-    Cork-Dork-side changes are pushed back to Vivino (paced + capped),
-    and both-sides-differ cases are flagged as conflicts and left untouched.
-    Guarded so a bad fetch can't wipe Cork Dork and corrupt local data can't
-    wipe Vivino. Returns a result summary, also stored for the status sensor.
+    ``mode`` defaults to the ``vivino_mode`` option on the config entry
+    (falling back to import), so every caller — service, websocket, timer —
+    respects what the user chose in the UI unless a test overrides it.
+
+    Import mode mirrors Vivino into Cork Dork and never writes to the user's
+    Vivino account. Sync mode uses a stored baseline (last-synced state) for
+    a three-way merge: Vivino-side changes are applied to Cork Dork (adds and
+    removals), Cork-Dork-side changes are pushed back to Vivino (paced +
+    capped), and both-sides-differ cases are flagged as conflicts and left
+    untouched. Guarded so a bad fetch can't wipe Cork Dork and corrupt local
+    data can't wipe Vivino. Returns a result summary, also stored for the
+    status sensor.
     """
+    if mode is None:
+        entries = hass.config_entries.async_entries(DOMAIN)
+        mode = (
+            entries[0].options.get(CONF_VIVINO_MODE, DEFAULT_VIVINO_MODE)
+            if entries else DEFAULT_VIVINO_MODE
+        )
     result: dict[str, Any] = {
         "cellar_total": 0,
         "cellar_imported": 0,          # backward-compat alias for added
@@ -1036,6 +1094,7 @@ async def async_sync_from_vivino(
         "cellar_pushed": 0,
         "cellar_push_failed": 0,
         "cellar_pending_push": 0,
+        "cellar_removal_choices": 0,
         "cellar_conflicts": 0,
         "conflicts_detail": [],
         "cellar_skipped_no_bottles": 0,
@@ -1045,6 +1104,7 @@ async def async_sync_from_vivino(
         "my_wines_imported": 0,
         "my_wines_skipped_no_bottles": 0,
         "errors": [],
+        "vivino_mode": mode,
     }
 
     client.reset_session_backoff()
@@ -1061,7 +1121,7 @@ async def async_sync_from_vivino(
 
         if cellar is not None:
             await _reconcile_cellar(
-                hass, storage, client, cellar, result, apply_pushback
+                hass, storage, client, cellar, result, mode
             )
 
     if sync_my_wines:
