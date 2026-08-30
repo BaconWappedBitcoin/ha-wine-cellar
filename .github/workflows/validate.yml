@@ -3,13 +3,14 @@ name: Validate
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   validate-hacs:
     runs-on: ubuntu-latest
     name: Validate HACS
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: HACS Validation
         uses: hacs/action@main
         with:
@@ -19,6 +20,6 @@ jobs:
     runs-on: ubuntu-latest
     name: Validate Hassfest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Hassfest Validation
         uses: home-assistant/actions/hassfest@master
