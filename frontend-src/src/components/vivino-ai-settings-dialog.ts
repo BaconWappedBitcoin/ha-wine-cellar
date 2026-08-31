@@ -9,7 +9,7 @@ export class VivinoAiSettingsDialog extends LitElement {
   @property({ type: String }) metadataLanguage = "en";
   @property({ attribute: false }) supportedLanguages: string[] = ["en", "fr", "de"];
   @property({ type: String }) metadataCurrency = "USD";
-  @property({ attribute: false }) supportedCurrencies: string[] = ["USD", "EUR", "GBP", "CHF"];
+  @property({ attribute: false }) supportedCurrencies: string[] = ["USD", "EUR", "GBP", "CHF", "AUD"];
 
   static styles = [
     sharedStyles,
