@@ -858,7 +858,10 @@ async def ws_recognize_label(
 
     _LOGGER.debug("Recognizing label image (%d chars)", len(msg["image"]))
     result = await gemini.recognize_label(
-        msg["image"], _get_metadata_language(hass), back_image_base64=msg.get("back_image")
+        msg["image"],
+        _get_metadata_language(hass),
+        back_image_base64=msg.get("back_image"),
+        currency=_get_metadata_currency(hass),
     )
 
     # The gemini client now returns {"error": "..."} on failure
@@ -1541,7 +1544,9 @@ async def ws_extract_wine_list(
         )
         return
 
-    result = await gemini.extract_wine_list(msg["image"], _get_metadata_language(hass))
+    result = await gemini.extract_wine_list(
+        msg["image"], _get_metadata_language(hass), _get_metadata_currency(hass)
+    )
 
     # Send result directly — on success it contains {wines, restaurant_name, currency}
     # On error it contains {error: "message"}
