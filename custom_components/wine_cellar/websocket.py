@@ -1104,7 +1104,10 @@ async def ws_refresh_wine(
     price_needs_ai = False
     if lookup.get("price"):
         updates["retail_price"] = lookup["price"]
-        updates["retail_price_currency"] = currency
+        # Vivino picks the currency from the requesting IP, so use the one it
+        # actually returned. Stamping the configured currency onto a figure
+        # quoted in another is how a US price ends up labelled AUD.
+        updates["retail_price_currency"] = lookup.get("price_currency") or currency
     elif not wine.get("retail_price") or wine.get("retail_price_currency") != currency:
         # No usable Vivino price — also true when the stored price was
         # captured in a different currency, since an unconverted number in

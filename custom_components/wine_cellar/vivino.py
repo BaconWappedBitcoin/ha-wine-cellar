@@ -38,6 +38,27 @@ _FOOD_NAME_CACHE: dict[int, str] = {}
 ALL_WINE_TYPE_IDS = [1, 2, 3, 4, 7]  # red, white, sparkling, rosé, dessert
 
 # The explore API requires both a country and a currency code — pick a
+# The public vintage page. This DOES carry real price data, which the
+# comments elsewhere in this file deny -- see get_vintage_price for why both
+# statements are true at once.
+VIVINO_WINE_PAGE_URL = "https://www.vivino.com/w"
+
+# A live merchant offer. The "ppc" type separates it from Vivino's own
+# subscription-plan prices, which sit in the same page under a flat
+# "currency_code" key with no type at all.
+_PPC_PRICE_RE = re.compile(r'"amount"\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*"type"\s*:\s*"ppc"')
+# Read out of the ~250 characters that follow a ppc amount, where the offer's
+# own currency, bottle size and vintage all live.
+_BOTTLE_TYPE_RE = re.compile(r'"bottle_type_id"\s*:\s*([0-9]+)')
+_VINTAGE_ID_RE = re.compile(r'"vintage_id"\s*:\s*([0-9]+)')
+_PAGE_CURRENCY_RE = re.compile(r'"currency"\s*:\s*\{\s*"code"\s*:\s*"([A-Z]{3})"')
+
+# Vivino's id for a standard 750 ml bottle. Id 3 is a 375 ml half, and a page
+# can offer nothing but halves -- Rusden Black Guts listed seven, all halves,
+# so the "cheapest price" was half a bottle and looked like the wine had
+# halved in value.
+_STANDARD_BOTTLE_TYPE_ID = 1
+
 # country whose market Vivino actually prices in the chosen currency for.
 CURRENCY_COUNTRY_CODE = {
     "USD": "US",
@@ -184,7 +205,8 @@ class VivinoClient:
         Far more reliable than text search for a wine we've already
         matched once (no query ambiguity, no relevance guessing) — but
         it's a lookup, not a search, so it only helps once `vivino_id` is
-        already known. Still has no price data.
+        already known. The mobile API itself has no price field, so the price
+        is fetched separately from the public vintage page.
         """
         session = async_get_clientsession(self._hass)
         try:
@@ -248,7 +270,155 @@ class VivinoClient:
         if vintage_id:
             result.update(await self._get_vintage_details(vintage_id))
 
+        # The mobile API carries no price, so ask the public vintage page.
+        # This is what stops an AI estimate being used for a wine Vivino can
+        # actually price.
+        priced = await self.get_vintage_price(vivino_id, vintage)
+        if priced:
+            result["price"] = priced["price"]
+            result["price_currency"] = priced["currency"]
+
         return result
+
+    async def get_vintage_price(
+        self, vivino_id: int, vintage: int | None = None
+    ) -> dict[str, Any] | None:
+        """Read a real market price off the public vintage page.
+
+        The rest of this file says Vivino has no price, and for the endpoints
+        it tested that is true: the explore API ignores an unauthenticated `q`,
+        the mobile API has no price field at all, and SEARCH-page HTML carries
+        boilerplate prices that are identical for every query. The wine's own
+        vintage page is a different page and does carry per-vintage pricing:
+
+            https://www.vivino.com/w/{wine_id}?year={vintage}
+
+        No cookie, no auth and no Accept-Language are needed, and `?year=`
+        genuinely selects the vintage -- the median moves when it is dropped.
+        TWO HEADERS ARE NOT OPTIONAL, and both fail in ways that look like
+        "Vivino has no price" rather than like an error:
+
+          * A browser User-Agent. Vivino answers aiohttp's own UA -- and so
+            Home Assistant's shared session -- with **403**. curl's default UA
+            passes, which is exactly why a hand-rolled curl check can confirm
+            a price that the integration then cannot fetch.
+          * `Accept: text/html`. This is a web page; the module-level HEADERS
+            ask for `application/json` and get **415** back.
+
+        Only "ppc" offers are used -- somebody actually selling the bottle,
+        with a stated bottle size and vintage. The page also publishes a
+        "market" median, which is NOT used: it carries neither a bottle size
+        nor a reliable vintage, so on a wine offered only in halves it reports
+        roughly half the real price with nothing to reveal that.
+
+        Returns {"price": float, "currency": "AUD", "vintage": int|None}
+        or None. THE CURRENCY MUST BE TAKEN FROM THE RESPONSE: Vivino decides
+        it from the requesting IP, so an Australian-hosted instance gets AUD
+        and a US-hosted one gets USD from the identical URL. Assuming the
+        configured currency here would silently mislabel every price.
+        """
+        url = f"{VIVINO_WINE_PAGE_URL}/{vivino_id}"
+        params = {"year": str(vintage)} if vintage else None
+        # Browser UA from HEADERS, but asking for HTML rather than the JSON
+        # the rest of this client wants -- see the docstring: the wrong value
+        # for either of these returns 403 or 415, not a price.
+        headers = {**HEADERS, "Accept": "text/html,application/xhtml+xml"}
+        session = async_get_clientsession(self._hass)
+        try:
+            timeout = aiohttp.ClientTimeout(total=20)
+            async with session.get(
+                url, params=params, headers=headers, timeout=timeout
+            ) as resp:
+                if resp.status != 200:
+                    # 403 means the User-Agent was rejected and 415 the Accept
+                    # header -- both are configuration faults here, not an
+                    # absent price, so say so loudly enough to be found.
+                    log = _LOGGER.warning if resp.status in (403, 415) else _LOGGER.debug
+                    log(
+                        "Vivino vintage page %s returned HTTP %s "
+                        "(403/415 means the request headers were rejected)",
+                        url, resp.status,
+                    )
+                    return None
+                html = await resp.text()
+        except (aiohttp.ClientError, TimeoutError) as err:
+            _LOGGER.debug("Vivino vintage page fetch failed: %s", err)
+            return None
+
+        # Only a standard 750 ml offer is a price for the bottle the user
+        # owns. A page may list nothing else -- see _STANDARD_BOTTLE_TYPE_ID.
+        best: dict[str, Any] | None = None
+        for m in _PPC_PRICE_RE.finditer(html):
+            window = html[m.end() : m.end() + 250]
+            bt = _BOTTLE_TYPE_RE.search(window)
+            if not bt or int(bt.group(1)) != _STANDARD_BOTTLE_TYPE_ID:
+                continue
+            cur = _PAGE_CURRENCY_RE.search(window)
+            if not cur:
+                continue
+            try:
+                amount = round(float(m.group(1)), 2)
+            except (TypeError, ValueError):
+                continue
+            if amount <= 0:
+                continue
+            # "vintage_id" is written BEFORE "amount" in these objects
+            # ({"id":..,"vintage_id":..,"amount":..,"type":"ppc"}), so a
+            # forward-only window can never see it. Look back, and take the
+            # nearest one -- a page can list several offers in a row.
+            behind = _VINTAGE_ID_RE.findall(html[max(0, m.start() - 250) : m.start()])
+            vid = behind[-1] if behind else None
+            offer = {
+                "price": amount,
+                "currency": cur.group(1),
+                "vintage_id": int(vid) if vid else None,
+            }
+            # Cheapest standard bottle on offer.
+            if best is None or offer["price"] < best["price"]:
+                best = offer
+
+        if best is None:
+            _LOGGER.debug(
+                "No standard-bottle price on Vivino page for wine %s vintage %s "
+                "(offers may all be halves or magnums)",
+                vivino_id, vintage,
+            )
+            return None
+
+        # Which vintage the offer is actually for. `?year=` picks the page but
+        # NOT the buy module, which shows whatever vintage is currently for
+        # sale -- asking for 2017 returned a 2021 offer. Report it so the
+        # caller can decide, rather than passing off another year's price as
+        # this one's.
+        offer_year = None
+        if best["vintage_id"]:
+            # The vintage objects live in an HTML-escaped blob on the page,
+            # unlike the price objects, so this has to look at both forms.
+            pattern = (
+                r'"id"\s*:\s*%d\s*,[^{}]{0,300}?"year"\s*:\s*"?(\d{4})"?'
+                % best["vintage_id"]
+            )
+            for text in (html, html.replace("&quot;", '"')):
+                ym = re.search(pattern, text)
+                if ym:
+                    offer_year = int(ym.group(1))
+                    break
+
+        if vintage and offer_year and offer_year != vintage:
+            _LOGGER.debug(
+                "Vivino price for wine %s is for the %s vintage, not %s",
+                vivino_id, offer_year, vintage,
+            )
+
+        _LOGGER.debug(
+            "Vivino price for wine %s: %s %s (vintage %s, standard bottle)",
+            vivino_id, best["currency"], best["price"], offer_year or "unknown",
+        )
+        return {
+            "price": best["price"],
+            "currency": best["currency"],
+            "vintage": offer_year,
+        }
 
     async def _get_vintage_details(self, vintage_id: int) -> dict[str, Any]:
         """Fetch vintage-specific extras: image, description, alcohol, grapes, food."""
