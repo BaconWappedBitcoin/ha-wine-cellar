@@ -32,7 +32,7 @@
         "data_description": {
           "gemini_model": "Format: gemini-2.5-flash",
           "ai_base_url": "Format: https://host or https://host/your-path — with or without a trailing /v1/chat/completions, either works",
-          "ai_api_key": "Sent as header: Authorization: Bearer {key}",
+          "ai_api_key": "Sent as header: Authorization: Bearer <key>",
           "ai_model": "Format: the exact model name your provider expects, e.g. gemini-2.5-flash",
           "vivino_cellar_url": "Open your cellar in a browser and copy the address from the address bar. It ends with /cellars/ and your cellar number.",
           "vivino_mode": "Import mirrors your Vivino cellar into Cork Dork and never writes to your Vivino account. Synchronize also pushes bottles you add or drink in Cork Dork back to Vivino — in Import mode, manage your bottle counts in Vivino."
