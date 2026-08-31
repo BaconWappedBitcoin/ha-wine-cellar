@@ -44,6 +44,7 @@ CURRENCY_COUNTRY_CODE = {
     "EUR": "DE",
     "GBP": "GB",
     "CHF": "CH",
+    "AUD": "AU",
 }
 
 # The mobile API's region.country is a bare ISO code ("fr"), not a display

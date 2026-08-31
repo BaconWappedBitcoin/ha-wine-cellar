@@ -70,7 +70,7 @@ export class WineCellarCard extends LitElement {
   @state() private _metadataLanguage = "en";
   @state() private _supportedLanguages: string[] = ["en", "fr", "de"];
   @state() private _metadataCurrency = "USD";
-  @state() private _supportedCurrencies: string[] = ["USD", "EUR", "GBP", "CHF"];
+  @state() private _supportedCurrencies: string[] = ["USD", "EUR", "GBP", "CHF", "AUD"];
   @state() private _aiFallbackAlways = false;
   @state() private _showVivinoAiSettings = false;
   @state() private _showWineList = false;
@@ -645,7 +645,7 @@ export class WineCellarCard extends LitElement {
       this._metadataLanguage = capResult?.metadata_language || "en";
       this._supportedLanguages = capResult?.supported_languages || ["en", "fr", "de"];
       this._metadataCurrency = capResult?.metadata_currency || "USD";
-      this._supportedCurrencies = capResult?.supported_currencies || ["USD", "EUR", "GBP", "CHF"];
+      this._supportedCurrencies = capResult?.supported_currencies || ["USD", "EUR", "GBP", "CHF", "AUD"];
       this._aiFallbackAlways = capResult?.ai_fallback_always || false;
       this._dismissedArrangements = capResult?.dismissed_arrangements || [];
       this._buyList = buyListResult?.buy_list || [];
