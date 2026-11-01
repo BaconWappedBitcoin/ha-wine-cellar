@@ -78,11 +78,11 @@ AI_PROVIDERS = ["gemini", "openai_compatible"]
 
 CONF_METADATA_LANGUAGE = "metadata_language"
 DEFAULT_METADATA_LANGUAGE = "en"
-SUPPORTED_METADATA_LANGUAGES = ["en", "fr", "de"]
+SUPPORTED_METADATA_LANGUAGES = ["en", "fr", "de", "da"]
 
 CONF_METADATA_CURRENCY = "metadata_currency"
 DEFAULT_METADATA_CURRENCY = "USD"
-SUPPORTED_METADATA_CURRENCIES = ["USD", "EUR", "GBP", "CHF"]
+SUPPORTED_METADATA_CURRENCIES = ["USD", "EUR", "GBP", "CHF", "DKK"]
 
 # When Vivino finds no confident match, offer AI as a fallback instead of
 # applying automatically. "always" skips asking and just uses AI every time.

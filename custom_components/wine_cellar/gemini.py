@@ -108,7 +108,7 @@ def parse_json_response(raw_text: str) -> Any:
     raise json.JSONDecodeError("Unable to parse AI response", raw_text, 0)
 
 
-LANGUAGE_NAMES = {"en": "English", "fr": "French", "de": "German"}
+LANGUAGE_NAMES = {"en": "English", "fr": "French", "de": "German", "da": "Danish"}
 
 
 def _language_prefix(language: str) -> str:

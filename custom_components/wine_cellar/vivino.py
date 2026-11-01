@@ -44,6 +44,7 @@ CURRENCY_COUNTRY_CODE = {
     "EUR": "DE",
     "GBP": "GB",
     "CHF": "CH",
+    "DKK": "DK",
 }
 
 # The mobile API's region.country is a bare ISO code ("fr"), not a display
@@ -76,6 +77,7 @@ ACCEPT_LANGUAGE_BY_CODE = {
     "en": "en-US,en;q=0.9",
     "fr": "fr-FR,fr;q=0.9,en;q=0.5",
     "de": "de-DE,de;q=0.9,en;q=0.5",
+    "da": "da-DK,da;q=0.9,en;q=0.5",
 }
 
 
