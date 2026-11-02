@@ -9,6 +9,7 @@ Supports two transports behind a shared prompt/validation layer:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -22,7 +23,29 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
+
+# Gemini answers 5xx when a model is overloaded ("high demand"). These spikes
+# are short, so a couple of retries inside the caller's timeout budget turn
+# most of them into a normal answer instead of a failed scan.
+GEMINI_RETRY_STATUSES = {500, 502, 503, 504}
+GEMINI_RETRY_DELAYS_S = (2, 5)
+# Don't start a retry with less time than this left before the deadline.
+GEMINI_MIN_ATTEMPT_S = 10
+
+
+def gemini_thinking_config(model: str) -> dict[str, str] | None:
+    """Thinking settings for the model, or None to use the model's default.
+
+    Gemini 3 and later think before answering by default, which can push a
+    label read past the 45 s timeout. Every call here is reading or
+    classifying, so low thinking is enough and 2-3x faster. Older models
+    don't accept `thinkingLevel`, so they get nothing.
+    """
+    match = re.match(r"gemini-(\d+)", model.strip())
+    if match and int(match.group(1)) >= 3:
+        return {"thinkingLevel": "low"}
+    return None
 
 
 def build_gemini_api_url(model: str = DEFAULT_GEMINI_MODEL) -> str:
@@ -689,6 +712,7 @@ class GeminiVisionClient(BaseAIClient):
         """Initialize the client."""
         super().__init__(hass)
         self._api_key = api_key
+        self._model = model
         self._api_url = build_gemini_api_url(model)
 
     async def _call_ai(
@@ -709,58 +733,90 @@ class GeminiVisionClient(BaseAIClient):
         if extra_image_base64:
             parts.append({"inlineData": {"mimeType": "image/jpeg", "data": extra_image_base64}})
 
-        body = {
-            "contents": [{"parts": parts}],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "temperature": temperature,
-            },
+        generation_config: dict[str, Any] = {
+            "responseMimeType": "application/json",
+            "temperature": temperature,
         }
+        thinking_config = gemini_thinking_config(self._model)
+        if thinking_config:
+            generation_config["thinkingConfig"] = thinking_config
+        body = {"contents": [{"parts": parts}], "generationConfig": generation_config}
 
         candidates: list[Any] = []
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
         try:
-            timeout = aiohttp.ClientTimeout(total=timeout_s)
-            async with session.post(
-                self._api_url,
-                headers={"x-goog-api-key": self._api_key},
-                json=body,
-                timeout=timeout,
-            ) as resp:
-                resp_text = await resp.text()
+            attempt = 0
+            while True:
+                timeout = aiohttp.ClientTimeout(total=max(deadline - loop.time(), 1))
+                async with session.post(
+                    self._api_url,
+                    headers={"x-goog-api-key": self._api_key},
+                    json=body,
+                    timeout=timeout,
+                ) as resp:
+                    status = resp.status
+                    resp_text = await resp.text()
 
-                if resp.status in (401, 403):
-                    _LOGGER.error("Gemini API authentication failed (status %s)", resp.status)
-                    return {"error": f"Gemini API key is invalid (HTTP {resp.status})"}
+                if status not in GEMINI_RETRY_STATUSES or attempt >= len(GEMINI_RETRY_DELAYS_S):
+                    break
+                delay = GEMINI_RETRY_DELAYS_S[attempt]
+                if deadline - loop.time() < delay + GEMINI_MIN_ATTEMPT_S:
+                    break
+                _LOGGER.warning(
+                    "Gemini API returned status %s, retrying in %ss (attempt %s)",
+                    status, delay, attempt + 2,
+                )
+                await asyncio.sleep(delay)
+                attempt += 1
 
-                if resp.status == 429:
-                    _LOGGER.error("Gemini API quota exhausted: %s", resp_text[:300])
-                    return {
-                        "error": "Gemini API free tier quota exhausted. "
-                        "Enable billing at console.cloud.google.com or "
-                        "create a new API key at aistudio.google.com/apikey"
-                    }
+            if status in (401, 403):
+                _LOGGER.error("Gemini API authentication failed (status %s)", status)
+                return {"error": f"Gemini API key is invalid (HTTP {status})"}
 
-                if resp.status != 200:
-                    _LOGGER.error(
-                        "Gemini API returned status %s: %s", resp.status, resp_text[:500]
-                    )
-                    return {"error": f"Gemini API error (HTTP {resp.status})"}
+            if status == 429:
+                _LOGGER.error("Gemini API quota exhausted: %s", resp_text[:300])
+                return {
+                    "error": "Gemini API free tier quota exhausted. "
+                    "Enable billing at console.cloud.google.com or "
+                    "create a new API key at aistudio.google.com/apikey"
+                }
 
-                data = json.loads(resp_text)
-                candidates = data.get("candidates", [])
-                if not candidates:
-                    _LOGGER.warning("Gemini returned no candidates: %s", resp_text[:500])
-                    return {"error": "Gemini returned no results"}
+            if status == 404:
+                _LOGGER.error("Gemini model not found: %s", resp_text[:500])
+                return {
+                    "error": "Gemini model not found (HTTP 404). Google may have retired it; "
+                    "pick a current model in the integration settings"
+                }
 
-                content = candidates[0].get("content", {})
-                parts_out = content.get("parts", [])
-                if not parts_out:
-                    _LOGGER.warning("Gemini response has no parts")
-                    return {"error": "Gemini returned empty response"}
+            if status in GEMINI_RETRY_STATUSES:
+                _LOGGER.error(
+                    "Gemini API still returned status %s after retries: %s", status, resp_text[:500]
+                )
+                return {
+                    "error": f"Gemini is overloaded right now (HTTP {status}). "
+                    "Try again in a minute"
+                }
 
-                text = parts_out[0].get("text", "")
-                _LOGGER.debug("Gemini raw response: %s", text[:500])
-                return parse_json_response(text)
+            if status != 200:
+                _LOGGER.error("Gemini API returned status %s: %s", status, resp_text[:500])
+                return {"error": f"Gemini API error (HTTP {status})"}
+
+            data = json.loads(resp_text)
+            candidates = data.get("candidates", [])
+            if not candidates:
+                _LOGGER.warning("Gemini returned no candidates: %s", resp_text[:500])
+                return {"error": "Gemini returned no results"}
+
+            content = candidates[0].get("content", {})
+            parts_out = content.get("parts", [])
+            if not parts_out:
+                _LOGGER.warning("Gemini response has no parts")
+                return {"error": "Gemini returned empty response"}
+
+            text = parts_out[0].get("text", "")
+            _LOGGER.debug("Gemini raw response: %s", text[:500])
+            return parse_json_response(text)
 
         except json.JSONDecodeError as err:
             finish_reason = candidates[0].get("finishReason") if candidates else None
