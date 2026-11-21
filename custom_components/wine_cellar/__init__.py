@@ -31,6 +31,7 @@ from .const import (
     CONF_GEMINI_MODEL,
     CONF_VIVINO_AUTO_SYNC,
     CONF_VIVINO_CELLAR_URL,
+    CONF_VIVINO_EMAIL,
     CONF_VIVINO_SESSION_COOKIE,
     DEFAULT_AI_PROVIDER,
     DEFAULT_GEMINI_MODEL,
@@ -41,6 +42,7 @@ from .const import (
 from . import photos
 from .vivino import VivinoClient
 from .vivino_account import VivinoAccountClient, async_sync_from_vivino
+from .vivino_app_account import VivinoAppAccountClient
 from .websocket import async_register_websocket_commands
 from .wine_storage import WineCellarStorage
 
@@ -231,13 +233,17 @@ def _setup_vivino_account(hass: HomeAssistant, entry: ConfigEntry) -> None:
     if cancel:
         cancel()
 
+    email = entry.options.get(CONF_VIVINO_EMAIL, "").strip()
     cookie = entry.options.get(CONF_VIVINO_SESSION_COOKIE, "").strip()
     cellar_url = entry.options.get(CONF_VIVINO_CELLAR_URL, "").strip()
-    if not cookie or not cellar_url:
+    if email:
+        # App sign-in (email + password): tokens renew themselves.
+        domain_data["vivino_account"] = VivinoAppAccountClient(hass, email)
+    elif cookie and cellar_url:
+        domain_data["vivino_account"] = VivinoAccountClient(hass, cookie, cellar_url)
+    else:
         domain_data.pop("vivino_account", None)
         return
-
-    domain_data["vivino_account"] = VivinoAccountClient(hass, cookie, cellar_url)
 
     if entry.options.get(CONF_VIVINO_AUTO_SYNC, False):
         async def _auto_sync(_now: Any) -> None:

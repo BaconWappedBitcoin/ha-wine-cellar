@@ -1183,9 +1183,12 @@ async def async_sync_from_vivino(
         if auth_failed and not result["cellar_imported"]:
             persistent_notification.async_create(
                 hass,
-                "Cork Dork could not read your Vivino cellar — the session "
-                "cookie has expired. Open Settings > Devices & Services > "
-                "Cork Dork > Configure and paste a fresh Vivino session cookie.",
+                getattr(
+                    client, "reauth_notification",
+                    "Cork Dork could not read your Vivino cellar — the session "
+                    "cookie has expired. Open Settings > Devices & Services > "
+                    "Cork Dork > Configure and paste a fresh Vivino session cookie.",
+                ),
                 title="Vivino session expired",
                 notification_id="wine_cellar_vivino_reauth",
             )

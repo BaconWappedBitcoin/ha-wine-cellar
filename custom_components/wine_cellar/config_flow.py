@@ -16,6 +16,9 @@ from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
 )
 
 from .const import (
@@ -28,7 +31,9 @@ from .const import (
     CONF_GEMINI_MODEL,
     CONF_VIVINO_AUTO_SYNC,
     CONF_VIVINO_CELLAR_URL,
+    CONF_VIVINO_EMAIL,
     CONF_VIVINO_MODE,
+    CONF_VIVINO_PASSWORD,
     CONF_VIVINO_SESSION_COOKIE,
     DEFAULT_AI_PROVIDER,
     DEFAULT_GEMINI_MODEL,
@@ -84,7 +89,11 @@ class WineCellarOptionsFlow(OptionsFlow):
             if not errors:
                 errors = await self._async_validate_vivino(user_input)
             if not errors:
-                return self.async_create_entry(title="", data=user_input)
+                # The password only served to obtain tokens: never persist it.
+                data = {
+                    k: v for k, v in user_input.items() if k != CONF_VIVINO_PASSWORD
+                }
+                return self.async_create_entry(title="", data=data)
 
         # On validation errors re-show the form with the entered values so
         # the user can correct them without retyping everything.
@@ -124,6 +133,14 @@ class WineCellarOptionsFlow(OptionsFlow):
                         default=current.get(CONF_AI_MODEL, ""),
                     ): str,
                     vol.Optional(
+                        CONF_VIVINO_EMAIL,
+                        default=current.get(CONF_VIVINO_EMAIL, ""),
+                    ): TextSelector(TextSelectorConfig(type=TextSelectorType.EMAIL)),
+                    vol.Optional(
+                        CONF_VIVINO_PASSWORD,
+                        default="",
+                    ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
+                    vol.Optional(
                         CONF_VIVINO_CELLAR_URL,
                         default=current.get(CONF_VIVINO_CELLAR_URL, ""),
                     ): str,
@@ -152,7 +169,16 @@ class WineCellarOptionsFlow(OptionsFlow):
     async def _async_validate_vivino(
         self, user_input: dict[str, Any]
     ) -> dict[str, str]:
-        """Test the Vivino session cookie against the cellar. Returns errors."""
+        """Test the Vivino connection (app sign-in or cookie). Returns errors."""
+        email = (user_input.get(CONF_VIVINO_EMAIL) or "").strip().lower()
+        if email:
+            return await self._async_validate_vivino_login(user_input, email)
+        if self.config_entry.options.get(CONF_VIVINO_EMAIL):
+            # Email removed: forget the tokens of the previous sign-in.
+            from .vivino_app_account import VivinoAppAccountClient
+
+            await VivinoAppAccountClient.async_clear_tokens(self.hass)
+
         cookie = (user_input.get(CONF_VIVINO_SESSION_COOKIE) or "").strip()
         cellar_url = (user_input.get(CONF_VIVINO_CELLAR_URL) or "").strip()
 
@@ -189,6 +215,37 @@ class WineCellarOptionsFlow(OptionsFlow):
             return {"base": "vivino_cannot_connect"}
         _LOGGER.debug("Vivino cookie verified; first page wines: %s",
                       result.get("first_page_wines"))
+        return {}
+
+    async def _async_validate_vivino_login(
+        self, user_input: dict[str, Any], email: str
+    ) -> dict[str, str]:
+        """Sign in like the Vivino app; the password is used once, not stored."""
+        from .vivino_account import VivinoAuthError, VivinoConnectionError
+        from .vivino_app_account import VivinoAppAccountClient
+
+        user_input[CONF_VIVINO_EMAIL] = email
+        password = user_input.get(CONF_VIVINO_PASSWORD) or ""
+        if not password:
+            # Saving other options: keep the existing sign-in if it matches.
+            if await VivinoAppAccountClient.async_has_tokens(self.hass, email):
+                return {}
+            return {"base": "vivino_password_required"}
+
+        try:
+            profile = await VivinoAppAccountClient.async_login(
+                self.hass, email, password
+            )
+        except VivinoAuthError as err:
+            _LOGGER.warning("Vivino sign-in failed: %s", err)
+            return {"base": "vivino_invalid_login"}
+        except VivinoConnectionError as err:
+            _LOGGER.warning("Vivino connection test failed: %s", err)
+            return {"base": "vivino_cannot_connect"}
+        except Exception:  # noqa: BLE001 - surface as a form error, not a crash
+            _LOGGER.exception("Unexpected error signing in to Vivino")
+            return {"base": "vivino_cannot_connect"}
+        _LOGGER.debug("Signed in to Vivino as user %s", profile.get("id"))
         return {}
 
     async def _async_validate_ai_provider(

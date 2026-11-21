@@ -74,7 +74,7 @@ A custom Home Assistant integration for managing your wine collection. Track bot
 - **Auto-Enrich on Add** — When you add a wine, Vivino data (rating, price, description, food pairings) is automatically fetched in the background
 
 ### Vivino Integration
-- **Cellar Connection** — Connect your Vivino cellar by pasting your cellar URL and session cookie once (see **[docs/vivino-import.md](docs/vivino-import.md)**). One tap on the card's button then brings in every bottle you own (with ratings, images, region, grape data, and your personal star ratings/notes) as unassigned wines. Bottle counts are respected and already-imported bottles are never duplicated.
+- **Cellar Connection** — Connect your Vivino cellar by signing in with your Vivino email and password, or by pasting your cellar URL and session cookie (see **[docs/vivino-import.md](docs/vivino-import.md)**). One tap on the card's button then brings in every bottle you own (with ratings, images, region, grape data, and your personal star ratings/notes) as unassigned wines. Bottle counts are respected and already-imported bottles are never duplicated.
 - **Vivino Mode: Import or Synchronize** — Chosen in the integration's options. **Import** (the default) is a one-way mirror: Vivino is the source of truth and Cork Dork follows it; nothing is ever written to your Vivino account. **Synchronize** is a two-way reconcile: bottles you add or drink in Cork Dork are pushed back to your Vivino cellar as cellar events (visible and undoable in Vivino's history), guarded so a bad fetch can't wipe Cork Dork and corrupt local data can't wipe Vivino. The card's button reflects the mode — ⬇️ Vivino Import or 🔄 Vivino Sync.
 - **You Pick the Bottle** — When Vivino loses a bottle and the choice of which physical bottle to remove is obvious (the wine is gone entirely, or unplaced bottles cover it), Cork Dork handles it and the sync toast reports the count. When a placed bottle would have to go and there are several to choose from, nothing is deleted: the card shows a panel, selecting the wine rings every candidate bottle in your racks in orange, and you click the bottle that is actually gone and confirm. Removed bottles are archived to history either way.
 - **Conflicts Are Yours to Settle** — If both sides changed the same wine between syncs (say a bottle drunk on Vivino while one was added in Cork Dork), the sync changes nothing and the card shows the conflict. Selecting it rings all of your local bottles for review; after correcting anything that's off, one confirmed click declares Cork Dork's count the truth and updates Vivino to match.
@@ -153,19 +153,24 @@ currency prices are recorded and totalled in (USD, EUR, GBP or CHF).
 
 ### Connecting Your Vivino Cellar
 
-Vivino has no public read API for your own cellar — the site uses a Rails
-session cookie and serves the cellar from an Inertia.js endpoint on
-`www.vivino.com` (not the `api.vivino.com` mobile backend). Cork Dork reads it
-by replaying a session cookie you paste from your browser.
+There are two ways to connect your Vivino account:
 
-- **[docs/vivino-import.md](docs/vivino-import.md)** has full instructions for
-  both methods:
-  - **Integration sync (recommended):** paste your cellar URL and session cookie
+- **Sign in with email and password (recommended).** Cork Dork signs in the way
+  the Vivino mobile app does (OAuth against `api.vivino.com`) and reads the
+  cellar from the app's own endpoints. The session renews itself, so there is
+  nothing to paste and nothing to refresh by hand. The password is used once to
+  sign in and is never stored.
+- **Session cookie.** Paste your cellar URL and a session cookie copied from
+  your browser; Cork Dork replays it against the website's Inertia.js cellar
+  endpoint on `www.vivino.com`. When the cookie expires, a notification prompts
+  you to paste a fresh one.
+
+- **[docs/vivino-import.md](docs/vivino-import.md)** has full instructions:
+  - **Integration sync:** sign in (or paste your cellar URL and session cookie)
     in **Cork Dork → Configure**, pick the Vivino mode there (Import, the default,
     never writes to your Vivino account), then use the card's button — **⬇️ Vivino
     Import** or **🔄 Vivino Sync**, whichever the mode gives you — or enable
-    twice-daily auto-sync. When the cookie expires, a notification prompts you to
-    refresh it.
+    twice-daily auto-sync.
   - **One-time CSV export:** run a browser-console snippet and load the file via
     **📦 Inventory → Import CSV**.
 - After importing, **🍇 Vivino Batch Scan** enriches wines with ratings, pricing,
