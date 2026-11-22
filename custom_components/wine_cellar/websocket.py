@@ -190,6 +190,32 @@ def _cabinet_shape_error(fields: dict[str, Any]) -> str | None:
     return None
 
 
+async def _lookup_known_vivino_id(vivino: Any, wine: dict[str, Any]) -> dict[str, Any] | None:
+    """Look a wine up by the ``vivino_id`` it already has, and verify it.
+
+    ``vivino_id`` holds a wine id for bottles matched by search, but a
+    *vintage* id for bottles imported by the account sync. The two id spaces
+    overlap: vintage 1213615 is a Monial Champagne, wine 1213615 a Montresor
+    Recioto. So the by-id result is checked like a search result, and when it
+    is not this wine the id is tried as a vintage. None means "fall back to
+    search".
+    """
+    vid = wine.get("vivino_id")
+    if not vid:
+        return None
+    lookup = await vivino.get_wine_by_id(vid, wine.get("vintage"))
+    if lookup and _vivino_match_is_trustworthy(wine, lookup):
+        return lookup
+    lookup = await vivino.get_wine_by_vintage_id(vid, wine.get("vintage"))
+    if lookup and _vivino_match_is_trustworthy(wine, lookup):
+        return lookup
+    _LOGGER.debug(
+        "Vivino id %s for '%s %s' matches neither a wine nor a vintage of it",
+        vid, wine.get("winery"), wine.get("name"),
+    )
+    return None
+
+
 async def _auto_enrich_wine(hass: HomeAssistant, wine: dict[str, Any]) -> None:
     """Background task: enrich a newly added wine with Vivino data."""
     try:
@@ -248,7 +274,7 @@ async def _auto_enrich_wine(hass: HomeAssistant, wine: dict[str, Any]) -> None:
 
         if updates:
             updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
-            if lookup.get("vivino_id"):
+            if lookup.get("vivino_id") and not wine.get("vivino_id"):
                 updates["vivino_id"] = lookup["vivino_id"]
             _LOGGER.debug("Auto-enrich wine %s: %s", wine.get("id"), list(updates.keys()))
             storage.update_wine(wine["id"], updates)
@@ -310,7 +336,7 @@ async def _auto_enrich_buy_list_item(hass: HomeAssistant, item: dict[str, Any]) 
 
         if updates:
             updates["vivino_updated_at"] = datetime.now(timezone.utc).isoformat()
-            if lookup.get("vivino_id"):
+            if lookup.get("vivino_id") and not item.get("vivino_id"):
                 updates["vivino_id"] = lookup["vivino_id"]
             storage.update_buy_list_item(item["id"], updates)
             await storage.async_save()
@@ -1038,9 +1064,7 @@ async def ws_refresh_wine(
     # If this wine's Vivino id is already known from a prior match, look it
     # up directly — no query ambiguity, and its full vintage list lets us
     # pick the exact matching vintage rather than guess from search ranking.
-    lookup = None
-    if wine.get("vivino_id"):
-        lookup = await vivino.get_wine_by_id(wine["vivino_id"], wine.get("vintage"))
+    lookup = await _lookup_known_vivino_id(vivino, wine)
 
     if not lookup:
         if not query:
@@ -1152,7 +1176,9 @@ async def ws_refresh_wine(
     updates["vivino_checked_at"] = now
     if changed_fields:
         updates["vivino_updated_at"] = now
-    if lookup.get("vivino_id"):
+    # Keep an id the wine already has: for an account-synced bottle it is a
+    # vintage id, and it is what matches the bottle to the Vivino cellar.
+    if lookup.get("vivino_id") and not wine.get("vivino_id"):
         updates["vivino_id"] = lookup["vivino_id"]
     if ai_price_used:
         updates["ai_updated_at"] = now
@@ -1355,9 +1381,7 @@ async def ws_batch_refresh_vivino(
             # If this wine's Vivino id is already known, look it up
             # directly — no query ambiguity, exact vintage from its own
             # vintage list. Falls back to text search if that fails.
-            lookup = None
-            if wine.get("vivino_id"):
-                lookup = await vivino.get_wine_by_id(wine["vivino_id"], wine.get("vintage"))
+            lookup = await _lookup_known_vivino_id(vivino, wine)
 
             if not lookup:
                 if not query:
@@ -1478,7 +1502,8 @@ async def ws_batch_refresh_vivino(
             updates["vivino_checked_at"] = now
             if had_changes:
                 updates["vivino_updated_at"] = now
-            if lookup.get("vivino_id"):
+            # Keep an existing id (a vintage id for account-synced bottles).
+            if lookup.get("vivino_id") and not wine.get("vivino_id"):
                 updates["vivino_id"] = lookup["vivino_id"]
             if ai_price_used:
                 updates["ai_updated_at"] = now

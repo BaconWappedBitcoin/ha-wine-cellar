@@ -176,6 +176,38 @@ class VivinoClient:
 
     # ── Vivino Mobile API (by-id lookup) ──────────────────────────────
 
+    async def get_wine_by_vintage_id(
+        self, vintage_id: int | str, vintage: int | None = None
+    ) -> dict[str, Any] | None:
+        """Look up a wine from a Vivino *vintage* id.
+
+        The account sync stores the vintage id in ``vivino_id`` (that is how
+        Vivino's cellar identifies a bottle), while the rest of the app
+        stores the wine id. The two id spaces overlap, so a vintage id passed
+        to ``get_wine_by_id`` silently returns an unrelated wine. This
+        resolves the vintage to its wine first, then looks that up.
+        """
+        session = async_get_clientsession(self._hass)
+        try:
+            async with session.get(
+                f"{VIVINO_MOBILE_API_URL}/vintages/{vintage_id}",
+                headers={"Accept": "application/json"},
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+        except Exception as err:
+            _LOGGER.debug("Vivino vintage lookup failed for id %s: %s", vintage_id, err)
+            return None
+        wine_id = ((data or {}).get("wine") or {}).get("id")
+        if not wine_id:
+            return None
+        year = data.get("year")
+        if vintage is None and isinstance(year, int):
+            vintage = year
+        return await self.get_wine_by_id(wine_id, vintage)
+
     async def get_wine_by_id(
         self, vivino_id: int, vintage: int | None = None
     ) -> dict[str, Any] | None:
