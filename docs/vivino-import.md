@@ -1,16 +1,40 @@
 # Connecting your Vivino cellar to Cork Dork
 
-Vivino has no public read API for your own cellar. The website authenticates
-with a Rails/Devise **HttpOnly session cookie** (no bearer token) and serves the
-cellar from an **Inertia.js** endpoint on `www.vivino.com` — not the
-`api.vivino.com` mobile backend. Home Assistant can't drive a browser to log in,
-so you paste your **session cookie** and **cellar URL** once; the integration
-then reads the cellar on a schedule using that cookie.
+Cork Dork can read your Vivino cellar in two ways:
 
-When the cookie eventually expires, Cork Dork raises a notification asking you to
-paste a fresh one.
+- **Sign in with your Vivino email and password** (recommended). Cork Dork signs
+  in exactly like the Vivino mobile app: an OAuth sign-in against
+  `api.vivino.com`, then the app's own cellar endpoints with a token that renews
+  itself. Nothing to copy from a browser, nothing to refresh by hand.
+- **Paste a session cookie.** The Vivino website authenticates with a
+  Rails/Devise **HttpOnly session cookie** and serves the cellar from an
+  **Inertia.js** endpoint on `www.vivino.com`. You paste that cookie and your
+  **cellar URL** once; when the cookie expires, Cork Dork raises a notification
+  asking you to paste a fresh one.
 
-## Method A — Integration sync (recommended)
+## Sign in with email and password
+
+1. **Settings → Devices & Services → Cork Dork → Configure**.
+2. Enter your **Vivino email** and **Vivino password**. Leave the cellar URL and
+   session cookie empty — when an email is set, it is used instead of the cookie.
+3. Choose the **Vivino mode** — see [Import or Synchronize](#import-or-synchronize)
+   below. The default, Import, never writes to your Vivino account.
+4. Optionally enable **Automatically sync the Vivino cellar twice a day**.
+5. Save. Cork Dork signs in right away; a wrong password is rejected with an
+   error.
+
+The password is only used to sign in and is **never stored**: Cork Dork keeps
+the resulting tokens (in Home Assistant's private `.storage`) and renews them on
+its own. When you later save other options, leave the password field empty. If
+Vivino ever ends the session, a "Vivino session expired" notification asks you
+to enter your password again in the same place. Clearing the email signs out.
+
+> **Signed up with Google or Apple?** Then your Vivino account has no password
+> yet. In the Vivino app, use **Forgot password** to set one, then sign in here.
+
+Then sync as described in [step 4](#4-sync) below.
+
+## Method A — Integration sync with a session cookie
 
 ### 1. Find your cellar URL
 

@@ -914,7 +914,7 @@ async def _reconcile_cellar(
     # winery and label image empty forever, even after Vivino filled it in.
     #
     # Only empty fields are filled, and the image is replaced only when it is
-    # the placeholder, so anything entered by hand stays untouched.
+    # missing or the placeholder, so anything entered by hand stays untouched.
     enriched_count = 0
     if cellar:
         by_id = {str(w.get("vivino_id")): w for w in cellar if w.get("vivino_id")}
@@ -927,9 +927,18 @@ async def _reconcile_cellar(
                            "rating", "ratings_count", "alcohol", "description"):
                 if not local.get(key) and fresh.get(key):
                     changes[key] = fresh[key]
+            # A name the app-login client gave while Vivino's details were
+            # unavailable ("Vivino wine <id>") is ours, not the user's:
+            # replace it once the real name is known.
+            vid = str(local.get("vivino_id") or "")
+            placeholder = f"Vivino wine {vid}"
+            if (local.get("name") == placeholder and fresh.get("name")
+                    and fresh["name"] != placeholder):
+                changes["name"] = fresh["name"]
             image = str(fresh.get("image_url") or "")
+            local_image = str(local.get("image_url") or "")
             if (image and PLACEHOLDER_LABEL not in image
-                    and PLACEHOLDER_LABEL in str(local.get("image_url") or "")):
+                    and (not local_image or PLACEHOLDER_LABEL in local_image)):
                 changes["image_url"] = image
             if changes:
                 storage.update_wine(local.get("id"), changes)
@@ -1183,9 +1192,12 @@ async def async_sync_from_vivino(
         if auth_failed and not result["cellar_imported"]:
             persistent_notification.async_create(
                 hass,
-                "Cork Dork could not read your Vivino cellar — the session "
-                "cookie has expired. Open Settings > Devices & Services > "
-                "Cork Dork > Configure and paste a fresh Vivino session cookie.",
+                getattr(
+                    client, "reauth_notification",
+                    "Cork Dork could not read your Vivino cellar — the session "
+                    "cookie has expired. Open Settings > Devices & Services > "
+                    "Cork Dork > Configure and paste a fresh Vivino session cookie.",
+                ),
                 title="Vivino session expired",
                 notification_id="wine_cellar_vivino_reauth",
             )
