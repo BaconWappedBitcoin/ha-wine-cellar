@@ -914,7 +914,7 @@ async def _reconcile_cellar(
     # winery and label image empty forever, even after Vivino filled it in.
     #
     # Only empty fields are filled, and the image is replaced only when it is
-    # the placeholder, so anything entered by hand stays untouched.
+    # missing or the placeholder, so anything entered by hand stays untouched.
     enriched_count = 0
     if cellar:
         by_id = {str(w.get("vivino_id")): w for w in cellar if w.get("vivino_id")}
@@ -936,8 +936,9 @@ async def _reconcile_cellar(
                     and fresh["name"] != placeholder):
                 changes["name"] = fresh["name"]
             image = str(fresh.get("image_url") or "")
+            local_image = str(local.get("image_url") or "")
             if (image and PLACEHOLDER_LABEL not in image
-                    and PLACEHOLDER_LABEL in str(local.get("image_url") or "")):
+                    and (not local_image or PLACEHOLDER_LABEL in local_image)):
                 changes["image_url"] = image
             if changes:
                 storage.update_wine(local.get("id"), changes)
