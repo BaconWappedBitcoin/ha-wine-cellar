@@ -927,6 +927,14 @@ async def _reconcile_cellar(
                            "rating", "ratings_count", "alcohol", "description"):
                 if not local.get(key) and fresh.get(key):
                     changes[key] = fresh[key]
+            # A name the app-login client gave while Vivino's details were
+            # unavailable ("Vivino wine <id>") is ours, not the user's:
+            # replace it once the real name is known.
+            vid = str(local.get("vivino_id") or "")
+            placeholder = f"Vivino wine {vid}"
+            if (local.get("name") == placeholder and fresh.get("name")
+                    and fresh["name"] != placeholder):
+                changes["name"] = fresh["name"]
             image = str(fresh.get("image_url") or "")
             if (image and PLACEHOLDER_LABEL not in image
                     and PLACEHOLDER_LABEL in str(local.get("image_url") or "")):

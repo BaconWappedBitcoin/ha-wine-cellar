@@ -41,6 +41,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
 from .vivino_account import (
+    COUNTRY_NAMES,
     VivinoAuthError,
     VivinoConnectionError,
     _log_parse_outcome,
@@ -70,6 +71,10 @@ HEADERS = {
     "User-Agent": "HomeAssistant-CorkDork",
 }
 
+# Name given to a vintage whose details could not be fetched, so its bottles
+# are kept. A later sync replaces it (see the gap-fill in vivino_account).
+PLACEHOLDER_NAME_PREFIX = "Vivino wine "
+
 REAUTH_MESSAGE = (
     "Vivino session expired — open Settings > Devices & Services > Cork Dork > "
     "Configure and enter your Vivino password again"
@@ -96,7 +101,12 @@ def _error_text(body: Any, status: int) -> str:
 
 
 def _extract_vintages(body: Any) -> list[dict[str, Any]]:
-    """``_vintages`` may answer with a bare list or a wrapping object."""
+    """Vintage records out of a ``_vintages`` response.
+
+    Vivino answers with an object keyed by vintage id
+    (``{"1213615": {"id": 1213615, "name": ..., "wine": {...}}, ...}``);
+    a bare list or a ``{"vintages": [...]}`` wrapper are accepted too.
+    """
     if isinstance(body, list):
         return [v for v in body if isinstance(v, dict)]
     if isinstance(body, dict):
@@ -105,6 +115,10 @@ def _extract_vintages(body: Any) -> list[dict[str, Any]]:
                 return [v for v in body[key] if isinstance(v, dict)]
         if body.get("id") and body.get("wine"):
             return [body]
+        return [
+            v for v in body.values()
+            if isinstance(v, dict) and v.get("id") is not None
+        ]
     return []
 
 
@@ -123,7 +137,11 @@ def _group_count(group: dict[str, Any]) -> int:
     return count if isinstance(count, int) and count > 0 else 0
 
 
-def _to_record(group: dict[str, Any], vintage: dict[str, Any] | None) -> dict[str, Any]:
+def _to_record(
+    group: dict[str, Any],
+    vintage: dict[str, Any] | None,
+    country_names: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Shape a v13 cellar group like the records ``_parse_user_wine`` reads.
 
     The cellar endpoint only carries ids; names, winery, region, image and
@@ -135,15 +153,31 @@ def _to_record(group: dict[str, Any], vintage: dict[str, Any] | None) -> dict[st
         vintage = {
             "id": vid,
             "year": group.get("vintage_year"),
-            "name": f"Vivino wine {vid}",
+            "name": f"{PLACEHOLDER_NAME_PREFIX}{vid}",
             "wine": {
                 "id": group.get("wine_id"),
                 "type_id": group.get("wine_type_id"),
             },
         }
+    vintage = dict(vintage)
     wine = vintage.get("wine")
-    if isinstance(wine, dict) and wine.get("type_id") is None:
-        wine["type_id"] = group.get("wine_type_id")
+    if isinstance(wine, dict):
+        wine = vintage["wine"] = dict(wine)
+        if wine.get("type_id") is None:
+            wine["type_id"] = group.get("wine_type_id")
+        # _vintages gives the region's country as an ISO code ("fr"), where
+        # the parser expects the object the website returns.
+        region = wine.get("region")
+        if isinstance(region, dict) and isinstance(region.get("country"), str):
+            code = region["country"]
+            wine["region"] = {
+                **region,
+                "country": {
+                    "code": code,
+                    "name": (country_names or {}).get(code.lower())
+                    or COUNTRY_NAMES.get(code.lower(), code.upper()),
+                },
+            }
     bottles = group.get("bottles")
     if not isinstance(bottles, list) or not bottles:
         bottles = [{} for _ in range(_group_count(group))]
@@ -172,6 +206,7 @@ class VivinoAppAccountClient:
         self._session_rejected = False
         self._list_id: int | None = None
         self._vintage_cache: dict[int, dict[str, Any]] = {}
+        self._country_names: dict[str, str] | None = None
         self.alias: str = ""
         self.user_id: int | None = None
         self.token_diagnostics: dict[str, Any] = {"method": "app_login"}
@@ -405,6 +440,27 @@ class VivinoAppAccountClient:
                     self._vintage_cache[int(v["id"])] = v
         return {i: self._vintage_cache[i] for i in ids if i in self._vintage_cache}
 
+    async def _countries(self) -> dict[str, str]:
+        """ISO code -> country name in Home Assistant's language (cached).
+
+        ``_vintages`` only carries the code; ``/countries`` is public and
+        localized with ``language``. Failure falls back to ``COUNTRY_NAMES``.
+        """
+        if self._country_names is None:
+            self._country_names = {}
+            language = (self._hass.config.language or "en").split("-")[0]
+            try:
+                body = await self._get("/countries", params={"language": language})
+            except VivinoAuthError:
+                raise
+            except Exception as err:  # noqa: BLE001 - names are best-effort
+                _LOGGER.debug("Vivino country names unavailable: %s", err)
+                body = []
+            for c in body if isinstance(body, list) else []:
+                if isinstance(c, dict) and c.get("code") and c.get("name"):
+                    self._country_names[str(c["code"]).lower()] = c["name"]
+        return self._country_names
+
     async def async_verify(self) -> dict[str, Any]:
         """Validate the stored tokens by reading the cellar's first page."""
         body = await self._get(
@@ -425,8 +481,9 @@ class VivinoAppAccountClient:
         groups = await self._cellar_groups()
         ids = [int(g["vintage_id"]) for g in groups if g.get("vintage_id") is not None]
         details = await self._vintages(ids)
+        countries = await self._countries() if details else {}
         records = [
-            _to_record(g, details.get(int(g.get("vintage_id") or 0)))
+            _to_record(g, details.get(int(g.get("vintage_id") or 0)), countries)
             for g in groups if _group_count(g) > 0
         ]
         wines = [w for w in (_parse_user_wine(r) for r in records) if w]
