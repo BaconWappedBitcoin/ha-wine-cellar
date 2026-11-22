@@ -5137,6 +5137,9 @@ let AddWineDialog = class AddWineDialog extends i {
         this._wineData = {};
         this._error = "";
         this._hasGemini = false;
+        // Label photos: AI and/or Vivino's own recognition (app sign-in).
+        this._hasLabelScan = false;
+        this._vivinoLabelScan = false;
         this._labelLoading = false;
         this._captureStage = "front";
         this._frontImageRaw = "";
@@ -5204,9 +5207,13 @@ let AddWineDialog = class AddWineDialog extends i {
                 type: "wine_cellar/get_capabilities",
             });
             this._hasGemini = result?.has_gemini || false;
+            this._vivinoLabelScan = !!result?.vivino_label_scan;
+            this._hasLabelScan = this._hasGemini || this._vivinoLabelScan;
         }
         catch {
             this._hasGemini = false;
+            this._hasLabelScan = false;
+            this._vivinoLabelScan = false;
         }
     }
     _close() {
@@ -5267,7 +5274,7 @@ let AddWineDialog = class AddWineDialog extends i {
         // Not every bottle has a scannable/known barcode — fall back to AI
         // label recognition automatically instead of dead-ending on "enter
         // details manually" when it's available.
-        if (this._hasGemini) {
+        if (this._hasLabelScan) {
             this._scanMode = "label";
             this._labelLoading = false;
             this._showBackPrompt = false;
@@ -5363,6 +5370,11 @@ let AddWineDialog = class AddWineDialog extends i {
                 const thumbUrl = await resizeImageForStorage(this._frontImageRaw);
                 const backThumbUrl = backImageRaw ? await resizeImageForStorage(backImageRaw) : "";
                 const r = result.result;
+                // Vivino's own label recognition names the exact Vivino vintage, so
+                // the bottle gets its vivino_id and rating straight away; an AI
+                // reading gets them later from the background Vivino lookup.
+                const fromVivino = r.source === "vivino_label";
+                const now = new Date().toISOString();
                 this._wineData = {
                     ...this._wineData,
                     name: r.name || "",
@@ -5382,8 +5394,16 @@ let AddWineDialog = class AddWineDialog extends i {
                     barcode: r.barcode || this._wineData.barcode || "",
                     image_url: thumbUrl,
                     back_image_url: backThumbUrl,
-                    ai_updated_at: new Date().toISOString(),
-                    ai_checked_at: new Date().toISOString(),
+                    ...(fromVivino
+                        ? {
+                            vivino_id: r.vivino_id,
+                            rating: r.rating ?? null,
+                            ratings_count: r.ratings_count ?? null,
+                            alcohol: r.alcohol || "",
+                            vivino_updated_at: now,
+                            vivino_checked_at: now,
+                        }
+                        : { ai_updated_at: now, ai_checked_at: now }),
                 };
                 this._scanMode = "idle";
                 this._step = "details";
@@ -5578,7 +5598,7 @@ let AddWineDialog = class AddWineDialog extends i {
                 ? b `
                 <div class="label-loading">
                   <span class="loading-spinner"></span>
-                  <div style="margin-top: 8px">Analyzing label with AI...</div>
+                  <div style="margin-top: 8px">${this._vivinoLabelScan ? "Recognizing label with Vivino..." : "Analyzing label with AI..."}</div>
                 </div>
               `
                 : this._showBackPrompt
@@ -5634,17 +5654,17 @@ let AddWineDialog = class AddWineDialog extends i {
           </button>
 
           <button
-            class="scan-option ${this._hasGemini ? "" : "disabled"}"
-            @click=${() => this._hasGemini && (() => { this._scanMode = "label"; this._error = ""; })()}
-            title=${this._hasGemini ? "" : "Configure Gemini API key in integration settings"}
+            class="scan-option ${this._hasLabelScan ? "" : "disabled"}"
+            @click=${() => this._hasLabelScan && (() => { this._scanMode = "label"; this._error = ""; })()}
+            title=${this._hasLabelScan ? "" : "Sign in to Vivino or configure a Gemini API key in integration settings"}
           >
             <span class="scan-option-icon">🤖</span>
             <div class="scan-option-text">
               <div class="scan-option-title">Recognize Label</div>
               <div class="scan-option-desc">
-                ${this._hasGemini
+                ${this._hasLabelScan
             ? "Take a photo of the wine label"
-            : "Requires Gemini API key in settings"}
+            : "Requires Vivino sign-in or a Gemini API key"}
               </div>
             </div>
           </button>
@@ -6789,6 +6809,12 @@ __decorate([
 __decorate([
     r()
 ], AddWineDialog.prototype, "_hasGemini", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_hasLabelScan", void 0);
+__decorate([
+    r()
+], AddWineDialog.prototype, "_vivinoLabelScan", void 0);
 __decorate([
     r()
 ], AddWineDialog.prototype, "_labelLoading", void 0);

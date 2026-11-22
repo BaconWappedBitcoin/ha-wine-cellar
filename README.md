@@ -159,7 +159,10 @@ There are two ways to connect your Vivino account:
   the Vivino mobile app does (OAuth against `api.vivino.com`) and reads the
   cellar from the app's own endpoints. The session renews itself, so there is
   nothing to paste and nothing to refresh by hand. The password is used once to
-  sign in and is never stored.
+  sign in and is never stored. Signed in this way, **label photos are
+  recognised by Vivino itself** (the same recognition as the app's camera),
+  which names the exact Vivino wine and vintage; AI label reading becomes
+  the fallback for labels Vivino does not know, and is optional.
 - **Session cookie.** Paste your cellar URL and a session cookie copied from
   your browser; Cork Dork replays it against the website's Inertia.js cellar
   endpoint on `www.vivino.com`. When the cookie expires, a notification prompts

@@ -17,6 +17,9 @@ Endpoints (reconstructed from the Android app, ``vivino.web.app`` 2026.47.1):
                                         filterable with ``vintage_ids``
 - ``GET  /v/9.1.1/_vintages?full=1``    full vintage records by ``ids[]``
 - ``POST /cellars/{list_id}/vintages``  cellar event (``type`` add / consume)
+- ``POST /v/11.0.0/scans/label``        label photo recognition (multipart
+                                        ``image``), polled on
+                                        ``GET /v/10.0.0/scans/label/{id}``
 
 This client exposes the same interface as ``VivinoAccountClient`` (the
 session-cookie client), so reconciliation, the Import/Synchronize modes, the
@@ -29,6 +32,8 @@ kept in Home Assistant's ``.storage`` (``wine_cellar.vivino_app_auth``).
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
 import time
 from datetime import datetime, timezone
@@ -79,6 +84,43 @@ REAUTH_MESSAGE = (
     "Vivino session expired — open Settings > Devices & Services > Cork Dork > "
     "Configure and enter your Vivino password again"
 )
+
+
+# Label scans: Vivino's match_status values (lower-cased) while it is still
+# working, and what to tell the user when it gives up.
+LABEL_SCAN_PENDING = {"analyzing", "inprogress", "created", "none", ""}
+LABEL_SCAN_TIMEOUT = 25.0
+LABEL_SCAN_POLL = 1.5
+LABEL_SCAN_MESSAGES = {
+    "notfound": "Vivino did not find this wine",
+    "winelabelnotfound": "Vivino did not find a wine label in the photo",
+    "notwine": "Vivino says this is not a wine label",
+    "unusable": "The photo could not be used",
+    "unusableblurry": "The photo is too blurry",
+    "unusabledark": "The photo is too dark",
+    "failed": "Vivino could not analyse the photo",
+    "analyzing": "Vivino took too long to analyse the photo",
+    "inprogress": "Vivino took too long to analyse the photo",
+}
+
+
+def _scan_status(scan: dict[str, Any]) -> str:
+    status = scan.get("match_status") if isinstance(scan, dict) else None
+    if isinstance(status, dict):  # tolerate {"name": "Matched"}
+        status = status.get("name") or status.get("status")
+    return str(status or "").replace("_", "").lower()
+
+
+def _decode_image(image: str) -> bytes | None:
+    """The card sends a data URL or bare base64 JPEG."""
+    if not image:
+        return None
+    if image.startswith("data:"):
+        image = image.split(",", 1)[-1]
+    try:
+        return base64.b64decode(image, validate=False) or None
+    except (binascii.Error, ValueError):
+        return None
 
 
 def _store(hass: HomeAssistant) -> Store:
@@ -508,6 +550,100 @@ class VivinoAppAccountClient:
 
     async def async_get_my_wines(self) -> list[dict[str, Any]]:
         return []
+
+    # ── Label recognition ────────────────────────────────────────────
+
+    async def async_scan_label(self, image: str) -> dict[str, Any]:
+        """Identify a wine from a label photo with Vivino's own recognition.
+
+        Same flow as the app: upload the JPEG to ``POST /v/11.0.0/scans/label``
+        and, while Vivino is still analysing, poll ``GET
+        /v/10.0.0/scans/label/{id}``. ``add_user_vintage=false`` keeps the
+        scan out of the user's "My wines" (it still shows in their scan
+        history, as an in-app scan does).
+
+        Returns ``{"wine": <parsed wine>, "status": "Matched"}`` on a match,
+        or ``{"wine": None, "status": <Vivino status>, "message": ...}``.
+        Raises VivinoAuthError / VivinoConnectionError like the other calls.
+        """
+        payload = _decode_image(image)
+        if not payload:
+            return {"wine": None, "status": "Unusable", "message": "Unreadable image"}
+
+        scan = await self._upload_label(payload)
+        scan_id = scan.get("id")
+        status = _scan_status(scan)
+        deadline = time.monotonic() + LABEL_SCAN_TIMEOUT
+        while status in LABEL_SCAN_PENDING and scan_id and time.monotonic() < deadline:
+            await asyncio.sleep(LABEL_SCAN_POLL)
+            body = await self._get(f"/v/10.0.0/scans/label/{scan_id}")
+            if isinstance(body, dict):
+                scan = body.get("label", body) if isinstance(body.get("label"), dict) else body
+            status = _scan_status(scan)
+
+        vintage_id = scan.get("vintage_id") or (scan.get("vintage") or {}).get("id")
+        if status != "matched" or not vintage_id:
+            _LOGGER.debug("Vivino label scan %s: %s", scan_id, status or "no status")
+            return {
+                "wine": None,
+                "status": status or "unknown",
+                "message": LABEL_SCAN_MESSAGES.get(status, "Vivino did not recognise this label"),
+            }
+
+        vintage_id = int(vintage_id)
+        if self.user_id is None:
+            try:
+                await self._fetch_profile()
+            except (VivinoAuthError, VivinoConnectionError):
+                raise
+            except Exception:  # noqa: BLE001 - only used to personalise details
+                pass
+        details = await self._vintages([vintage_id])
+        vintage = details.get(vintage_id) or (
+            scan.get("vintage") if isinstance(scan.get("vintage"), dict) else None
+        )
+        countries = await self._countries() if vintage else {}
+        wine = _parse_user_wine(_to_record(
+            {"vintage_id": vintage_id, "bottle_count": 1, "bottles": [{}]},
+            vintage, countries,
+        ))
+        if not wine or wine["name"].startswith(PLACEHOLDER_NAME_PREFIX):
+            return {"wine": None, "status": "matched",
+                    "message": "Vivino matched the label but its details are unavailable"}
+        return {"wine": wine, "status": "matched", "scan_id": scan_id}
+
+    async def _upload_label(self, payload: bytes, retry: bool = True) -> dict[str, Any]:
+        """Multipart upload of the label photo (the form is rebuilt per try)."""
+        token = await self._access_token()
+        form = aiohttp.FormData()
+        form.add_field("image", payload, filename="label.jpg", content_type="image/jpeg")
+        session = async_get_clientsession(self._hass)
+        try:
+            async with session.post(
+                f"{API_BASE}/v/11.0.0/scans/label",
+                params={
+                    "image_type": "jpg",
+                    "add_user_vintage": "false",
+                    "queue_tier_matching": "false",
+                },
+                data=form,
+                headers={**HEADERS, "Authorization": f"Bearer {token}"},
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as resp:
+                status = resp.status
+                body = await _read_json(resp)
+        except aiohttp.ClientError as err:
+            raise VivinoConnectionError(f"Vivino label upload failed: {err}") from err
+        if status == 401 and retry:
+            await self._refresh()
+            return await self._upload_label(payload, retry=False)
+        if status in (401, 403):
+            raise VivinoAuthError(self.reauth_message)
+        if status >= 300 or not isinstance(body, dict):
+            raise VivinoConnectionError(
+                f"Vivino label upload returned {_error_text(body, status)}"
+            )
+        return body.get("label", body) if isinstance(body.get("label"), dict) else body
 
     # ── Write-back (Cork Dork -> Vivino) ─────────────────────────────
 
