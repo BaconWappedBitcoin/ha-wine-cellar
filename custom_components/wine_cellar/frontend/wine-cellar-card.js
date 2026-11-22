@@ -3175,7 +3175,8 @@ let LabelCamera = class LabelCamera extends i {
             ? b `
             <div class="error-message">${this._error}</div>
             <div class="hint">
-              The button below opens your device's own camera, which works either way.
+              "Take a photo" opens your device's own camera, which works either way;
+              or pick an existing photo from your library.
             </div>
           `
             : b `
@@ -3189,9 +3190,21 @@ let LabelCamera = class LabelCamera extends i {
           `}
 
       <div class="fallback-area">
+        ${this._error
+            ? b `
+              <!-- No live camera (e.g. plain http): capture="environment"
+                   opens the device's own camera without a secure context. -->
+              <label class="file-input-label">
+                📷 Take a photo
+                <input type="file" accept="image/*" capture="environment" @change=${this._onFileSelected} />
+              </label>
+            `
+            : A}
+        <!-- Never capture= here: on iOS it skips the photo library and
+             opens the camera, so "gallery" could not pick an existing photo. -->
         <label class="file-input-label">
-          ${this._error ? "📷 Take a photo" : "📁 Upload from gallery"}
-          <input type="file" accept="image/*" capture="environment" @change=${this._onFileSelected} />
+          📁 ${this._error ? "Choose from library" : "Upload from gallery"}
+          <input type="file" accept="image/*" @change=${this._onFileSelected} />
         </label>
       </div>
     `;
@@ -3276,7 +3289,10 @@ LabelCamera.styles = [
       }
 
       .fallback-area {
-        text-align: center;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
         padding: 8px 0;
       }
 
