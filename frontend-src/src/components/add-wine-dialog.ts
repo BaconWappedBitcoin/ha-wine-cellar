@@ -7,6 +7,8 @@ import {
   StorageRow,
   WineType,
   WINE_TYPE_LABELS,
+  getRackSlots,
+  rowSlotCount,
 } from "../models";
 import { sharedStyles } from "../styles";
 import { resizeImageForStorage } from "../utils/image";
@@ -1436,7 +1438,7 @@ export class AddWineDialog extends LitElement {
                 }}
               >
                 <div class="cab-name">${cab.name}</div>
-                <div class="cab-info">${cab.rows}×${cab.cols} slots</div>
+                <div class="cab-info">${getRackSlots(cab).length} slots</div>
               </div>
             `
           )}
@@ -1522,8 +1524,10 @@ export class AddWineDialog extends LitElement {
 
     const cabinet = this.cabinets.find((c) => c.id === d.cabinet_id);
     if (cabinet && !d.zone && d.row != null && d.col != null) {
-      if (d.row < 0 || d.row >= cabinet.rows || d.col < 0 || d.col >= cabinet.cols) {
-        this._error = `That slot is outside ${cabinet.name} (${cabinet.rows} rows × ${cabinet.cols} columns).`;
+      if (d.row < 0 || d.row >= cabinet.rows || d.col < 0 || d.col >= rowSlotCount(cabinet, d.row)) {
+        this._error = d.row >= 0 && d.row < cabinet.rows && rowSlotCount(cabinet, d.row) < cabinet.cols
+          ? `That slot is outside ${cabinet.name}: row ${d.row + 1} has ${rowSlotCount(cabinet, d.row)} slots.`
+          : `That slot is outside ${cabinet.name} (${cabinet.rows} rows × ${cabinet.cols} columns).`;
         return;
       }
       const isStorageRow = (cabinet.storage_rows || []).some((sr) => sr.row === d.row);

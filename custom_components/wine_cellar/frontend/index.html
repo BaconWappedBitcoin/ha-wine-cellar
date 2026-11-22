@@ -69,6 +69,9 @@
       // reproduces the "can overfill a full bin" class of bug (see history
       // entry "Fix drag-and-drop into bulk bins/boxes bypassing capacity
       // check") without needing to hand-populate a bin to capacity yourself.
+      { id: "stag-1", barcode: "", name: "Staggered Test Red", winery: "Test Winery", region: "", country: "", vintage: 2020, type: "red", grape_variety: "", rating: 4.0, ratings_count: null, image_url: "", price: 20, purchase_date: "", drink_by: "", notes: "", description: "", food_pairings: "", alcohol: "", cabinet_id: "cabinet-5", row: 0, col: 1, depth: 0, zone: "", disposition: "D", added_at: "2026-01-01T10:00:00Z" },
+      { id: "stag-2", barcode: "", name: "Staggered Test White", winery: "Test Winery", region: "", country: "", vintage: 2021, type: "white", grape_variety: "", rating: 3.8, ratings_count: null, image_url: "", price: 20, purchase_date: "", drink_by: "", notes: "", description: "", food_pairings: "", alcohol: "", cabinet_id: "cabinet-5", row: 1, col: 0, depth: 0, zone: "", disposition: "H", added_at: "2026-01-01T10:00:00Z" },
+      { id: "stag-3", barcode: "", name: "Staggered Test Rosé", winery: "Test Winery", region: "", country: "", vintage: 2022, type: "rosé", grape_variety: "", rating: null, ratings_count: null, image_url: "", price: 20, purchase_date: "", drink_by: "", notes: "", description: "", food_pairings: "", alcohol: "", cabinet_id: "cabinet-5", row: 1, col: 1, depth: 0, zone: "", disposition: "D", added_at: "2026-01-01T10:00:00Z" },
       { id: "cap-1", barcode: "", name: "Capacity Test Wine 1", winery: "Test Winery", region: "", country: "", vintage: 2022, type: "red", grape_variety: "", rating: null, ratings_count: null, image_url: "", price: 20, purchase_date: "", drink_by: "", notes: "", description: "", food_pairings: "", alcohol: "", cabinet_id: "cabinet-4", row: null, col: null, depth: 0, zone: "storage-0", disposition: "D", added_at: "2026-01-01T10:00:00Z" },
       { id: "cap-2", barcode: "", name: "Capacity Test Wine 2", winery: "Test Winery", region: "", country: "", vintage: 2022, type: "white", grape_variety: "", rating: null, ratings_count: null, image_url: "", price: 20, purchase_date: "", drink_by: "", notes: "", description: "", food_pairings: "", alcohol: "", cabinet_id: "cabinet-4", row: null, col: null, depth: 1, zone: "storage-0", disposition: "H", added_at: "2026-01-01T10:00:00Z" },
       { id: "cap-3", barcode: "", name: "Capacity Test Wine 3", winery: "Test Winery", region: "", country: "", vintage: 2022, type: "rosé", grape_variety: "", rating: null, ratings_count: null, image_url: "", price: 20, purchase_date: "", drink_by: "", notes: "", description: "", food_pairings: "", alcohol: "", cabinet_id: "cabinet-4", row: null, col: null, depth: 2, zone: "storage-0", disposition: "D", added_at: "2026-01-01T10:00:00Z" },
@@ -83,6 +86,8 @@
         { row: 0, name: "Full Bin", type: "bulk", capacity: 3 },
         { row: 1, name: "Spare Bin", type: "bulk", capacity: 5 },
       ], order: 3 },
+      // Staggered (honeycomb) rack: rows alternate 3 and 2 slots.
+      { id: "cabinet-5", name: "Staggered Test", type: "grid", rows: 6, cols: 3, depth: 1, has_bottom_zone: false, bottom_zone_name: "", storage_rows: [], row_cols: [3, 2, 3, 2, 3, 2], order: 4 },
     ];
 
     let mockIdSeq = 1;

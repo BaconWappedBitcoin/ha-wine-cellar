@@ -1,7 +1,7 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { sharedStyles } from "./styles";
-import { Wine, Cabinet, CellarStats, WINE_TYPE_COLORS, WineType, StorageRow, StorageRowType, BOX_SIZES, getRackSlots, getWineLocation } from "./models";
+import { Wine, Cabinet, CellarStats, WINE_TYPE_COLORS, WineType, StorageRow, StorageRowType, BOX_SIZES, getRackSlots, getWineLocation, isStaggered, rowSlotCount } from "./models";
 import { matchesQuery } from "./utils/search";
 import { Finding, analyzeArrangement } from "./utils/arrange";
 
@@ -1293,13 +1293,27 @@ export class WineCellarCard extends LitElement {
     return this._rackPanelCabinet ? getRackSlots(this._rackPanelCabinet) : [];
   }
 
-  // Adds exactly one new slot. A rack is a strict rows×cols rectangle, so
+  // Adds exactly one new slot. A plain rack is a rows×cols rectangle (a
+  // staggered one grows its last row instead), so
   // growing either axis by 1 adds that many slots (all of the other axis).
   // Grow whichever axis is smaller to add as few slots as possible — for the
   // common single-row rack (rows=1) this always adds exactly 1 slot.
   private _addRackSlot() {
     if (!this._rackPanelCabinet) return;
-    const { rows, cols } = this._rackPanelCabinet;
+    const cab = this._rackPanelCabinet;
+    const { rows, cols } = cab;
+    if (isStaggered(cab)) {
+      // Staggered rack: fill the last row up to full width, else start a
+      // new row continuing the alternation with a single slot.
+      const counts = Array.from({ length: rows }, (_, r) => rowSlotCount(cab, r));
+      if (counts[rows - 1] < cols) {
+        counts[rows - 1] += 1;
+        this._resizeRack({ row_cols: counts });
+      } else {
+        this._resizeRack({ rows: rows + 1, row_cols: [...counts, 1] });
+      }
+      return;
+    }
     if (rows <= cols) {
       this._resizeRack({ cols: cols + 1 });
     } else {
@@ -1307,7 +1321,7 @@ export class WineCellarCard extends LitElement {
     }
   }
 
-  private async _resizeRack(updates: { rows?: number; cols?: number }) {
+  private async _resizeRack(updates: { rows?: number; cols?: number; row_cols?: number[] }) {
     if (!this._rackPanelCabinet) return;
     try {
       await this.hass.callWS({
@@ -1322,7 +1336,7 @@ export class WineCellarCard extends LitElement {
     }
   }
 
-  // A rack is a strict rows×cols rectangle, so only the trailing slot can be
+  // A rack is a rows×cols rectangle (or staggered rows), so only the trailing slot can be
   // removed without leaving a hole the grid can't represent.
   private _isLastRackSlot(row: number, col: number): boolean {
     const slots = this._getRackSlots();
@@ -1352,7 +1366,17 @@ export class WineCellarCard extends LitElement {
           updates: { cabinet_id: "", row: null, col: null, zone: "", depth: 0 },
         });
       }
-      if (cols >= rows && cols > 1) {
+      if (isStaggered(this._rackPanelCabinet)) {
+        // Staggered rack: take the slot off the last row; an emptied row goes.
+        const cab = this._rackPanelCabinet;
+        const counts = Array.from({ length: rows }, (_, r) => rowSlotCount(cab, r));
+        if (counts[rows - 1] > 1) {
+          counts[rows - 1] -= 1;
+          await this._resizeRack({ row_cols: counts });
+        } else {
+          await this._resizeRack({ rows: rows - 1, row_cols: counts.slice(0, -1) });
+        }
+      } else if (cols >= rows && cols > 1) {
         await this._resizeRack({ cols: cols - 1 });
       } else {
         await this._resizeRack({ rows: rows - 1 });

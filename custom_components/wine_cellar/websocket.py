@@ -166,6 +166,15 @@ def _cabinet_shape_error(fields: dict[str, Any]) -> str | None:
         if not low <= value <= high:
             return f"{key} must be between {low} and {high}"
 
+    row_cols = fields.get("row_cols")
+    if row_cols is not None:
+        if not isinstance(row_cols, list) or len(row_cols) > _CABINET_LIMITS["rows"][1]:
+            return "row_cols must be a list with one entry per row"
+        low, high = _CABINET_LIMITS["cols"]
+        for n in row_cols:
+            if isinstance(n, bool) or not isinstance(n, int) or not low <= n <= high:
+                return f"each row's slot count must be between {low} and {high}"
+
     rows = fields.get("storage_rows")
     if rows is not None:
         if not isinstance(rows, list):
