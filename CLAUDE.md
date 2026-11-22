@@ -41,6 +41,7 @@ This file is about the **code**: things that were expensive to discover and are 
 - `custom_components/wine_cellar/websocket.py` — all frontend↔backend commands; most business logic (refresh, batch refresh, settings, backup/restore) lives here.
 - `custom_components/wine_cellar/wine_storage.py` — persisted data shape (`.storage/wine_cellar`), the Wine/Cabinet/BuyList schema.
 - `frontend-src/src/wine-cellar-card.ts` — main card (grid, tabs, batch actions, stats).
+- `frontend-src/src/wine-cellar-section-card.ts` — `custom:wine-cellar-section-card`: one rack as a dashboard tile (same bundle, imported by the main card). It reuses `cabinet-grid`, `wine-detail-dialog` and `add-wine-dialog` rather than copying them; moving/copying bottles stays in the full card.
 - `frontend-src/src/components/` — dialogs (wine detail, add wine, inventory, rack settings, Vivino/AI settings, wine list scan, arrangement report).
 - `frontend-src/src/utils/` — shared logic, extracted so it stops being copied: `location.ts` (containers, occupancy, placement), `suggest.ts` (where a new bottle should go), `arrange.ts` (what is untidy), `search.ts` (`normalizeText`, filtering, sorting), `camera.ts` (why the camera failed).
 

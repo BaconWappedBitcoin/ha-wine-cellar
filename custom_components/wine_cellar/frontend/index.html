@@ -35,6 +35,10 @@
 <body>
   <div style="width: 100%; max-width: 1200px;">
     <wine-cellar-card></wine-cellar-card>
+    <!-- One rack as its own tile (wine-cellar-section-card). -->
+    <div style="display: flex; gap: 16px; margin-top: 16px; flex-wrap: wrap;">
+      <div style="width: 380px;"><wine-cellar-section-card id="section-preview"></wine-cellar-section-card></div>
+    </div>
   </div>
 
   <script>
@@ -377,6 +381,11 @@
       if (card) {
         card.setConfig({ type: "custom:wine-cellar-card", title: "Cork Dork" });
         card.hass = mockHass;
+      }
+      const section = document.getElementById("section-preview");
+      if (section) {
+        section.setConfig({ type: "custom:wine-cellar-section-card", section: "Section 1" });
+        section.hass = mockHass;
       }
     });
   </script>
