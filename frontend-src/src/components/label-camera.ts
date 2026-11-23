@@ -91,7 +91,10 @@ export class LabelCamera extends LitElement {
       }
 
       .fallback-area {
-        text-align: center;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
         padding: 8px 0;
       }
 
@@ -292,7 +295,8 @@ export class LabelCamera extends LitElement {
         ? html`
             <div class="error-message">${this._error}</div>
             <div class="hint">
-              The button below opens your device's own camera, which works either way.
+              "Take a photo" opens your device's own camera, which works either way;
+              or pick an existing photo from your library.
             </div>
           `
         : html`
@@ -306,9 +310,21 @@ export class LabelCamera extends LitElement {
           `}
 
       <div class="fallback-area">
+        ${this._error
+          ? html`
+              <!-- No live camera (e.g. plain http): capture="environment"
+                   opens the device's own camera without a secure context. -->
+              <label class="file-input-label">
+                📷 Take a photo
+                <input type="file" accept="image/*" capture="environment" @change=${this._onFileSelected} />
+              </label>
+            `
+          : nothing}
+        <!-- Never capture= here: on iOS it skips the photo library and
+             opens the camera, so "gallery" could not pick an existing photo. -->
         <label class="file-input-label">
-          ${this._error ? "📷 Take a photo" : "📁 Upload from gallery"}
-          <input type="file" accept="image/*" capture="environment" @change=${this._onFileSelected} />
+          📁 ${this._error ? "Choose from library" : "Upload from gallery"}
+          <input type="file" accept="image/*" @change=${this._onFileSelected} />
         </label>
       </div>
     `;
