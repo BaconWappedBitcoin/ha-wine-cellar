@@ -28,6 +28,7 @@ A custom Home Assistant integration for managing your wine collection. Track bot
 - **Bulk Bins** — Open storage for loosely grouped bottles (e.g., daily drinkers, pending sort). Shows individual wine squares with configurable capacity.
 - **Wine Boxes** — Multi-box rows with configurable box sizes (e.g., [6, 12, 3]). CSS-drawn box shapes with wine count displayed inside each box (e.g., "2/6") and pack size labels.
 - **Zone Side Panel** — Click any storage zone container to open a slide-out panel (same UX as the depth panel) showing all wines in that zone with add/remove capability.
+- **Vivino Profile** — For bottles linked to Vivino, Cork Dork fetches what the Vivino app shows on the wine's page: the **recommended drinking window** for that vintage (also sets Drink now / Hold / Past peak), the **taste profile** (light↔bold, smooth↔tannic, dry↔sweet, soft↔acidic, gentle↔fizzy), the **main flavours**, the **wine style**, and any **awards and critic scores**, in your metadata language. Vivino's window replaces an AI estimate but never one you set by hand. Fetched on refresh, when a bottle is added, and in the background after a Vivino account sync.
 - **Per-Row Type Selector** — Each rack row can be independently set to Slots (grid), Bulk Bin, or Wine Box via the rack settings dialog.
 
 ### Cellar Arrangement

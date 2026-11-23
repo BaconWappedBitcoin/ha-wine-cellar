@@ -204,6 +204,14 @@ class WineCellarStorage:
             "ai_updated_at": wine_data.get("ai_updated_at"),
             "ai_checked_at": wine_data.get("ai_checked_at"),
         }
+        # Vivino profile (vivino_profile.py) and who owns the drinking
+        # window: kept when given (copy/paste, a duplicate of a known wine).
+        for key in (
+            "drink_window_source", "vivino_taste", "vivino_flavors", "vivino_style",
+            "vivino_awards", "vivino_critics", "vivino_profile_at",
+        ):
+            if wine_data.get(key) not in (None, "", [], {}):
+                wine[key] = wine_data[key]
         self._data[CONF_WINES].append(wine)
         return wine
 
