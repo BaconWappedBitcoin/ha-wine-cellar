@@ -32,6 +32,7 @@ from .const import (
     SUPPORTED_METADATA_LANGUAGES,
 )
 from . import photos
+from .vivino_profile import async_apply_vivino_profile
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -88,9 +89,13 @@ def _select_wines(storage: Any, wine_ids: list[str] | None) -> list[dict[str, An
 def _build_ai_updates(wine: dict[str, Any], result: dict[str, Any], currency: str = "USD") -> dict[str, Any]:
     """Build a wine `updates` dict from a Gemini analyze_single_wine result."""
     updates: dict[str, Any] = {}
-    if result.get("disposition"):
+    # The drinking window is shared with Vivino and the user: the AI only
+    # fills or refreshes its own estimate, never Vivino's per-vintage window
+    # or one the user set (see vivino_profile.py).
+    ai_owns_window = wine.get("drink_window_source") not in ("vivino", "user")
+    if ai_owns_window and result.get("disposition"):
         updates["disposition"] = result["disposition"]
-    if result.get("drink_by"):
+    if ai_owns_window and result.get("drink_by"):
         updates["drink_by"] = result["drink_by"]
 
     # Set AI description if wine has no description or has error text
@@ -108,8 +113,10 @@ def _build_ai_updates(wine: dict[str, Any], result: dict[str, Any], currency: st
     if ai_ratings:
         updates["ai_ratings"] = ai_ratings
 
-    if result.get("drink_window"):
+    if ai_owns_window and result.get("drink_window"):
         updates["drink_window"] = result["drink_window"]
+    if ai_owns_window and any(k in updates for k in ("drink_window", "drink_by", "disposition")):
+        updates["drink_window_source"] = "ai"
 
     est_price = result.get("estimated_price")
     if est_price and isinstance(est_price, (int, float)) and est_price > 0:
@@ -280,6 +287,9 @@ async def _auto_enrich_wine(hass: HomeAssistant, wine: dict[str, Any]) -> None:
             storage.update_wine(wine["id"], updates)
             await storage.async_save()
             hass.bus.async_fire(f"{DOMAIN}_updated")
+        # Now that the bottle has its Vivino id: window, taste, style, awards.
+        if (storage.get_wine(wine["id"]) or {}).get("vivino_id"):
+            await async_apply_vivino_profile(hass, wine["id"])
     except Exception as err:
         _LOGGER.warning("Auto-enrich failed for wine %s: %s", wine.get("id"), err)
 
@@ -671,6 +681,14 @@ async def ws_update_wine(
     """Update a wine's details."""
     storage = hass.data[DOMAIN]["storage"]
     updates = msg["updates"]
+    # A drinking window or disposition changed by hand is the user's from
+    # now on: neither Vivino nor the AI will replace it.
+    before = storage.get_wine(msg["wine_id"]) or {}
+    if "drink_window_source" not in updates and any(
+        key in updates and (updates[key] or "") != (before.get(key) or "")
+        for key in ("drink_window", "drink_by", "disposition")
+    ):
+        updates = {**updates, "drink_window_source": "user"}
     wine = storage.update_wine(msg["wine_id"], updates)
     if wine:
         await photos.store_wine_photos(hass, wine)
@@ -1014,7 +1032,9 @@ async def ws_analyze_wines(
     dispositions = result.get("dispositions", {})
     updated = 0
     for wine_id, disposition in dispositions.items():
-        wine = storage.update_wine(wine_id, {"disposition": disposition})
+        wine = storage.update_wine(
+            wine_id, {"disposition": disposition, "drink_window_source": "user"}
+        )
         if wine:
             updated += 1
 
@@ -1185,6 +1205,9 @@ async def ws_refresh_wine(
         updates["ai_checked_at"] = now
 
     updated_wine = storage.update_wine(msg["wine_id"], updates)
+    # Drinking window, taste, flavours, style, awards, critics.
+    await async_apply_vivino_profile(hass, msg["wine_id"], save=False)
+    updated_wine = storage.get_wine(msg["wine_id"]) or updated_wine
     await storage.async_save()
     hass.bus.async_fire(f"{DOMAIN}_updated")
     connection.send_result(msg["id"], {
@@ -1509,6 +1532,8 @@ async def ws_batch_refresh_vivino(
                 updates["ai_updated_at"] = now
                 updates["ai_checked_at"] = now
             storage.update_wine(wine["id"], updates)
+            if await async_apply_vivino_profile(hass, wine["id"], save=False):
+                had_changes = True
             if had_changes:
                 updated += 1
             else:

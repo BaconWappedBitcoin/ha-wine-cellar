@@ -134,6 +134,10 @@ def _prefer_matching_vintage(
     return results
 
 
+async def _none() -> None:
+    return None
+
+
 class VivinoClient:
     """Client for looking up wine data from multiple sources."""
 
@@ -175,6 +179,144 @@ class VivinoClient:
         return None
 
     # ── Vivino Mobile API (by-id lookup) ──────────────────────────────
+
+    async def _get_json(self, path: str, params: Any = None, timeout: int = 15) -> Any:
+        """GET a public api.vivino.com path; None on any failure."""
+        session = async_get_clientsession(self._hass)
+        try:
+            async with session.get(
+                f"{VIVINO_MOBILE_API_URL}{path}",
+                params=params,
+                headers={"Accept": "application/json"},
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                return await resp.json(content_type=None)
+        except Exception as err:  # noqa: BLE001 - best-effort details
+            _LOGGER.debug("Vivino %s failed: %s", path, err)
+            return None
+
+    async def find_vintage_id(self, wine_id: int | str, year: int | str | None) -> int | None:
+        """The vintage id of a wine for a given year (or its only/newest one)."""
+        data = await self._get_json(f"/wines/{wine_id}")
+        vintages = [v for v in ((data or {}).get("vintages") or []) if isinstance(v, dict)]
+        if not vintages:
+            return None
+        if year:
+            for v in vintages:
+                if str(v.get("year")) == str(year):
+                    return v.get("id")
+            return None
+        # Non-vintage or unknown year: a single vintage is unambiguous.
+        return vintages[0].get("id") if len(vintages) == 1 else None
+
+    async def get_vivino_profile(self, vintage_id: int | str, language: str = "en") -> dict[str, Any] | None:
+        """What Vivino's app shows about a vintage beyond the basics.
+
+        All public endpoints:
+        - ``/v/9.1.1/_vintages?full=1`` — recommended drinking window, awards,
+          critic reviews, the wine's style id (and name/winery, so the caller
+          can check this is the right wine);
+        - ``/v/9.0.0/wines/{wine_id}/tastes`` — taste structure (1-5 scales)
+          and the community's flavour keywords;
+        - ``/wine-styles/{id}`` — the style's name.
+
+        Returns None if the vintage itself cannot be read; every other part is
+        optional and simply missing when Vivino has nothing.
+        """
+        body = await self._get_json(
+            "/v/9.1.1/_vintages", params=[("full", 1), ("ids[]", vintage_id)]
+        )
+        vintage = None
+        if isinstance(body, dict):
+            vintage = body.get(str(vintage_id)) or next(
+                (v for v in body.values() if isinstance(v, dict) and str(v.get("id")) == str(vintage_id)),
+                None,
+            )
+        if not isinstance(vintage, dict):
+            return None
+        wine = vintage.get("wine") or {}
+        profile: dict[str, Any] = {
+            "vintage_id": vintage.get("id"),
+            "wine_id": wine.get("id"),
+            "name": wine.get("name") or vintage.get("name"),
+            "winery": (wine.get("winery") or {}).get("name", ""),
+        }
+
+        window = vintage.get("recommended_drinking_window") or {}
+        start, end = window.get("start_year"), window.get("end_year")
+        if isinstance(start, int) and isinstance(end, int) and 1900 < start <= end < 2200:
+            profile["drink_window"] = f"{start}-{end}"
+            profile["drink_by"] = str(end)
+            profile["drink_from"] = start
+
+        awards = []
+        for a in vintage.get("awards") or []:
+            if not isinstance(a, dict):
+                continue
+            comp = a.get("competition") or {}
+            awards.append({
+                k: v for k, v in {
+                    "competition": comp.get("name") if isinstance(comp, dict) else None,
+                    "medal": a.get("medal") or a.get("trophy"),
+                    "score": a.get("score"),
+                    "year": a.get("year") or a.get("edition"),
+                }.items() if v not in (None, "")
+            })
+        profile["vivino_awards"] = [a for a in awards if a]
+
+        critics = []
+        for r in vintage.get("wine_critic_reviews") or []:
+            if not isinstance(r, dict):
+                continue
+            critic = r.get("wine_critic") or r.get("critic") or {}
+            entry = {
+                k: v for k, v in {
+                    "critic": critic.get("name") if isinstance(critic, dict) else None,
+                    "score": r.get("score"),
+                    "score_max": critic.get("score_max") if isinstance(critic, dict) else None,
+                }.items() if v not in (None, "")
+            }
+            if entry.get("score"):
+                critics.append(entry)
+        profile["vivino_critics"] = critics
+
+        style_id = wine.get("style_id")
+        wine_id = wine.get("id")
+        style, tastes = await asyncio.gather(
+            self._get_json(f"/wine-styles/{style_id}", params={"language": language}) if style_id else _none(),
+            self._get_json(f"/v/9.0.0/wines/{wine_id}/tastes", params={"language": language}) if wine_id else _none(),
+        )
+        if isinstance(style, dict) and style.get("name"):
+            profile["vivino_style"] = style["name"]
+
+        tastes = (tastes or {}).get("tastes", tastes) if isinstance(tastes, dict) else None
+        if isinstance(tastes, dict):
+            structure = tastes.get("structure") or {}
+            taste = {
+                key: round(float(structure[key]), 1)
+                for key in ("intensity", "sweetness", "tannin", "acidity", "fizziness")
+                if isinstance(structure.get(key), (int, float))
+            }
+            if taste:
+                profile["vivino_taste"] = taste
+            flavors: list[str] = []
+            groups = sorted(
+                (g for g in tastes.get("flavor") or [] if isinstance(g, dict)),
+                key=lambda g: -((g.get("stats") or {}).get("count") or 0),
+            )
+            for group in groups[:4]:
+                keywords = sorted(
+                    (k for k in group.get("primary_keywords") or [] if isinstance(k, dict) and k.get("name")),
+                    key=lambda k: -(k.get("count") or 0),
+                )
+                for k in keywords[:3]:
+                    if k["name"] not in flavors:
+                        flavors.append(k["name"])
+            if flavors:
+                profile["vivino_flavors"] = flavors[:10]
+        return profile
 
     async def get_wine_by_vintage_id(
         self, vintage_id: int | str, vintage: int | None = None

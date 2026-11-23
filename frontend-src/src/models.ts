@@ -41,6 +41,16 @@ export interface Wine {
   source?: string;
   disposition: string;
   drink_window: string;
+  // Who set the drinking window/disposition: Vivino replaces "ai", nobody
+  // replaces "user" (see vivino_profile.py).
+  drink_window_source?: "vivino" | "ai" | "user" | "";
+  // What Vivino's app shows on the wine's page (vivino_profile.py).
+  vivino_taste?: VivinoTaste | null;
+  vivino_flavors?: string[];
+  vivino_style?: string;
+  vivino_awards?: { competition?: string; medal?: string; score?: string; year?: number | string }[];
+  vivino_critics?: { critic?: string; score?: string; score_max?: number }[];
+  vivino_profile_at?: string;
   ai_ratings: Record<string, number> | null;
   // `*_updated_at` is when the data last actually changed; `*_checked_at` is
   // when the source was last consulted. A checked_at newer than updated_at
@@ -68,6 +78,15 @@ export interface StorageRow {
   type: StorageRowType;
   capacity: number;
   boxes?: number[];  // for type="box": array of box sizes, e.g. [6, 12, 3]
+}
+
+// Vivino taste structure, each on a 1-5 scale.
+export interface VivinoTaste {
+  intensity?: number;
+  sweetness?: number;
+  tannin?: number;
+  acidity?: number;
+  fizziness?: number;
 }
 
 export interface Cabinet {
