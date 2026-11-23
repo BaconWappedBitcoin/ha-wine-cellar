@@ -104,6 +104,13 @@ CONF_VIVINO_SESSION_COOKIE = "vivino_session_cookie"
 CONF_VIVINO_CELLAR_URL = "vivino_cellar_url"
 CONF_VIVINO_AUTO_SYNC = "vivino_auto_sync"
 
+# Alternative to the cookie: sign in like the Vivino mobile app (OAuth password
+# grant against api.vivino.com). Only the email is kept in the options; the
+# password is used once to obtain tokens and never stored. When an email is
+# set it takes precedence over the cookie + cellar URL.
+CONF_VIVINO_EMAIL = "vivino_email"
+CONF_VIVINO_PASSWORD = "vivino_password"
+
 # What the Vivino connection is allowed to do. "import" mirrors the Vivino
 # cellar into Cork Dork and never writes to the user's Vivino account;
 # "sync" is the full two-way reconcile that also pushes Cork Dork changes
@@ -120,4 +127,4 @@ VIVINO_AUTO_SYNC_INTERVAL_HOURS = 12
 ATTR_TOTAL_BOTTLES = "total_bottles"
 ATTR_TOTAL_CAPACITY = "total_capacity"
 
-FRONTEND_VERSION = "20260830g"
+FRONTEND_VERSION = "20261122b"

@@ -15,7 +15,7 @@
     "step": {
       "init": {
         "title": "Cork Dork Options",
-        "description": "To sync your Vivino cellar, paste your cellar page URL and your Vivino session cookie (see the docs: docs/vivino-import.md). The cookie is verified against your cellar when you save.",
+        "description": "To sync your Vivino cellar, either sign in with your Vivino email and password (recommended — the connection then renews itself), or paste your cellar page URL and a Vivino session cookie (see docs/vivino-import.md). The password is only used to sign in and is never stored.",
         "data": {
           "default_wine_type": "Default wine type for new entries",
           "ai_provider": "AI provider",
@@ -24,6 +24,8 @@
           "ai_base_url": "AI base URL (used when provider is OpenAI-compatible)",
           "ai_api_key": "AI API key (Bearer token)",
           "ai_model": "AI model name",
+          "vivino_email": "Vivino email",
+          "vivino_password": "Vivino password (only needed to sign in or sign in again)",
           "vivino_cellar_url": "Vivino cellar page URL",
           "vivino_session_cookie": "Vivino session cookie (from your logged-in browser)",
           "vivino_mode": "Vivino mode",
@@ -34,6 +36,8 @@
           "ai_base_url": "Format: https://host or https://host/your-path — with or without a trailing /v1/chat/completions, either works",
           "ai_api_key": "Sent as header: Authorization: Bearer {key}",
           "ai_model": "Format: the exact model name your provider expects, e.g. gemini-2.5-flash",
+          "vivino_email": "Sign in like the Vivino app. Leave empty to use the session cookie below instead. If you sign in to Vivino with Google or Apple, first set a password with “Forgot password” in the Vivino app.",
+          "vivino_password": "Used once to obtain a session that renews itself; never saved. Leave empty when saving other options.",
           "vivino_cellar_url": "Open your cellar in a browser and copy the address from the address bar. It ends with /cellars/ and your cellar number.",
           "vivino_mode": "Import mirrors your Vivino cellar into Cork Dork and never writes to your Vivino account. Synchronize also pushes bottles you add or drink in Cork Dork back to Vivino — in Import mode, manage your bottle counts in Vivino."
         }
@@ -45,7 +49,9 @@
       "ai_provider_cannot_connect": "Could not connect to the AI base URL. Check the address and try again.",
       "vivino_invalid_auth": "Vivino rejected the session cookie — it may be expired or wrong. Paste a fresh one from your logged-in browser.",
       "vivino_cannot_connect": "Could not reach Vivino — check your network connection and try again.",
-      "vivino_incomplete": "Enter both the cellar URL and the session cookie, or leave both empty to disable the connection."
+      "vivino_incomplete": "Enter both the cellar URL and the session cookie, or leave both empty to disable the connection.",
+      "vivino_invalid_login": "Vivino rejected the email or password.",
+      "vivino_password_required": "Enter your Vivino password to sign in."
     }
   },
   "selector": {
