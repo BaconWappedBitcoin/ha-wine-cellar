@@ -305,6 +305,7 @@ class WineCellarStorage:
             "has_bottom_zone": cabinet_data.get("has_bottom_zone", False),
             "bottom_zone_name": cabinet_data.get("bottom_zone_name", "Storage"),
             "storage_rows": cabinet_data.get("storage_rows", []),
+            "row_cols": cabinet_data.get("row_cols", []),
             "order": cabinet_data.get("order", len(self.cabinets)),
         }
         self._data[CONF_CABINETS].append(cabinet)
@@ -336,6 +337,22 @@ class WineCellarStorage:
         return False
 
     @staticmethod
+    def row_slot_count(cabinet: dict[str, Any], row: int) -> int:
+        """How many grid slots a row has.
+
+        A rack is ``rows`` x ``cols`` unless ``row_cols`` gives some rows fewer
+        slots, as in a staggered (honeycomb) rack whose rows alternate, e.g.
+        3/2/3/2. Entries missing, below 1 or above ``cols`` mean a full row.
+        """
+        cols = cabinet.get("cols", 0) or 0
+        row_cols = cabinet.get("row_cols") or []
+        if 0 <= row < len(row_cols):
+            n = row_cols[row]
+            if isinstance(n, int) and not isinstance(n, bool) and 1 <= n < cols:
+                return n
+        return cols
+
+    @staticmethod
     def cabinet_capacity(cabinet: dict[str, Any]) -> int:
         """Return a single cabinet's total bottle capacity.
 
@@ -346,8 +363,13 @@ class WineCellarStorage:
         if cabinet.get("type") != "grid":
             return 0
         storage_rows = cabinet.get("storage_rows", [])
-        grid_rows = max(0, cabinet.get("rows", 0) - len(storage_rows))
-        capacity = grid_rows * cabinet.get("cols", 0) * cabinet.get("depth", 1)
+        storage_row_indices = {sr.get("row") for sr in storage_rows}
+        slots = sum(
+            WineCellarStorage.row_slot_count(cabinet, r)
+            for r in range(cabinet.get("rows", 0))
+            if r not in storage_row_indices
+        )
+        capacity = slots * cabinet.get("depth", 1)
         for sr in storage_rows:
             if sr.get("type") == "box":
                 capacity += sum(sr.get("boxes", []))
@@ -391,7 +413,7 @@ class WineCellarStorage:
         row, col = wine.get("row"), wine.get("col")
         if row is None or col is None:
             return None
-        if row >= cabinet.get("rows", 0) or col >= cabinet.get("cols", 0):
+        if row >= cabinet.get("rows", 0) or col >= self.row_slot_count(cabinet, row):
             return "the rack was shrunk past its slot"
         if depth >= (cabinet.get("depth", 1) or 1):
             return "the rack was made shallower than its slot"
@@ -821,7 +843,7 @@ class WineCellarStorage:
                 return None
             if not (0 <= row_idx < cabinet.get("rows", 0)):
                 return None
-            if not (0 <= col_idx < cabinet.get("cols", 0)):
+            if not (0 <= col_idx < self.row_slot_count(cabinet, row_idx)):
                 return None
             if row_idx in storage_row_indices:
                 # That row was converted to a bin/box; it has no grid slots.

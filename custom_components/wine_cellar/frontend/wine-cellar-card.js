@@ -760,6 +760,21 @@ const WINE_TYPE_LABELS = {
     sparkling: "Sparkling",
     dessert: "Dessert",
 };
+// How many slots a grid row has: `cols`, unless `row_cols` gives that row
+// fewer (a staggered rack). Mirrors WineCellarStorage.row_slot_count.
+function rowSlotCount(cabinet, row) {
+    const cols = cabinet.cols || 0;
+    const n = cabinet.row_cols?.[row];
+    return typeof n === "number" && Number.isInteger(n) && n >= 1 && n < cols ? n : cols;
+}
+// True when some row is shorter than the rack is wide.
+function isStaggered(cabinet) {
+    for (let r = 0; r < (cabinet.rows || 0); r++) {
+        if (rowSlotCount(cabinet, r) < (cabinet.cols || 0))
+            return true;
+    }
+    return false;
+}
 // Every physical (row, col) grid slot in a cabinet, in display order,
 // skipping rows configured as bulk/box storage zones.
 function getRackSlots(cabinet) {
@@ -768,7 +783,8 @@ function getRackSlots(cabinet) {
     for (let r = 0; r < cabinet.rows; r++) {
         if (storageRowSet.has(r))
             continue;
-        for (let c = 0; c < cabinet.cols; c++)
+        const n = rowSlotCount(cabinet, r);
+        for (let c = 0; c < n; c++)
             slots.push({ row: r, col: c });
     }
     return slots;
@@ -2074,9 +2090,13 @@ let CabinetGrid = class CabinetGrid extends i {
     }
     _renderGridRow(row, cols) {
         const cabinetDepth = this.cabinet.depth || 1;
+        // A short row (staggered rack) keeps full-width cell size and is centred,
+        // which offsets it by half a slot against its neighbours.
+        const slots = rowSlotCount(this.cabinet, row);
+        const short = slots < cols;
         return b `
-      <div class="row">
-        ${Array.from({ length: cols }, (_, col) => {
+      <div class="row ${short ? "short" : ""}" style=${short ? `--rack-cols: ${cols}` : ""}>
+        ${Array.from({ length: slots }, (_, col) => {
             const wines = this._getWinesAt(row, col);
             const wineCount = wines.length;
             const frontWine = wines.length > 0
@@ -2331,10 +2351,19 @@ CabinetGrid.styles = [
       }
 
       .row {
+        --row-gap: 2px;
         display: flex;
-        gap: 2px;
+        gap: var(--row-gap);
         margin-bottom: 2px;
         position: relative;
+      }
+
+      /* Staggered rack: a shorter row keeps full-size cells, centred. */
+      .row.short {
+        justify-content: center;
+      }
+      .row.short .cell {
+        flex: 0 0 calc((100% - (var(--rack-cols) - 1) * var(--row-gap)) / var(--rack-cols));
       }
 
       /* Scalloped shelf appearance */
@@ -2774,7 +2803,7 @@ CabinetGrid.styles = [
           padding: 4px;
         }
         .row {
-          gap: 1px;
+          --row-gap: 1px;
           margin-bottom: 1px;
         }
         .row::after {
@@ -2809,7 +2838,7 @@ CabinetGrid.styles = [
           padding: 5px;
         }
         .row {
-          gap: 2px;
+          --row-gap: 2px;
           margin-bottom: 1px;
         }
       }
@@ -5968,7 +5997,7 @@ let AddWineDialog = class AddWineDialog extends i {
         }}
               >
                 <div class="cab-name">${cab.name}</div>
-                <div class="cab-info">${cab.rows}×${cab.cols} slots</div>
+                <div class="cab-info">${getRackSlots(cab).length} slots</div>
               </div>
             `)}
         </div>
@@ -6049,8 +6078,10 @@ let AddWineDialog = class AddWineDialog extends i {
         }
         const cabinet = this.cabinets.find((c) => c.id === d.cabinet_id);
         if (cabinet && !d.zone && d.row != null && d.col != null) {
-            if (d.row < 0 || d.row >= cabinet.rows || d.col < 0 || d.col >= cabinet.cols) {
-                this._error = `That slot is outside ${cabinet.name} (${cabinet.rows} rows × ${cabinet.cols} columns).`;
+            if (d.row < 0 || d.row >= cabinet.rows || d.col < 0 || d.col >= rowSlotCount(cabinet, d.row)) {
+                this._error = d.row >= 0 && d.row < cabinet.rows && rowSlotCount(cabinet, d.row) < cabinet.cols
+                    ? `That slot is outside ${cabinet.name}: row ${d.row + 1} has ${rowSlotCount(cabinet, d.row)} slots.`
+                    : `That slot is outside ${cabinet.name} (${cabinet.rows} rows × ${cabinet.cols} columns).`;
                 return;
             }
             const isStorageRow = (cabinet.storage_rows || []).some((sr) => sr.row === d.row);
@@ -7098,6 +7129,8 @@ let RackSettingsDialog = RackSettingsDialog_1 = class RackSettingsDialog extends
                 return false;
             if (w.row >= newRows || w.col >= newCols)
                 return true;
+            if (w.col >= rowSlotCount(this._editCabinet, w.row))
+                return true;
             if ((w.depth || 0) >= newDepth)
                 return true;
             return rows.some((sr) => sr.row === w.row);
@@ -7196,7 +7229,46 @@ let RackSettingsDialog = RackSettingsDialog_1 = class RackSettingsDialog extends
         const current = this._editCabinet.rows || 1;
         if (current >= 20)
             return;
-        this._editCabinet = { ...this._editCabinet, rows: current + 1 };
+        const cab = this._editCabinet;
+        // A staggered rack keeps alternating: the new row copies the one two
+        // rows up. Otherwise it is a full row.
+        const rowCols = isStaggered(cab)
+            ? [...this._rowColsArray(current), rowSlotCount(cab, current - 2)]
+            : this._editCabinet.row_cols;
+        this._editCabinet = { ...this._editCabinet, rows: current + 1, row_cols: rowCols };
+    }
+    // One slot count per row, as the editor shows them.
+    _rowColsArray(rows = this._editCabinet.rows || 1) {
+        const cab = this._editCabinet;
+        return Array.from({ length: rows }, (_, r) => rowSlotCount(cab, r));
+    }
+    // What gets saved: one entry per row, or nothing for a plain rectangle.
+    _rowColsToSave() {
+        return isStaggered(this._editCabinet) ? this._rowColsArray() : [];
+    }
+    _setRowSlots(row, n) {
+        const cols = this._editCabinet.cols || 1;
+        const next = this._rowColsArray();
+        next[row] = Math.max(1, Math.min(cols, n));
+        this._editCabinet = { ...this._editCabinet, row_cols: next };
+    }
+    // Staggered (honeycomb) layout: rows alternate full width and one slot
+    // less, e.g. 3/2/3/2. Pressing it again on a staggered rack restores
+    // full rows.
+    _toggleStagger() {
+        const cab = this._editCabinet;
+        if (isStaggered(cab)) {
+            this._editCabinet = { ...this._editCabinet, row_cols: [] };
+            return;
+        }
+        const cols = this._editCabinet.cols || 1;
+        if (cols < 2)
+            return;
+        const rows = this._editCabinet.rows || 1;
+        this._editCabinet = {
+            ...this._editCabinet,
+            row_cols: Array.from({ length: rows }, (_, r) => (r % 2 ? cols - 1 : cols)),
+        };
     }
     _removeRow() {
         const current = this._editCabinet.rows || 1;
@@ -7205,7 +7277,11 @@ let RackSettingsDialog = RackSettingsDialog_1 = class RackSettingsDialog extends
         const newRows = current - 1;
         // Remove storage row if last row was storage
         this._editStorageRows = this._editStorageRows.filter((sr) => sr.row < newRows);
-        this._editCabinet = { ...this._editCabinet, rows: newRows };
+        this._editCabinet = {
+            ...this._editCabinet,
+            rows: newRows,
+            row_cols: (this._editCabinet.row_cols || []).slice(0, newRows),
+        };
     }
     _addCol() {
         const current = this._editCabinet.cols || 1;
@@ -7245,6 +7321,7 @@ let RackSettingsDialog = RackSettingsDialog_1 = class RackSettingsDialog extends
                     has_bottom_zone: false,
                     bottom_zone_name: "",
                     storage_rows: this._editStorageRows,
+                    row_cols: this._rowColsToSave(),
                     order: this.cabinets.length,
                     orientation: "vertical",
                 },
@@ -7280,6 +7357,7 @@ let RackSettingsDialog = RackSettingsDialog_1 = class RackSettingsDialog extends
                     has_bottom_zone: false,
                     bottom_zone_name: "",
                     storage_rows: validStorageRows,
+                    row_cols: this._rowColsToSave(),
                     orientation: "vertical",
                 },
             });
@@ -7367,6 +7445,11 @@ let RackSettingsDialog = RackSettingsDialog_1 = class RackSettingsDialog extends
             this._error = "Failed to reorder racks.";
         }
     }
+    // "3/2/3/2", or "3/2/…" for long racks.
+    _rowPattern(cab) {
+        const counts = Array.from({ length: cab.rows }, (_, r) => rowSlotCount(cab, r));
+        return counts.length > 6 ? `${counts.slice(0, 4).join("/")}/…` : counts.join("/");
+    }
     _renderList() {
         const sorted = [...this.cabinets].sort((a, b) => a.order - b.order);
         return b `
@@ -7379,7 +7462,9 @@ let RackSettingsDialog = RackSettingsDialog_1 = class RackSettingsDialog extends
                   <div class="rack-info">
                     <div class="rack-name">${cab.name}</div>
                     <div class="rack-meta">
-                      ${cab.rows} × ${cab.cols} grid${(cab.depth || 1) > 1 ? ` × ${cab.depth} deep` : ""}
+                      ${isStaggered(cab)
+                ? `${cab.rows} staggered rows (${this._rowPattern(cab)})`
+                : `${cab.rows} × ${cab.cols} grid`}${(cab.depth || 1) > 1 ? ` × ${cab.depth} deep` : ""}
                       · ${this._winesInCabinet(cab.id)} bottles
                       ${storageCount > 0 ? ` · ${storageCount} storage` : ""}
                     </div>
@@ -7425,6 +7510,8 @@ let RackSettingsDialog = RackSettingsDialog_1 = class RackSettingsDialog extends
         const numRows = this._editCabinet.rows || 1;
         const numCols = this._editCabinet.cols || 8;
         const numDepth = this._editCabinet.depth || 1;
+        const rowSlots = this._rowColsArray(numRows);
+        const staggered = rowSlots.some((n) => n < numCols);
         // Which bottles this edit would displace, whichever way it shrinks.
         const displaced = isEdit ? this._displacedWines() : [];
         return b `
@@ -7473,6 +7560,13 @@ let RackSettingsDialog = RackSettingsDialog_1 = class RackSettingsDialog extends
             </div>
           </div>
 
+          <button
+            class="small-btn stagger-btn ${staggered ? "active" : ""}"
+            ?disabled=${!staggered && numCols < 2}
+            @click=${this._toggleStagger}
+            title="Rows alternate full width and one slot less, offset by half a slot (honeycomb rack)"
+          >${staggered ? "Staggered ✓ — reset to full rows" : "Staggered rows (e.g. 3/2/3/2)"}</button>
+
           <!-- Visual grid preview -->
           <div class="grid-preview">
             ${Array.from({ length: numRows }, (_, row) => {
@@ -7484,9 +7578,13 @@ let RackSettingsDialog = RackSettingsDialog_1 = class RackSettingsDialog extends
                   <span class="grid-preview-label">R${row + 1}</span>
                   ${isStorage
                 ? b `<div class="grid-preview-cell"></div><span class="grid-preview-storage-label">${typeIcon} ${sr?.name || "Storage"}</span>`
-                : Array.from({ length: Math.min(numCols, 15) }, () => b `<div class="grid-preview-cell"></div>`)}
-                  ${!isStorage && numCols > 15
-                ? b `<span style="font-size:0.65em;color:var(--wc-text-secondary)">+${numCols - 15}</span>`
+                : b `
+                        ${rowSlots[row] < numCols
+                    ? b `<span style="width:${((Math.min(numCols, 15) - Math.min(rowSlots[row], 15)) * 23) / 2}px;flex-shrink:0"></span>`
+                    : A}
+                        ${Array.from({ length: Math.min(rowSlots[row], 15) }, () => b `<div class="grid-preview-cell"></div>`)}`}
+                  ${!isStorage && rowSlots[row] > 15
+                ? b `<span style="font-size:0.65em;color:var(--wc-text-secondary)">+${rowSlots[row] - 15}</span>`
                 : A}
                 </div>
               `;
@@ -7552,7 +7650,13 @@ let RackSettingsDialog = RackSettingsDialog_1 = class RackSettingsDialog extends
                               </div>
                             `}
                       `
-                : b `<span class="row-type-info">${numCols} col${numCols !== 1 ? "s" : ""}${numDepth > 1 ? ` × ${numDepth} deep` : ""}</span>`}
+                : b `
+                        <div class="row-cap-stepper" title="Slots in this row">
+                          <button class="stepper-btn-sm" ?disabled=${rowSlots[row] <= 1} @click=${(e) => { e.stopPropagation(); this._setRowSlots(row, rowSlots[row] - 1); }}>−</button>
+                          <span class="stepper-val-sm">${rowSlots[row]}</span>
+                          <button class="stepper-btn-sm" ?disabled=${rowSlots[row] >= numCols} @click=${(e) => { e.stopPropagation(); this._setRowSlots(row, rowSlots[row] + 1); }}>+</button>
+                        </div>
+                        <span class="row-type-info">slot${rowSlots[row] !== 1 ? "s" : ""}${numDepth > 1 ? ` × ${numDepth} deep` : ""}</span>`}
                 </div>
               `;
         })}
@@ -7868,6 +7972,13 @@ RackSettingsDialog.styles = [
         padding: 8px;
         margin-bottom: 8px;
         overflow-x: auto;
+      }
+
+      .stagger-btn {
+        margin: 0 0 8px;
+      }
+      .stagger-btn.active {
+        border-color: var(--wc-accent, #8b6914);
       }
 
       .grid-preview-row {
@@ -12542,14 +12653,29 @@ let WineCellarCard = class WineCellarCard extends i {
     _getRackSlots() {
         return this._rackPanelCabinet ? getRackSlots(this._rackPanelCabinet) : [];
     }
-    // Adds exactly one new slot. A rack is a strict rows×cols rectangle, so
+    // Adds exactly one new slot. A plain rack is a rows×cols rectangle (a
+    // staggered one grows its last row instead), so
     // growing either axis by 1 adds that many slots (all of the other axis).
     // Grow whichever axis is smaller to add as few slots as possible — for the
     // common single-row rack (rows=1) this always adds exactly 1 slot.
     _addRackSlot() {
         if (!this._rackPanelCabinet)
             return;
-        const { rows, cols } = this._rackPanelCabinet;
+        const cab = this._rackPanelCabinet;
+        const { rows, cols } = cab;
+        if (isStaggered(cab)) {
+            // Staggered rack: fill the last row up to full width, else start a
+            // new row continuing the alternation with a single slot.
+            const counts = Array.from({ length: rows }, (_, r) => rowSlotCount(cab, r));
+            if (counts[rows - 1] < cols) {
+                counts[rows - 1] += 1;
+                this._resizeRack({ row_cols: counts });
+            }
+            else {
+                this._resizeRack({ rows: rows + 1, row_cols: [...counts, 1] });
+            }
+            return;
+        }
         if (rows <= cols) {
             this._resizeRack({ cols: cols + 1 });
         }
@@ -12573,7 +12699,7 @@ let WineCellarCard = class WineCellarCard extends i {
             this._showToast("Failed to resize rack");
         }
     }
-    // A rack is a strict rows×cols rectangle, so only the trailing slot can be
+    // A rack is a rows×cols rectangle (or staggered rows), so only the trailing slot can be
     // removed without leaving a hole the grid can't represent.
     _isLastRackSlot(row, col) {
         const slots = this._getRackSlots();
@@ -12604,7 +12730,19 @@ let WineCellarCard = class WineCellarCard extends i {
                     updates: { cabinet_id: "", row: null, col: null, zone: "", depth: 0 },
                 });
             }
-            if (cols >= rows && cols > 1) {
+            if (isStaggered(this._rackPanelCabinet)) {
+                // Staggered rack: take the slot off the last row; an emptied row goes.
+                const cab = this._rackPanelCabinet;
+                const counts = Array.from({ length: rows }, (_, r) => rowSlotCount(cab, r));
+                if (counts[rows - 1] > 1) {
+                    counts[rows - 1] -= 1;
+                    await this._resizeRack({ row_cols: counts });
+                }
+                else {
+                    await this._resizeRack({ rows: rows - 1, row_cols: counts.slice(0, -1) });
+                }
+            }
+            else if (cols >= rows && cols > 1) {
                 await this._resizeRack({ cols: cols - 1 });
             }
             else {

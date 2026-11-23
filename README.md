@@ -29,6 +29,7 @@ A custom Home Assistant integration for managing your wine collection. Track bot
 - **Wine Boxes** — Multi-box rows with configurable box sizes (e.g., [6, 12, 3]). CSS-drawn box shapes with wine count displayed inside each box (e.g., "2/6") and pack size labels.
 - **Zone Side Panel** — Click any storage zone container to open a slide-out panel (same UX as the depth panel) showing all wines in that zone with add/remove capability.
 - **Per-Row Type Selector** — Each rack row can be independently set to Slots (grid), Bulk Bin, or Wine Box via the rack settings dialog.
+- **Staggered (Honeycomb) Racks** — Each slot row can hold fewer bottles than the rack is wide; shorter rows are drawn offset by half a slot, like a diamond/honeycomb rack where bottles rest in the gaps of the row below. One click on **Staggered rows** alternates full and one-short rows (e.g. 3/2/3/2), or set each row's count with its own stepper.
 
 ### Cellar Arrangement
 - **Tidy-Up Analysis** — A counter in the header ("2 tidy-ups") opens a report of what has drifted out of order. It finds three things: bottles of one wine scattered across several places, a container dominated by one wine type with one or two odd ones out, and a bottle due to be drunk soon that is stuck behind bottles you are holding.
@@ -173,7 +174,7 @@ by replaying a session cookie you paste from your browser.
 
 ## Default Cabinet Layout
 
-The integration ships with 3 cabinet sections, each with 10 rows and 9 columns (90 slots per section, 270 total). The bottom row of each section defaults to a bulk bin storage zone. Rack dimensions (up to 20×20), names, depth (1-6 bottles deep), and per-row storage types (Slots, Bulk Bin, Wine Box) can all be customized through the **Manage Racks** button in the tab bar.
+The integration ships with 3 cabinet sections, each with 10 rows and 9 columns (90 slots per section, 270 total). The bottom row of each section defaults to a bulk bin storage zone. Rack dimensions (up to 20×20), names, depth (1-6 bottles deep), per-row storage types (Slots, Bulk Bin, Wine Box) and per-row slot counts for staggered racks can all be customized through the **Manage Racks** button in the tab bar.
 
 ## Data Sources
 
