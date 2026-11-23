@@ -88,6 +88,13 @@ SUPPORTED_METADATA_CURRENCIES = ["USD", "EUR", "GBP", "CHF"]
 # applying automatically. "always" skips asking and just uses AI every time.
 CONF_AI_FALLBACK_ALWAYS = "ai_fallback_always"
 
+# How a bottle's Drink now / Hold / Past peak status is drawn on the rack:
+# "disc" covers the label (the original look), "corner" is a small dot that
+# leaves the label visible, "off" hides it.
+CONF_DISPOSITION_BADGE = "disposition_badge"
+DISPOSITION_BADGE_CHOICES = ("disc", "corner", "off")
+DEFAULT_DISPOSITION_BADGE = "disc"
+
 # How many timestamped server backups to keep on disk. Older ones are pruned
 # after each new save; 0 keeps every backup forever.
 # Arrangement findings the user has waved off for good. Kept as a list of
@@ -120,4 +127,4 @@ VIVINO_AUTO_SYNC_INTERVAL_HOURS = 12
 ATTR_TOTAL_BOTTLES = "total_bottles"
 ATTR_TOTAL_CAPACITY = "total_capacity"
 
-FRONTEND_VERSION = "20260830g"
+FRONTEND_VERSION = "20261123e"
