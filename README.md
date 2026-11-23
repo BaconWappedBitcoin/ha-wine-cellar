@@ -28,6 +28,14 @@ A custom Home Assistant integration for managing your wine collection. Track bot
 - **Bulk Bins** — Open storage for loosely grouped bottles (e.g., daily drinkers, pending sort). Shows individual wine squares with configurable capacity.
 - **Wine Boxes** — Multi-box rows with configurable box sizes (e.g., [6, 12, 3]). CSS-drawn box shapes with wine count displayed inside each box (e.g., "2/6") and pack size labels.
 - **Zone Side Panel** — Click any storage zone container to open a slide-out panel (same UX as the depth panel) showing all wines in that zone with add/remove capability.
+- **Section Card** — Put a single rack on any dashboard as its own tile with `custom:wine-cellar-section-card` (or pick **Cork Dork — Section** in the card picker and choose the section). It shows that rack's grid and bottle count; tap a bottle for its details, tap a free slot to add a bottle there. It stays in sync with the full card.
+
+  ```yaml
+  type: custom:wine-cellar-section-card
+  section: Cuisine        # rack name or id
+  title: Wine fridge      # optional
+  show_header: true       # optional, bottle count line
+  ```
 - **Per-Row Type Selector** — Each rack row can be independently set to Slots (grid), Bulk Bin, or Wine Box via the rack settings dialog.
 
 ### Cellar Arrangement

@@ -14,6 +14,8 @@ import "./components/rack-settings-dialog";
 import "./components/wine-list-dialog";
 import "./components/inventory-dialog";
 import "./components/vivino-ai-settings-dialog";
+// Ships in the same bundle: one rack as its own dashboard card.
+import "./wine-cellar-section-card";
 
 // How long an incoming change waits before the card re-fetches, and the floor
 // on how often it may do so at all.
