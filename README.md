@@ -28,6 +28,7 @@ A custom Home Assistant integration for managing your wine collection. Track bot
 - **Bulk Bins** — Open storage for loosely grouped bottles (e.g., daily drinkers, pending sort). Shows individual wine squares with configurable capacity.
 - **Wine Boxes** — Multi-box rows with configurable box sizes (e.g., [6, 12, 3]). CSS-drawn box shapes with wine count displayed inside each box (e.g., "2/6") and pack size labels.
 - **Zone Side Panel** — Click any storage zone container to open a slide-out panel (same UX as the depth panel) showing all wines in that zone with add/remove capability.
+- **Drinking Status** — Bottles marked Drink now / Hold / Past peak show it on the rack. In **Vivino / AI Settings** choose how: a disc over the label (default), a small corner dot that keeps the label visible, or hidden. The search bar can also filter the list by status.
 - **Per-Row Type Selector** — Each rack row can be independently set to Slots (grid), Bulk Bin, or Wine Box via the rack settings dialog.
 
 ### Cellar Arrangement

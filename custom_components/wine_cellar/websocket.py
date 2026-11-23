@@ -13,6 +13,9 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from .const import (
+    CONF_DISPOSITION_BADGE,
+    DEFAULT_DISPOSITION_BADGE,
+    DISPOSITION_BADGE_CHOICES,
     CONF_AI_FALLBACK_ALWAYS,
     CONF_DISMISSED_ARRANGEMENTS,
     CONF_METADATA_CURRENCY,
@@ -895,6 +898,9 @@ def ws_get_capabilities(
             "ai_fallback_always": bool(
                 hass.data[DOMAIN]["storage"].settings.get(CONF_AI_FALLBACK_ALWAYS, False)
             ),
+            "disposition_badge": hass.data[DOMAIN]["storage"].settings.get(
+                CONF_DISPOSITION_BADGE, DEFAULT_DISPOSITION_BADGE
+            ),
             "server_backup_keep": _get_backup_keep(hass),
             "server_backup_keep_choices": SERVER_BACKUP_KEEP_CHOICES,
             "dismissed_arrangements": list(
@@ -928,6 +934,10 @@ async def ws_update_settings(
     currency = updates.get(CONF_METADATA_CURRENCY)
     if currency is not None and currency not in SUPPORTED_METADATA_CURRENCIES:
         connection.send_result(msg["id"], {"error": f"Unsupported currency: {currency}"})
+        return
+    badge = updates.get(CONF_DISPOSITION_BADGE)
+    if badge is not None and badge not in DISPOSITION_BADGE_CHOICES:
+        connection.send_result(msg["id"], {"error": f"Unsupported badge style: {badge}"})
         return
     keep = updates.get(CONF_SERVER_BACKUP_KEEP)
     if keep is not None:

@@ -10,6 +10,7 @@ export class VivinoAiSettingsDialog extends LitElement {
   @property({ attribute: false }) supportedLanguages: string[] = ["en", "fr", "de"];
   @property({ type: String }) metadataCurrency = "USD";
   @property({ attribute: false }) supportedCurrencies: string[] = ["USD", "EUR", "GBP", "CHF"];
+  @property({ type: String }) dispositionBadge = "disc";
 
   static styles = [
     sharedStyles,
@@ -159,6 +160,22 @@ export class VivinoAiSettingsDialog extends LitElement {
                   class="pill ${this.metadataCurrency === cur ? "active" : ""}"
                   @click=${() => this._setCurrency(cur)}
                 >${cur}</button>
+              `)}
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <span class="settings-label">Drink now / Hold / Past badge</span>
+            <div class="pill-group">
+              ${[
+                ["disc", "Over label"],
+                ["corner", "Corner dot"],
+                ["off", "Hidden"],
+              ].map(([value, label]) => html`
+                <button
+                  class="pill ${this.dispositionBadge === value ? "active" : ""}"
+                  @click=${() => this.dispatchEvent(new CustomEvent("set-disposition-badge", { detail: { value } }))}
+                >${label}</button>
               `)}
             </div>
           </div>

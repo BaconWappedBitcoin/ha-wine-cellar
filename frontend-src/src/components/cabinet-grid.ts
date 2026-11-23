@@ -3,6 +3,8 @@ import { customElement, property, state } from "lit/decorators.js";
 import { Cabinet, Wine, StorageRow, WINE_TYPE_COLORS, WineType } from "../models";
 import { sharedStyles } from "../styles";
 
+const DISPOSITION_TITLES: Record<string, string> = { D: "Drink now", H: "Hold", P: "Past peak" };
+
 @customElement("cabinet-grid")
 export class CabinetGrid extends LitElement {
   @property({ attribute: false }) cabinet!: Cabinet;
@@ -13,6 +15,9 @@ export class CabinetGrid extends LitElement {
   // Candidates for a pending Vivino removal: every listed bottle gets an
   // orange ring so the user can see which ones may be the removed bottle.
   @property({ attribute: false }) removalHighlightIds: string[] = [];
+  // Drink now / Hold / Past peak status: "disc" over the label, "corner"
+  // dot, or "off" (app setting disposition_badge).
+  @property({ type: String }) dispositionBadge: "disc" | "corner" | "off" = "disc";
 
   @state() private _dragOverCell: string | null = null;
 
@@ -224,6 +229,23 @@ export class CabinetGrid extends LitElement {
         line-height: 1;
         border: 2px solid rgba(255, 255, 255, 0.5);
         box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+      }
+
+      /* Small status dot in the top-right corner: the label stays visible. */
+      .cell .disposition.corner,
+      .zone-bottle .disposition.corner {
+        /* Inside the round cell's edge, so it is not clipped. */
+        top: 12%;
+        right: 12%;
+        left: auto;
+        transform: none;
+        width: 28%;
+        height: 28%;
+        min-width: 7px;
+        min-height: 7px;
+        max-width: 12px;
+        max-height: 12px;
+        border-width: 1.5px;
       }
 
       .cell .disposition.drink,
@@ -822,7 +844,7 @@ export class CabinetGrid extends LitElement {
               title="${wine.name} (${wine.vintage || "NV"})"
             >
               ${(wine.vintage || "NV").toString().slice(-2)}
-              ${dispClass ? html`<span class="disposition ${dispClass}">${disp}</span>` : nothing}
+              ${dispClass && this.dispositionBadge !== "off" ? html`<span class="disposition ${dispClass} ${this.dispositionBadge === "corner" ? "corner" : ""}" title=${DISPOSITION_TITLES[disp] || ""}>${this.dispositionBadge === "corner" ? "" : disp}</span>` : nothing}
             </div>
           `;
         })}
@@ -920,7 +942,7 @@ export class CabinetGrid extends LitElement {
                 ? html`
                     ${frontWine.image_url ? html`<img class="wine-thumb" src="${frontWine.image_url}" alt="" />` : nothing}
                     <span class="bottle-label">${frontWine.vintage || "NV"}</span>
-                    ${dispClass ? html`<span class="disposition ${dispClass}">${disp}</span>` : nothing}
+                    ${dispClass && this.dispositionBadge !== "off" ? html`<span class="disposition ${dispClass} ${this.dispositionBadge === "corner" ? "corner" : ""}" title=${DISPOSITION_TITLES[disp] || ""}>${this.dispositionBadge === "corner" ? "" : disp}</span>` : nothing}
                     ${ratingDisplay ? html`<span class="rating-badge">★${ratingDisplay}</span>` : nothing}
                     ${wineCount > 1 ? html`<span class="depth-badge">${wineCount}</span>` : nothing}
                     ${cabinetDepth >= 2
@@ -994,7 +1016,7 @@ export class CabinetGrid extends LitElement {
           ? html`
               ${frontWine.image_url ? html`<img class="wine-thumb" src="${frontWine.image_url}" alt="" />` : nothing}
               <span class="bottle-label">${frontWine.vintage || "NV"}</span>
-              ${dispClass ? html`<span class="disposition ${dispClass}">${disp}</span>` : nothing}
+              ${dispClass && this.dispositionBadge !== "off" ? html`<span class="disposition ${dispClass} ${this.dispositionBadge === "corner" ? "corner" : ""}" title=${DISPOSITION_TITLES[disp] || ""}>${this.dispositionBadge === "corner" ? "" : disp}</span>` : nothing}
               ${ratingDisplay ? html`<span class="rating-badge">★${ratingDisplay}</span>` : nothing}
               ${wineCount > 1 ? html`<span class="depth-badge">${wineCount}</span>` : nothing}
               ${cabinetDepth >= 2
